@@ -1,0 +1,271 @@
+
+.page {
+  min-height: 100vh;
+  width: 100%;
+  background: #f6f7fb;
+  padding: 20px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.container {
+  width: 100%;
+  max-width: 980px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+  overflow: hidden;
+}
+
+.header {
+  padding: 16px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 850;
+  letter-spacing: 0.2px;
+}
+
+.subline {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(0,0,0,0.65);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.body {
+  padding: 18px;
+}
+
+.msg {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.03);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.msgOk {
+  border-color: rgba(16,185,129,0.25);
+  background: rgba(16,185,129,0.10);
+  color: #065f46;
+}
+
+.msgErr {
+  border-color: rgba(220,38,38,0.25);
+  background: rgba(220,38,38,0.06);
+  color: #b91c1c;
+}
+
+.toolbar {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: #fff;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 750;
+  transition: transform .05s ease, background .15s ease, border-color .15s ease;
+}
+
+.btn:hover {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.18);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btnPrimary {
+  background: #111827;
+  color: #fff;
+  border-color: rgba(0,0,0,0.10);
+}
+
+.btnDanger {
+  border-color: rgba(220,38,38,0.25);
+  background: rgba(220,38,38,0.06);
+  color: #b91c1c;
+}
+
+.btnGhost {
+  background: transparent;
+}
+
+.tableWrap {
+  margin-top: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  overflow: hidden;
+  background: #fff;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.th {
+  text-align: left;
+  font-size: 14px;
+  color: rgba(0,0,0,0.65);
+  background: #f3f4f6;
+  padding: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  font-weight: 850;
+  text-align: center;
+}
+
+.td {
+  padding: 5px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  font-size: 14px;
+  color: rgba(0,0,0,0.85);
+  text-align: center;
+}
+
+.rowHover:hover {
+  background: rgba(17,24,39,0.035);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.timeRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: #fff;
+  font-size: 14px;
+  outline: none;
+  color: #000;
+}
+
+.select option {
+  color: #000;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+}
+
+.helper {
+  font-size: 12px;
+  margin-top: 6px;
+  color: rgba(0,0,0,0.6);
+}
+
+.warn {
+  color: #b91c1c;
+}
+
+.note {
+  color: rgba(0,0,0,0.6);
+}
+
+/* статус-бейдж */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.06);
+  color: #111827;
+  font-size: 12.5px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.45);
+}
+
+.badgeWarn {
+  background: rgba(245,158,11,0.14);
+  border-color: rgba(245,158,11,0.30);
+  color: #92400e;
+}
+.badgeWarn .dot { background: rgba(245,158,11,1); }
+
+.badgeGood {
+  background: rgba(16,185,129,0.12);
+  border-color: rgba(16,185,129,0.25);
+  color: #065f46;
+}
+.badgeGood .dot { background: rgba(16,185,129,1); }
+
+.badgeBad {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.28);
+  color: #991b1b;
+}
+.badgeBad .dot { background: rgba(239,68,68,1); }
+
+.loading {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgba(0,0,0,0.7);
+}
+
+.weekendCell {
+  color: rgba(185, 28, 28, 0.95);
+  font-weight: 850;
+}
+
+/* мобилка */
+@media (max-width: 520px) {
+  .page {
+    align-items: flex-start;
+    padding: 14px;
+  }
+  .container {
+    max-width: 100%;
+  }
+  .timeRow {
+    flex-wrap: wrap;
+  }
+}

@@ -1,0 +1,67 @@
+.page {
+    min-height: 100vh;
+    width: 100%;
+    background: #f6f7fb;
+    padding: 20px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+  
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .container {
+    width: 100%;
+    max-width: 980px;
+  }
+  
+  .card {
+    background: #fff;
+    border-radius: 14px;
+    border: 1px solid rgba(0,0,0,0.06);
+    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+    overflow: hidden;
+  }
+  
+  .appHeader {
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
+  }
+  
+  .company {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 0.3px;
+    color: rgba(0,0,0,0.8);
+  }
+  
+  .branch {
+    margin-top: 4px;
+    font-size: 14px;
+    font-weight: 850;
+    color: rgba(0,0,0,0.9);
+  }
+  
+  .userLine {
+    margin-top: 6px;
+    font-size: 12.5px;
+    font-weight: 750;
+    color: rgba(0,0,0,0.6);
+  }
+  
+  .body {
+    padding: 18px;
+  }
+  
+  /* мобилка */
+  @media (max-width: 520px) {
+    .page {
+      padding: 14px;
+      align-items: flex-start;
+    }
+    .container {
+      max-width: 100%;
+    }
+  }
+  

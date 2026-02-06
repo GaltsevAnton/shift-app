@@ -1,0 +1,204 @@
+.section {}
+
+.header {
+  padding: 16px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.subline {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(0,0,0,0.65);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.body {
+  padding: 18px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.btn {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: #fff;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 750;
+}
+
+.btn:hover {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.18);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnPrimary {
+  background: #111827;
+  color: #fff;
+  border-color: rgba(0,0,0,0.10);
+}
+
+.btnDanger {
+  border-color: rgba(220,38,38,0.25);
+  background: rgba(220,38,38,0.06);
+  color: #b91c1c;
+}
+
+.btnGhost {
+  background: transparent;
+}
+
+.msg {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(0,0,0,0.03);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.msgOk {
+  border-color: rgba(16,185,129,0.25);
+  background: rgba(16,185,129,0.10);
+  color: #065f46;
+}
+
+.msgErr {
+  border-color: rgba(220,38,38,0.25);
+  background: rgba(220,38,38,0.06);
+  color: #b91c1c;
+}
+
+.loading {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgba(0,0,0,0.7);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #fff;
+}
+
+.table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.th {
+  text-align: left;
+  font-size: 12.5px;
+  color: rgba(0,0,0,0.65);
+  background: #f3f4f6;
+  padding: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  vertical-align: top;
+  font-size: 13.5px;
+  color: rgba(0,0,0,0.85);
+  min-width: 150px;
+  text-align: center;
+}
+
+.rowHover:hover {
+  background: rgba(17,24,39,0.03);
+}
+
+.stickyLeft {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.staffCell {
+  min-width: 160px;
+  white-space: nowrap;
+  background: #fff;
+  border-right: 1px solid rgba(0,0,0,0.06);
+  text-align: left;
+}
+
+.off {
+  color: rgba(185, 28, 28, 0.95);
+  font-weight: 900;
+}
+
+.note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(0,0,0,0.55);
+}
+
+/* статус-бейдж */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(0,0,0,0.06);
+  color: #111827;
+  font-size: 12.5px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.45);
+}
+
+.badgeWarn {
+  background: rgba(245,158,11,0.14);
+  border-color: rgba(245,158,11,0.30);
+  color: #92400e;
+}
+.badgeWarn .dot { background: rgba(245,158,11,1); }
+
+.badgeGood {
+  background: rgba(16,185,129,0.12);
+  border-color: rgba(16,185,129,0.25);
+  color: #065f46;
+}
+.badgeGood .dot { background: rgba(16,185,129,1); }

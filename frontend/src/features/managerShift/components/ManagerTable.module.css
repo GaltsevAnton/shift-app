@@ -1,0 +1,284 @@
+.root {
+    display: grid;
+    gap: 12px;
+  }
+  
+  .topRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  
+  .tabs {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .tab {
+    padding: 9px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    cursor: pointer;
+    font-size: 13.5px;
+    font-weight: 800;
+  }
+  
+  .tab:hover {
+    background: rgba(0,0,0,0.04);
+    border-color: rgba(0,0,0,0.18);
+  }
+  
+  .tabActive {
+    background: rgba(17,24,39,0.06);
+    border-color: rgba(17,24,39,0.22);
+  }
+  
+  .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  
+  .btn {
+    padding: 9px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    cursor: pointer;
+    font-size: 13.5px;
+    font-weight: 800;
+  }
+  
+  .btn:hover {
+    background: rgba(0,0,0,0.04);
+    border-color: rgba(0,0,0,0.18);
+  }
+  
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .btnPrimary {
+    background: #111827;
+    color: #fff;
+    border-color: rgba(0,0,0,0.10);
+  }
+  
+  .btnDanger {
+    border-color: rgba(220,38,38,0.25);
+    background: rgba(220,38,38,0.06);
+    color: #b91c1c;
+  }
+  
+  .meta {
+    font-size: 13px;
+    color: rgba(0,0,0,0.65);
+  }
+  
+  .sep {
+    margin: 0 8px;
+    opacity: 0.6;
+  }
+  
+  .editOn {
+    margin-left: 10px;
+    font-weight: 900;
+    color: #92400e;
+    background: rgba(245,158,11,0.14);
+    border: 1px solid rgba(245,158,11,0.30);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  
+  .editOff {
+    margin-left: 10px;
+    font-weight: 900;
+    color: rgba(0,0,0,0.55);
+    background: rgba(0,0,0,0.06);
+    border: 1px solid rgba(0,0,0,0.10);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  
+  .msg {
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: rgba(0,0,0,0.03);
+    font-size: 13.5px;
+    font-weight: 650;
+  }
+  
+  .msgOk {
+    border-color: rgba(16,185,129,0.25);
+    background: rgba(16,185,129,0.10);
+    color: #065f46;
+  }
+  
+  .msgErr {
+    border-color: rgba(220,38,38,0.25);
+    background: rgba(220,38,38,0.06);
+    color: #b91c1c;
+  }
+  
+  .loading {
+    font-size: 14px;
+    color: rgba(0,0,0,0.7);
+  }
+  
+  .tableWrap {
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: #fff;
+  }
+  
+  .table {
+    width: 100%;
+    min-width: 980px;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  
+  .th {
+    text-align: left;
+    font-size: 12.5px;
+    color: rgba(0,0,0,0.65);
+    background: #f3f4f6;
+    padding: 10px;
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+    font-weight: 850;
+    white-space: nowrap;
+  }
+  
+  .td {
+    padding: 10px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    vertical-align: top;
+    font-size: 13.5px;
+    color: rgba(0,0,0,0.85);
+    min-width: 150px;
+  }
+  
+  .rowHover:hover {
+    background: rgba(17,24,39,0.03);
+  }
+  
+  .stickyLeft {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+  }
+  
+  .staffCell {
+    min-width: 160px;
+    white-space: nowrap;
+    background: #fff;
+    border-right: 1px solid rgba(0,0,0,0.06);
+  }
+  
+  .cell {
+    display: grid;
+    gap: 8px;
+  }
+  
+  .timeLine {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .timeInput {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    font-size: 13.5px;
+    color: #000;
+  }
+  
+  .breakLine {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  .breakLabel {
+    font-size: 12px;
+    color: rgba(0,0,0,0.6);
+  }
+  
+  .breakInput {
+    width: 90px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    font-size: 13.5px;
+    color: #000;
+  }
+  
+  .clearBtn {
+    padding: 7px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 800;
+  }
+  
+  .clearBtn:hover {
+    background: rgba(0,0,0,0.04);
+    border-color: rgba(0,0,0,0.18);
+  }
+  
+  .clearBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .edited {
+    font-size: 12px;
+    font-weight: 850;
+    color: #92400e;
+  }
+  
+  .note {
+    font-size: 12px;
+    color: rgba(0,0,0,0.55);
+  }
+  
+  /* выходные */
+.weekendTh {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+}
+.weekendTd {
+  background: rgba(239, 68, 68, 0.035);
+}
+
+/* сегодня */
+.todayTh {
+  outline: 2px solid rgba(59, 130, 246, 0.35);
+  outline-offset: -2px;
+}
+.todayTd {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* TABLE mode (view) */
+.viewCell {
+  display: grid;
+  gap: 6px;
+}
+.viewTime {
+  font-weight: 850;
+  color: rgba(0,0,0,0.8);
+  white-space: nowrap;
+}
