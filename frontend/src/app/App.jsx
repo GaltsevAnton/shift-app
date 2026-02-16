@@ -1,31 +1,64 @@
 import { useEffect, useState } from "react";
-import { clearToken, getRole, getToken } from "../shared/api/api";
+import { clearToken, getToken } from "../shared/api/api";
 import Login from "../pages/auth/LoginPage";
-import ManagerMonth from "../pages/manager/ManagerMonthPage";
+import ManagerTable from "../pages/manager/ManagerTablePage";
+import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
 import StaffMonth from "../pages/staff/StaffMonthPage";
 
 export default function App() {
   const [token, setTokenState] = useState(getToken());
-  const [role, setRole] = useState(getRole());
+  const [managerView, setManagerView] = useState(localStorage.getItem("managerView") || "SHIFTS");
 
   useEffect(() => {
     setTokenState(getToken());
-    setRole(getRole());
   }, []);
 
   function onLogout() {
     clearToken();
     setTokenState(null);
-    setRole(null);
   }
 
-  function onLoggedIn() {
-    setTokenState(getToken());
-    setRole(getRole());
-  }
+  if (!token) return <Login onLoggedIn={() => setTokenState(getToken())} />;
 
-  if (!token) return <Login onLoggedIn={onLoggedIn} />;
+  const role = localStorage.getItem("appRole") || "MANAGER";
   if (role === "STAFF") return <StaffMonth onLogout={onLogout} />;
 
-  return <ManagerMonth onLogout={onLogout} />;
+  // MANAGER
+  if (managerView === "PREFS") {
+    return (
+      <div>
+        <div style={{ display: "flex", gap: 8, padding: 10, justifyContent: "center" }}>
+          <button
+            onClick={() => { localStorage.setItem("managerView", "SHIFTS"); setManagerView("SHIFTS"); }}
+          >
+            Shifts
+          </button>
+          <button
+            onClick={() => { localStorage.setItem("managerView", "PREFS"); setManagerView("PREFS"); }}
+          >
+            Preferences
+          </button>
+        </div>
+        <ManagerWeekPage onLogout={onLogout} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, padding: 10, justifyContent: "center" }}>
+        <button
+          onClick={() => { localStorage.setItem("managerView", "SHIFTS"); setManagerView("SHIFTS"); }}
+        >
+          Shifts
+        </button>
+        <button
+          onClick={() => { localStorage.setItem("managerView", "PREFS"); setManagerView("PREFS"); }}
+        >
+          Preferences
+        </button>
+      </div>
+      <ManagerTable onLogout={onLogout} />
+    </div>
+  );
 }

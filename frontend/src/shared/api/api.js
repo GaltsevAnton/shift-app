@@ -4,26 +4,16 @@ export function getToken() {
   return localStorage.getItem("accessToken");
 }
 
-export function getRole() {
-  return localStorage.getItem("appRole") || null;
-}
-
-// ВАЖНО: не пытаемся парсить роль из JWT (у тебя другой формат клеймов)
-// Роль задаём явно при логине (см. LoginForm.jsx)
-export function setToken(token, role) {
+export function setToken(token) {
   localStorage.setItem("accessToken", token);
-  if (role) localStorage.setItem("appRole", role);
 }
 
 export function clearToken() {
   localStorage.removeItem("accessToken");
-  localStorage.removeItem("appRole");
-  localStorage.removeItem("staffName");
 }
 
 async function request(path, { method = "GET", body, auth = true } = {}) {
   const headers = { "Content-Type": "application/json" };
-
   if (auth) {
     const t = getToken();
     if (t) headers["Authorization"] = `Bearer ${t}`;
@@ -55,23 +45,15 @@ function safeJson(text) {
 }
 
 export const api = {
+  // ===== AUTH =====
   login: (login, password) =>
     request("/api/auth/login", { method: "POST", auth: false, body: { login, password } }),
 
-  // ===== MANAGER =====
-  managerWeeks: (month) =>
-    request(`/api/manager/weeks?month=${month}`),
-
+  // ===== MANAGER USERS =====
   managerUsers: () => request("/api/manager/users"),
 
-  managerPreferences: (from, to) =>
-    request(`/api/manager/preferences?from=${from}&to=${to}`),
-
-  setWeekStatus: (weekStart, status) =>
-    request(`/api/manager/week-status?weekStart=${weekStart}&status=${status}`, { method: "POST" }),
-
-  managerShifts: (from, to) =>
-    request(`/api/manager/shifts?from=${from}&to=${to}`),
+  // ===== MANAGER SHIFTS (таблица смен) =====
+  managerShifts: (from, to) => request(`/api/manager/shifts?from=${from}&to=${to}`),
 
   bulkShifts: (shifts) =>
     request("/api/manager/shifts/bulk", { method: "POST", body: { shifts } }),
@@ -82,16 +64,24 @@ export const api = {
       body: { fromWeekStart, toWeekStart, overwrite },
     }),
 
-  // ===== STAFF =====
-  staffWeeks: (month) =>
-    request(`/api/staff/weeks?month=${month}`),
+  // ===== STAFF (желания) =====
+  staffWeeks: (month) => request(`/api/staff/weeks?month=${month}`),
 
-  staffWeek: (weekStart) =>
-    request(`/api/staff/week?weekStart=${weekStart}`),
+  staffWeek: (weekStart) => request(`/api/staff/week?weekStart=${weekStart}`),
 
   staffWeekSave: (weekStart, days) =>
     request(`/api/staff/week/save`, { method: "POST", body: { weekStart, days } }),
 
   staffCopyPrev: (weekStart) =>
     request(`/api/staff/week/copy-prev?weekStart=${weekStart}`, { method: "POST" }),
+
+  // ===== MANAGER: edit staff week (если ты добавил ManagerStaffWeekController) =====
+  managerStaffWeek: (userId, weekStart) =>
+    request(`/api/manager/staff-week?userId=${userId}&weekStart=${weekStart}`),
+
+  managerStaffWeekSave: (userId, weekStart, days) =>
+    request(`/api/manager/staff-week/save?userId=${userId}`, {
+      method: "POST",
+      body: { weekStart, days },
+    }),
 };
