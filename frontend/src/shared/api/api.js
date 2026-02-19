@@ -84,4 +84,17 @@ export const api = {
       method: "POST",
       body: { weekStart, days },
     }),
+
+    // ===== MANAGER EMPLOYEES (accounts) =====
+    managerEmployeesList: () => request("/api/manager/employees"),
+
+    managerEmployeesCreate: (payload) =>
+      request("/api/manager/employees", { method: "POST", body: payload }),
+
+    managerEmployeesUpdate: (id, payload) =>
+      request(`/api/manager/employees/${id}`, { method: "PUT", body: payload }),
+
+    managerEmployeesDelete: (id) =>
+      request(`/api/manager/employees/${id}`, { method: "DELETE" }),
+
 };

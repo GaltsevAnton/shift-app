@@ -31,3 +31,32 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Logs ###
+*.log
+logs/
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Node / React ###
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+### Env / secrets ###
+.env
+.env.*
+!*.example
+
+### Spring Boot secrets (НЕ коммитим реальные конфиги) ###
+**/application.properties
+**/application.yml
+**/application-*.properties
+**/application-*.yml

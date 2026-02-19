@@ -23,26 +23,26 @@ public class StaffWeekController {
 
     @GetMapping("/weeks")
     public List<WeekRowResponse> weeks(@RequestParam String month) {
-        var me = CurrentUser.require();
+        var me = CurrentUser.requireEmployee();
         YearMonth ym = YearMonth.parse(month); // "2026-02"
         return weekService.staffWeeks(me.getRestaurantId(), ym);
     }
 
     @GetMapping("/week")
     public StaffWeekResponse week(@RequestParam LocalDate weekStart) {
-        var me = CurrentUser.require();
-        return weekService.staffWeek(me.getRestaurantId(), me.getUserId(), weekStart);
+        var me = CurrentUser.requireEmployee();
+        return weekService.staffWeek(me.getRestaurantId(), me.getEmployeeId(), weekStart);
     }
 
     @PostMapping("/week/save")
     public String save(@RequestBody @Valid StaffWeekSaveRequest req) {
-        var me = CurrentUser.require();
-        return weekService.staffSaveWeek(me.getRestaurantId(), me.getUserId(), req);
+        var me = CurrentUser.requireEmployee();
+        return weekService.staffSaveWeek(me.getRestaurantId(), me.getEmployeeId(), req);
     }
 
     @PostMapping("/week/copy-prev")
     public String copyPrev(@RequestParam LocalDate weekStart) {
-        var me = CurrentUser.require();
-        return weekService.staffCopyPrevWeek(me.getRestaurantId(), me.getUserId(), weekStart);
+        var me = CurrentUser.requireEmployee();
+        return weekService.staffCopyPrevWeek(me.getRestaurantId(), me.getEmployeeId(), weekStart);
     }
 }

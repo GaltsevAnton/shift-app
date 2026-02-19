@@ -1,0 +1,23 @@
+Entity (...User, ...Restaurant, и т.п.)
+
+Зачем: объекты, которые соответствуют таблицам в базе.
+
+обычно @Entity
+
+поля = колонки
+
+связи = @ManyToOne, @OneToMany
+
+Пример: User
+
+login
+
+passwordHash
+
+active
+
+role
+
+restaurant
+
+✅ Entity = “модель БД”.

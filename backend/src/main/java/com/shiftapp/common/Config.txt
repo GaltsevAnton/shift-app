@@ -1,0 +1,13 @@
+Config (SecurityConfig)
+
+Зачем: правила доступа + подключение фильтра.
+
+какие URL открыты всем (permitAll)
+
+какие только MANAGER/STAFF (hasRole/hasAnyRole)
+
+подключает JwtAuthFilter
+
+настраивает CORS
+
+✅ Config = “правила охраны”.

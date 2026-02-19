@@ -1,6 +1,7 @@
 package com.shiftapp.auth;
 
 import com.shiftapp.auth.security.CustomUserDetails;
+import com.shiftapp.auth.security.CustomEmployeeDetails;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,18 +16,42 @@ import java.util.Date;
 @Service
 public class JwtService {
 
-    private final SecretKey key;
-    private final long accessTokenMinutes;
+    private final SecretKey key;    //— секретный ключ, которым подписывается токен (чтобы его нельзя было подделать)
+    private final long accessTokenMinutes;  //— сколько минут живёт токен
 
-    public JwtService(@Value("${app.jwt.secret}") String secret,
+    public JwtService(@Value("${app.jwt.secret}") String secret,        //@Value - Это команда Spring: “возьми значение из application.properties (или application.yml)
                       @Value("${app.jwt.access-token-minutes}") long accessTokenMinutes) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        // берём строку secret
+        // превращаем в байты UTF-8
+        // делаем SecretKey для HMAC (обычно HS256)
         this.accessTokenMinutes = accessTokenMinutes;
     }
 
-    public String generateAccessToken(CustomUserDetails user) {
+    public String generateEmployeeAccessToken(CustomEmployeeDetails emp) {
         Instant now = Instant.now();
         Instant exp = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
+    
+        return Jwts.builder()
+                .subject(emp.getUsername())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .claim("typ", "EMP")
+                .claim("eid", emp.getEmployeeId())
+                .claim("rid", emp.getRestaurantId())
+                .claim("role", emp.getRole().name())
+                .signWith(key)
+                .compact();
+    }
+
+    public String generateAccessToken(CustomUserDetails user) {
+        // передаёшь пользователя (в обёртке CustomUserDetails) — чтобы взять:
+        //     username
+        //     userId
+        //     restaurantId
+        //     role
+        Instant now = Instant.now();    //now = текущее время
+        Instant exp = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);     //exp = now + N минут
 
         return Jwts.builder()
                 .subject(user.getUsername())
@@ -35,6 +60,7 @@ public class JwtService {
                 .claim("uid", user.getUserId())
                 .claim("rid", user.getRestaurantId())
                 .claim("role", user.getRole().name())
+                .claim("typ", "USR")
                 .signWith(key)
                 .compact();
     }
@@ -47,4 +73,16 @@ public class JwtService {
                 .getPayload()
                 .getSubject();
     }
+
+    public String extractType(String token) {
+        Object val = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("typ");
+    
+        // Для старых токенов (где typ ещё нет) считаем, что это USR
+        return val == null ? "USR" : val.toString();
+    }    
 }

@@ -1,0 +1,13 @@
+Filter (JwtAuthFilter)
+
+Зачем: выполняется до контроллеров для каждого запроса.
+
+читает Authorization: Bearer <token>
+
+извлекает username из токена (JwtService.extractUsername)
+
+загружает UserDetails (CustomUserDetailsService)
+
+кладёт пользователя в SecurityContext
+
+✅ Filter = “проверка пропуска на входе”.

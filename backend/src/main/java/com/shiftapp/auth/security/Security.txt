@@ -1,0 +1,25 @@
+Security (...auth.security...)
+
+Это куски, которые нужны Spring Security, чтобы понимать пользователя и его права.
+
+CustomUserDetails
+
+Зачем: адаптер User → UserDetails (формат Spring Security).
+
+getUsername() → login
+
+getAuthorities() → ROLE_...
+
+isEnabled() → active
+
+твои методы getUserId(), getRestaurantId()
+
+CustomUserDetailsService (если есть)
+
+Зачем: загрузить пользователя по username:
+
+“дай UserDetails по login”
+
+внутри обычно UserRepository.findByLogin(...)
+
+✅ Security слой = “как охрана узнаёт кто ты и какие у тебя права”.

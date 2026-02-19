@@ -1,0 +1,12 @@
+DTO (...dto/...)
+
+Зачем: передача данных между клиентом и сервером (JSON ⇄ Java).
+
+・Request DTO (например LoginRequest)
+Что приходит в запросе: login, password + валидация @NotBlank.
+
+・Response DTO (например LoginResponse)
+Что сервер отдаёт в ответе: accessToken.
+
+✅ DTO не ходит в БД и не содержит бизнес-логику.
+✅ DTO — это “контейнер данных”.

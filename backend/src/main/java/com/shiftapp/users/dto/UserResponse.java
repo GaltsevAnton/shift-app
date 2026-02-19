@@ -1,3 +1,5 @@
+// Response DTO то сервер отдаёт в ответе
+
 package com.shiftapp.users.dto;
 
 import com.shiftapp.users.UserRole;

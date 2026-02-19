@@ -3,6 +3,7 @@
 
 package com.shiftapp.auth;
 
+import com.shiftapp.auth.security.CustomEmployeeDetailsService;
 import com.shiftapp.auth.security.CustomUserDetailsService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -24,14 +25,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;    //jwtService — умеет “читать токен” (например получить username)
     private final CustomUserDetailsService userDetailsService;  //userDetailsService — умеет по username загрузить пользователя (как CustomUserDetails)
+    private final CustomEmployeeDetailsService employeeDetailsService;
 
-    public JwtAuthFilter(JwtService jwtService, CustomUserDetailsService userDetailsService) {
+    public JwtAuthFilter(JwtService jwtService, 
+                        CustomUserDetailsService userDetailsService, 
+                        CustomEmployeeDetailsService employeeDetailsService) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.employeeDetailsService = employeeDetailsService;
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+    protected void doFilterInternal(HttpServletRequest request, 
+                                    HttpServletResponse response, 
+                                    FilterChain filterChain)
                                     /* Если бы ты не дал имена, код бы вообще не скомпилировался — в Java параметр обязан иметь имя.
                                     * Важно: это не “сокращение чтобы не писать тип”. 
                                     * Тип ты всё равно пишешь один раз в объявлении метода, а дальше используешь имя переменной.*/
@@ -46,10 +53,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = auth.substring(7).trim();
         try {
             String username = jwtService.extractUsername(token);
+            String typ = jwtService.extractType(token); // "USR" или "EMP"
 
             // если уже есть аутентификация — не трогаем
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                var userDetails = userDetailsService.loadUserByUsername(username);
+                var userDetails = "EMP".equalsIgnoreCase(typ)
+                        ? employeeDetailsService.loadUserByUsername(username)
+                        : userDetailsService.loadUserByUsername(username);
 
                 var authentication = new UsernamePasswordAuthenticationToken(
                         userDetails,

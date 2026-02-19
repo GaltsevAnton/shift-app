@@ -26,7 +26,7 @@ public class AuthController {       //Это имя класса. Обычно �
     private final JwtService jwtService; //сервис, который делает JWT. после успешного логина он генерирует строку токена, 
     // которую ты отдаёшь клиенту.
 
-    // То есть контроллер всегда будет работать с теми же объектами userRepository, passwordEncoder, jwtService.
+    // то есть контроллер всегда будет работать с теми же объектами userRepository, passwordEncoder, jwtService.
 
     public AuthController(com.shiftapp.users.UserRepository userRepository,
                           PasswordEncoder passwordEncoder,

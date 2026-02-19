@@ -17,11 +17,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
 // Ты работаешь с сущностью User (таблица пользователей в базе).
 // Тип ID у User — Long (например id = 1, 2, 3...).
 
-// ✅ save(user) — сохранить
-// ✅ findById(id) — найти по id
-// ✅ findAll() — найти всех
-// ✅ deleteById(id) — удалить
-// ✅ count() — количество записей
+//  save(user) — сохранить
+//  findById(id) — найти по id
+//  findAll() — найти всех
+//  deleteById(id) — удалить
+//  count() — количество записей
 // и т.д.
 
 

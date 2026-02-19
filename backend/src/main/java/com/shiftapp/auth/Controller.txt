@@ -1,0 +1,15 @@
+Controller (...Controller)
+
+Зачем: принимать HTTP-запросы и возвращать HTTP-ответы.
+
+Пример: AuthController
+
+・принимает POST /api/auth/login
+
+・получает LoginRequest
+
+・вызывает нужные компоненты (Repository/Service)
+
+・возвращает LoginResponse
+
+✅ Controller = “входная дверь API”.

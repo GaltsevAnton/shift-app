@@ -10,12 +10,14 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
+//это API контроллер: возвращает данные (JSON/строки), а не HTML.
 @RequestMapping("/api/manager/users")
+// — базовый путь. Всё внутри будет начинаться с: /api/manager/users
 public class ManagerUserController {
 
-    private final UserRepository userRepository;
-    private final RestaurantRepository restaurantRepository;
-    private final PasswordEncoder passwordEncoder;
+    private final UserRepository userRepository;    //— искать/сохранять пользователей в БД.
+    private final RestaurantRepository restaurantRepository; //— получить ресторан из БД, чтобы привязать сотрудника к ресторану.
+    private final PasswordEncoder passwordEncoder;  //— сделать хэш пароля перед сохранением.
 
     public ManagerUserController(UserRepository userRepository,
                                  RestaurantRepository restaurantRepository,
@@ -26,11 +28,13 @@ public class ManagerUserController {
     }
 
     @GetMapping
-    public List<UserResponse> listStaff() {
+    // @GetMapping = “дай посмотреть”
+    // Используется для получения данных (читать, показать).
+    public List<UserResponse> listStaff() {     //Потому что @GetMapping без пути, берётся путь класса: GET /api/manager/users
         var me = CurrentUser.require();
         Long rid = me.getRestaurantId();
 
-        return userRepository.findByRestaurant_IdAndRoleOrderByFullNameAsc(rid, UserRole.STAFF)
+        return userRepository.findByRestaurant_IdAndRoleOrderByFullNameAsc(rid, UserRole.STAFF) //Вернёт список User (Entity) сотрудников, отсортированных по fullName.
                 .stream()
                 .map(u -> {
                     UserResponse r = new UserResponse();
@@ -42,12 +46,32 @@ public class ManagerUserController {
                     return r;
                 })
                 .toList();
+                /*
+                Чтобы не отдавать Entity наружу и не случайно не отправить лишнее (например passwordHash).
+                Внутри map ты вручную копируешь нужные поля:
+                id
+                login
+                fullName
+                role
+                active
+                И возвращаешь список List<UserResponse>.
+                Итог: менеджер получает JSON со списком сотрудников.            
+                */
     }
 
     @PostMapping("/create-staff")
+    /* @PostMapping = “сделай действие / отправляю данные”
+    Используется для создания/действия (добавить, логин, отправить).*/
     public String createStaff(@RequestParam @NotBlank String login,
                               @RequestParam @NotBlank String fullName,
                               @RequestParam @NotBlank String password) {
+                            /*
+                            Почему тут @RequestParam, а не @RequestBody?
+                            @RequestParam означает, что параметры приходят как:
+                            query string (?login=...) или
+                            application/x-www-form-urlencoded (форма)
+                            Если бы ты хотел JSON, ты бы делал @RequestBody CreateStaffRequest.
+                            */
 
         var me = CurrentUser.require();
         Long restaurantId = me.getRestaurantId();

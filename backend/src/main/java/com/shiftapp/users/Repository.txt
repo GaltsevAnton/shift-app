@@ -1,0 +1,15 @@
+Repository (...Repository)
+
+Зачем: работа с базой данных.
+
+Пример: UserRepository
+
+・findByLogin(...)
+
+・existsByLogin(...)
+
+・findByRestaurant_IdAndRole...
+
+Spring Data создаёт реализацию автоматически.
+
+✅ Repository = “доступ к таблицам/данным”.
