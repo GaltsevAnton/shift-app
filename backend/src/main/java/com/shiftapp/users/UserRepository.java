@@ -9,6 +9,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByLogin(String login);       //Это “найти пользователя по логину”.
     boolean existsByLogin(String login);            //Это “проверить существует ли пользователь с таким логином”.
 
+    Optional<User> findByIdAndRestaurant_Id(Long id, Long restaurantId);    
+    List<User> findAllByRestaurant_IdOrderByIdDesc(Long restaurantId);
+
     List<User> findByRestaurant_IdAndRoleOrderByFullNameAsc(Long restaurantId, UserRole role);
 }
 

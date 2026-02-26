@@ -28,7 +28,7 @@ function jpStatus(s) {
   return s;
 }
 
-export default function ManagerWeekPage({ onLogout }) {
+export default function ManagerWeekPage({ view, onNavigate, onLogout }) {
   const name = localStorage.getItem("staffName") || "manager";
 
   const [month, setMonth] = useState(() => build5MonthsFromCurrent()[0]);
@@ -37,13 +37,9 @@ export default function ManagerWeekPage({ onLogout }) {
   const [weeks, setWeeks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState(null);
-
   const [selectedWeekStart, setSelectedWeekStart] = useState(null);
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  useEffect(() => { load(); }, [month]);
 
   async function load() {
     setLoading(true);
@@ -60,13 +56,10 @@ export default function ManagerWeekPage({ onLogout }) {
 
   if (selectedWeekStart) {
     return (
-      <ManagerLayout name={name}>
+      <ManagerLayout name={name} view={view} onNavigate={onNavigate} onLogout={onLogout}>
         <div className={styles.topBar}>
           <button className={styles.btn} onClick={() => setSelectedWeekStart(null)} type="button">
             ← 戻る
-          </button>
-          <button className={`${styles.btn} ${styles.btnDanger}`} onClick={onLogout} type="button">
-            Logout
           </button>
         </div>
         <ManagerWeekEditor weekStart={selectedWeekStart} onBack={() => setSelectedWeekStart(null)} />
@@ -75,15 +68,12 @@ export default function ManagerWeekPage({ onLogout }) {
   }
 
   return (
-    <ManagerLayout name={name}>
+    <ManagerLayout name={name} view={view} onNavigate={onNavigate} onLogout={onLogout}>
       <div className={styles.header}>
         <div>
           <div className={styles.title}>希望シフト（Manager）</div>
           <div className={styles.sub}>月→週→スタッフを選んで編集できます</div>
         </div>
-        <button className={`${styles.btn} ${styles.btnDanger}`} onClick={onLogout} type="button">
-          Logout
-        </button>
       </div>
 
       <div className={styles.row}>

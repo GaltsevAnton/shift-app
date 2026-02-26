@@ -63,8 +63,6 @@ public class SecurityConfig {
                         // /api/auth/anything
                         // всё разрешено без токена, иначе ты не сможешь залогиниться.
 
-                        .requestMatchers("/api/employee/auth/**").permitAll()
-
                         .requestMatchers("/api/manager/**").hasRole("MANAGER")
                         //Это значит:
                         // если URL начинается на /api/manager/

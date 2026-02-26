@@ -1,11 +1,12 @@
-package com.shiftapp.employees.dto;
+package com.shiftapp.users.dto;
 
-import com.shiftapp.employees.EmployeeRole;
+import com.shiftapp.users.UserRole;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-public class EmployeeUpdateRequest {
+public class UserUpdateRequest {
+
     @NotBlank
     @Size(max = 100)
     public String login;
@@ -15,10 +16,10 @@ public class EmployeeUpdateRequest {
     public String fullName;
 
     @NotNull
-    public EmployeeRole role;
+    public UserRole role;
 
     public boolean active;
 
-    // пароль НЕ обязателен: если пусто/ null — не меняем
+    // пароль не обязателен: если null или пусто — не меняем
     public String password;
 }

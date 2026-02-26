@@ -1,11 +1,12 @@
-package com.shiftapp.employees.dto;
+package com.shiftapp.users.dto;
 
-import com.shiftapp.employees.EmployeeRole;
+import com.shiftapp.users.UserRole;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-public class EmployeeCreateRequest {
+public class UserCreateRequest {
+
     @NotBlank
     @Size(max = 100)
     public String login;
@@ -15,7 +16,7 @@ public class EmployeeCreateRequest {
     public String fullName;
 
     @NotNull
-    public EmployeeRole role;
+    public UserRole role;
 
     @NotBlank
     @Size(min = 4, max = 100)

@@ -3,7 +3,6 @@
 
 package com.shiftapp.auth;
 
-import com.shiftapp.auth.security.CustomEmployeeDetailsService;
 import com.shiftapp.auth.security.CustomUserDetailsService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -25,14 +24,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;    //jwtService — умеет “читать токен” (например получить username)
     private final CustomUserDetailsService userDetailsService;  //userDetailsService — умеет по username загрузить пользователя (как CustomUserDetails)
-    private final CustomEmployeeDetailsService employeeDetailsService;
 
     public JwtAuthFilter(JwtService jwtService, 
-                        CustomUserDetailsService userDetailsService, 
-                        CustomEmployeeDetailsService employeeDetailsService) {
+                        CustomUserDetailsService userDetailsService) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
-        this.employeeDetailsService = employeeDetailsService;
     }
 
     @Override
@@ -53,14 +49,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = auth.substring(7).trim();
         try {
             String username = jwtService.extractUsername(token);
-            String typ = jwtService.extractType(token); // "USR" или "EMP"
 
-            // если уже есть аутентификация — не трогаем
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                var userDetails = "EMP".equalsIgnoreCase(typ)
-                        ? employeeDetailsService.loadUserByUsername(username)
-                        : userDetailsService.loadUserByUsername(username);
-
+                var userDetails = userDetailsService.loadUserByUsername(username);
+            
                 var authentication = new UsernamePasswordAuthenticationToken(
                         userDetails,
                         null,
@@ -69,7 +61,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
-
+            
             filterChain.doFilter(request, response);
 
         } catch (Exception ex) {

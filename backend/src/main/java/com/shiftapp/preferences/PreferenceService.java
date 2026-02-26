@@ -23,13 +23,16 @@ public class PreferenceService {
 
     @Transactional
     public PreferenceResponse upsertForUser(Long userId, UpsertPreferenceRequest req) {
-        if (req.getEndTime().isBefore(req.getStartTime()) || req.getEndTime().equals(req.getStartTime())) {
-            throw new IllegalArgumentException("endTime must be after startTime");
+        if (req.getStartTime() != null && req.getEndTime() != null) {
+            if (!req.getEndTime().isAfter(req.getStartTime())) {
+                throw new IllegalArgumentException("endTime must be after startTime");
+            }
         }
 
         User user = userRepository.findById(userId).orElseThrow();
 
-        Preference pref = preferenceRepository.findByUser_IdAndWorkDate(userId, req.getWorkDate())
+        Preference pref = preferenceRepository
+                .findByUser_IdAndWorkDate(userId, req.getWorkDate())
                 .orElseGet(Preference::new);
 
         pref.setUser(user);
@@ -39,7 +42,6 @@ public class PreferenceService {
         pref.setEndTime(req.getEndTime());
         pref.setComment(req.getComment());
 
-        // Если создаём впервые — DRAFT, если уже было — оставляем статус как есть (пока)
         if (pref.getStatus() == null) pref.setStatus(PreferenceStatus.DRAFT);
 
         Preference saved = preferenceRepository.save(pref);

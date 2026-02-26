@@ -1,102 +1,316 @@
 .page {
-    min-height: 100vh;
+  min-height: 100vh;
+  width: 100%;
+  background: #f6f7fb;
+  padding: 20px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+}
+
+/* ===== Header (общий) ===== */
+.appHeader {
+  padding: 14px 18px;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
+  box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+}
+
+.company {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  color: rgba(0,0,0,0.8);
+}
+
+.branch {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 850;
+  color: rgba(0,0,0,0.9);
+}
+
+.userLine {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 750;
+  color: rgba(0,0,0,0.6);
+}
+
+/* ===== Staff (центр + карточка) ===== */
+.staffContainer {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 40px);
+}
+
+.staffCard {
+  width: 100%;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+  overflow: hidden;
+}
+
+.staffCard .appHeader {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.staffBody {
+  padding: 0px;
+}
+
+/* ===== Manager legacy (не используется после sidebar) ===== */
+.managerContainer {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: grid;
+  gap: 12px;
+}
+
+.managerBody {
+  width: 100%;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+  padding: 18px;
+}
+
+/* ===== Manager Shell (sidebar layout) ===== */
+.managerShell {
+  display: flex;
+  min-height: 100vh;
+  background: #f0f1f6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1a1d2e;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebarLogo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.sidebarLogoIcon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.sidebarLogoText {
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.sidebarNav {
+  flex: 1;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255,255,255,0.55);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebarItem:hover {
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.85);
+}
+
+.sidebarItemActive {
+  background: rgba(99, 102, 241, 0.25) !important;
+  color: #a5b4fc !important;
+}
+
+.sidebarIcon {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sidebarLabel {
+  flex: 1;
+}
+
+/* ── Sidebar footer ── */
+.sidebarFooter {
+  padding: 14px 14px 18px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebarUser {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebarUserAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebarUserName {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebarLogout {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255,255,255,0.45);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  text-align: center;
+}
+
+.sidebarLogout:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ── Main content area ── */
+.managerMain {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+/* мобилка */
+@media (max-width: 720px) {
+  .managerShell {
+    flex-direction: column;
+  }
+  .sidebar {
     width: 100%;
-    background: #f6f7fb;
-    padding: 20px;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+    height: auto;
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
-  
-  /* ===== Header (общий) ===== */
-  .appHeader {
-    padding: 14px 18px;
-    border: 1px solid rgba(0,0,0,0.06);
-    border-radius: 14px;
-    background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
-    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+  .sidebarNav {
+    flex-direction: row;
+    padding: 8px;
   }
-  
-  .company {
-    font-size: 13px;
-    font-weight: 900;
-    letter-spacing: 0.3px;
-    color: rgba(0,0,0,0.8);
-  }
-  
-  .branch {
-    margin-top: 4px;
-    font-size: 14px;
-    font-weight: 850;
-    color: rgba(0,0,0,0.9);
-  }
-  
-  .userLine {
-    margin-top: 6px;
-    font-size: 12.5px;
-    font-weight: 750;
-    color: rgba(0,0,0,0.6);
-  }
-  
-  /* ===== Staff (центр + карточка) ===== */
-  .staffContainer {
-    width: 100%;
-    max-width: 620px;
-    margin: 0 auto;
-    display: flex;
-    justify-content: center;
+  .sidebarFooter {
+    flex-direction: row;
     align-items: center;
-    min-height: calc(100vh - 40px); /* padding page */
+    padding: 8px 14px;
+    border-top: none;
+    border-left: 1px solid rgba(255,255,255,0.07);
   }
-  
-  .staffCard {
-    width: 100%;
-    background: #fff;
-    border-radius: 14px;
-    border: 1px solid rgba(0,0,0,0.06);
-    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
-    overflow: hidden;
+  .managerMain {
+    padding: 14px;
   }
-  
-  .staffCard .appHeader {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+@media (max-width: 520px) {
+  .page {
+    padding: 14px;
   }
-  
-  .staffBody {
-    padding: 0px;
+  .staffContainer {
+    align-items: flex-start;
+    min-height: auto;
   }
-  
-  /* ===== Manager (во весь экран) ===== */
-  .managerContainer {
-    width: 100%;
-    max-width: 1400px;
-    margin: 0 auto;
-  
-    display: grid;
-    gap: 12px;
-  }
-  
-  .managerBody {
-    width: 100%;
-    background: #fff;
-    border-radius: 14px;
-    border: 1px solid rgba(0,0,0,0.06);
-    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
-    padding: 18px;
-  }
-  
-  /* мобилка */
-  @media (max-width: 520px) {
-    .page {
-      padding: 14px;
-    }
-    .staffContainer {
-      align-items: flex-start;
-      min-height: auto;
-    }
-    .managerBody {
-      padding: 14px;
-    }
-  }
-  
+}
+
+/* ── Personal shift button (нижняя часть sidebar) ── */
+.sidebarItemPersonal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+  margin-bottom: 8px;
+}
+
+.sidebarItemPersonal:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.sidebarItemPersonal.sidebarItemActive {
+  background: rgba(99, 102, 241, 0.25) !important;
+  border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+.sidebarPersonalInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.sidebarPersonalHint {
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+  font-weight: 500;
+}

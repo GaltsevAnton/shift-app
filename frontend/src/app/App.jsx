@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { clearToken, getToken } from "../shared/api/api";
 import Login from "../pages/auth/LoginPage";
-import ManagerTable from "../pages/manager/ManagerTablePage";
+import ManagerTablePage from "../pages/manager/ManagerTablePage";
 import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
-import StaffMonth from "../pages/staff/StaffMonthPage";
+import StaffMonthPage from "../pages/staff/StaffMonthPage";
 import EmployeesPage from "../pages/manager/EmployeesPage";
 
 export default function App() {
   const [token, setTokenState] = useState(getToken());
-  const [managerView, setManagerView] = useState(localStorage.getItem("managerView") || "SHIFTS");
+  const [managerView, setManagerView] = useState(
+    localStorage.getItem("managerView") || "SHIFTS"
+  );
 
   useEffect(() => {
     setTokenState(getToken());
@@ -27,40 +29,20 @@ export default function App() {
   if (!token) return <Login onLoggedIn={() => setTokenState(getToken())} />;
 
   const role = localStorage.getItem("appRole") || "MANAGER";
-  if (role === "STAFF") return <StaffMonth onLogout={onLogout} />;
 
-  // ===== MANAGER =====
-  const menu = (
-    <div style={{ display: "flex", gap: 8, padding: 10, justifyContent: "center" }}>
-      <button onClick={() => go("SHIFTS")}>Shifts</button>
-      <button onClick={() => go("PREFS")}>Preferences</button>
-      <button onClick={() => go("EMPLOYEES")}>Employees</button>
-    </div>
-  );
+  // STAFF — только свои смены, без sidebar
+  if (role === "STAFF") return <StaffMonthPage onLogout={onLogout} />;
 
+  // MANAGER / ADMIN — с sidebar
+  // PREFS = личные смены менеджера (через стафф-эндпоинты, обычный StaffMonthPage)
   if (managerView === "PREFS") {
     return (
-      <div>
-        {menu}
-        <ManagerWeekPage onLogout={onLogout} />
-      </div>
+      <StaffMonthPage
+        onLogout={onLogout}
+        managerNav={{ view: managerView, onNavigate: go }}
+      />
     );
   }
-
-  if (managerView === "EMPLOYEES") {
-    return (
-      <div>
-        {menu}
-        <EmployeesPage />
-      </div>
-    );
-  }
-
-  // SHIFTS
-  return (
-    <div>
-      {menu}
-      <ManagerTable onLogout={onLogout} />
-    </div>
-  );
+  if (managerView === "EMPLOYEES") return <EmployeesPage        view={managerView} onNavigate={go} onLogout={onLogout} />;
+  return                                  <ManagerTablePage     view={managerView} onNavigate={go} onLogout={onLogout} />;
 }

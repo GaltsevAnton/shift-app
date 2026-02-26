@@ -1,28 +1,27 @@
-// Response DTO то сервер отдаёт в ответе
-
 package com.shiftapp.users.dto;
 
+import com.shiftapp.users.User;
 import com.shiftapp.users.UserRole;
 
+import java.time.Instant;
+
 public class UserResponse {
-    private Long id;
-    private String login;
-    private String fullName;
-    private UserRole role;
-    private boolean active;
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public Long id;
+    public String login;
+    public String fullName;
+    public UserRole role;
+    public boolean active;
+    public Instant createdAt;
 
-    public String getLogin() { return login; }
-    public void setLogin(String login) { this.login = login; }
-
-    public String getFullName() { return fullName; }
-    public void setFullName(String fullName) { this.fullName = fullName; }
-
-    public UserRole getRole() { return role; }
-    public void setRole(UserRole role) { this.role = role; }
-    
-    public boolean isActive() { return active; }
-    public void setActive(boolean active) { this.active = active; }
+    public static UserResponse from(User u) {
+        UserResponse r = new UserResponse();
+        r.id = u.getId();
+        r.login = u.getLogin();
+        r.fullName = u.getFullName();
+        r.role = u.getRole();
+        r.active = u.isActive();
+        r.createdAt = u.getCreatedAt();
+        return r;
+    }
 }

@@ -10,6 +10,9 @@ export function setToken(token) {
 
 export function clearToken() {
   localStorage.removeItem("accessToken");
+  localStorage.removeItem("appRole");
+  localStorage.removeItem("staffName");
+  localStorage.removeItem("managerView");
 }
 
 async function request(path, { method = "GET", body, auth = true } = {}) {
@@ -24,6 +27,13 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  // токен протух или невалиден — разлогиниваем
+  if (res.status === 401) {
+    clearToken();
+    window.location.reload();
+    return;
+  }
 
   const text = await res.text();
   const data = text ? safeJson(text) : null;
@@ -52,7 +62,7 @@ export const api = {
   // ===== MANAGER USERS =====
   managerUsers: () => request("/api/manager/users"),
 
-  // ===== MANAGER SHIFTS (таблица смен) =====
+  // ===== MANAGER SHIFTS =====
   managerShifts: (from, to) => request(`/api/manager/shifts?from=${from}&to=${to}`),
 
   bulkShifts: (shifts) =>
@@ -64,7 +74,10 @@ export const api = {
       body: { fromWeekStart, toWeekStart, overwrite },
     }),
 
-  // ===== STAFF (желания) =====
+  // ===== MANAGER WEEKS =====
+  managerWeeks: (month) => request(`/api/manager/weeks?month=${month}`),
+
+  // ===== STAFF =====
   staffWeeks: (month) => request(`/api/staff/weeks?month=${month}`),
 
   staffWeek: (weekStart) => request(`/api/staff/week?weekStart=${weekStart}`),
@@ -75,7 +88,7 @@ export const api = {
   staffCopyPrev: (weekStart) =>
     request(`/api/staff/week/copy-prev?weekStart=${weekStart}`, { method: "POST" }),
 
-  // ===== MANAGER: edit staff week (если ты добавил ManagerStaffWeekController) =====
+  // ===== MANAGER: staff week =====
   managerStaffWeek: (userId, weekStart) =>
     request(`/api/manager/staff-week?userId=${userId}&weekStart=${weekStart}`),
 
@@ -85,16 +98,30 @@ export const api = {
       body: { weekStart, days },
     }),
 
-    // ===== MANAGER EMPLOYEES (accounts) =====
-    managerEmployeesList: () => request("/api/manager/employees"),
+  // ===== MANAGER WEEK EDITOR =====
+  managerWeek: (weekStart) =>
+    request(`/api/manager/week?weekStart=${weekStart}`),
 
-    managerEmployeesCreate: (payload) =>
-      request("/api/manager/employees", { method: "POST", body: payload }),
+  managerWeekSave: (weekStart, userId, days) =>
+    request(`/api/manager/week/save`, {
+      method: "POST",
+      body: { weekStart, userId, days },
+    }),
 
-    managerEmployeesUpdate: (id, payload) =>
-      request(`/api/manager/employees/${id}`, { method: "PUT", body: payload }),
+  setWeekStatus: (weekStart, status) =>
+    request(`/api/manager/week-status?weekStart=${weekStart}&status=${status}`, {
+      method: "POST",
+    }),
 
-    managerEmployeesDelete: (id) =>
-      request(`/api/manager/employees/${id}`, { method: "DELETE" }),
+  // ===== MANAGER EMPLOYEES =====
+  managerEmployeesList: () => request("/api/manager/employees"),
 
+  managerEmployeesCreate: (payload) =>
+    request("/api/manager/employees", { method: "POST", body: payload }),
+
+  managerEmployeesUpdate: (id, payload) =>
+    request(`/api/manager/employees/${id}`, { method: "PUT", body: payload }),
+
+  managerEmployeesDelete: (id) =>
+    request(`/api/manager/employees/${id}`, { method: "DELETE" }),
 };

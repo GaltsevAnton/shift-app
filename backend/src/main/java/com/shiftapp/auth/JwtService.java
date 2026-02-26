@@ -1,7 +1,7 @@
 package com.shiftapp.auth;
 
 import com.shiftapp.auth.security.CustomUserDetails;
-import com.shiftapp.auth.security.CustomEmployeeDetails;
+// import com.shiftapp.auth.security.CustomEmployeeDetails;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,22 +28,6 @@ public class JwtService {
         this.accessTokenMinutes = accessTokenMinutes;
     }
 
-    public String generateEmployeeAccessToken(CustomEmployeeDetails emp) {
-        Instant now = Instant.now();
-        Instant exp = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
-    
-        return Jwts.builder()
-                .subject(emp.getUsername())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(exp))
-                .claim("typ", "EMP")
-                .claim("eid", emp.getEmployeeId())
-                .claim("rid", emp.getRestaurantId())
-                .claim("role", emp.getRole().name())
-                .signWith(key)
-                .compact();
-    }
-
     public String generateAccessToken(CustomUserDetails user) {
         // передаёшь пользователя (в обёртке CustomUserDetails) — чтобы взять:
         //     username
@@ -60,7 +44,7 @@ public class JwtService {
                 .claim("uid", user.getUserId())
                 .claim("rid", user.getRestaurantId())
                 .claim("role", user.getRole().name())
-                .claim("typ", "USR")
+                // .claim("typ", "USR")
                 .signWith(key)
                 .compact();
     }
@@ -73,16 +57,4 @@ public class JwtService {
                 .getPayload()
                 .getSubject();
     }
-
-    public String extractType(String token) {
-        Object val = Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload()
-                .get("typ");
-    
-        // Для старых токенов (где typ ещё нет) считаем, что это USR
-        return val == null ? "USR" : val.toString();
-    }    
 }
