@@ -15,6 +15,9 @@ public class UserCreateRequest {
     @Size(max = 200)
     public String fullName;
 
+    @Size(max = 100)
+    public String position;
+
     @NotNull
     public UserRole role;
 

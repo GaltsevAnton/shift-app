@@ -45,6 +45,7 @@ public class UserService {
         u.setRestaurant(em.getReference(Restaurant.class, restaurantId));
         u.setLogin(req.login);
         u.setFullName(req.fullName);
+        u.setPosition(req.position);
         u.setRole(req.role);
         u.setActive(true);
         u.setPasswordHash(passwordEncoder.encode(req.password));
@@ -66,6 +67,7 @@ public class UserService {
 
         u.setLogin(req.login);
         u.setFullName(req.fullName);
+        u.setPosition(req.position);
         u.setRole(req.role);
         u.setActive(req.active);
 

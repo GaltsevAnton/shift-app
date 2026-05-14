@@ -29,6 +29,9 @@ public class User {
     @Column(name = "full_name", nullable = false, length = 200)
     private String fullName;
 
+    @Column(length = 100)
+    private String position;  // должность — только для фильтра/отображения
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -49,6 +52,8 @@ public class User {
     public void setRole(UserRole role) { this.role = role; }
     public String getFullName() { return fullName; }
     public void setFullName(String fullName) { this.fullName = fullName; }
+    public String getPosition() { return position; }
+    public void setPosition(String position) { this.position = position; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }
