@@ -44,6 +44,7 @@ public class JwtService {
                 .claim("uid", user.getUserId())
                 .claim("rid", user.getRestaurantId())
                 .claim("role", user.getRole().name())
+                .claim("fullName", user.getFullName())
                 // .claim("typ", "USR")
                 .signWith(key)
                 .compact();

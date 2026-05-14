@@ -42,6 +42,7 @@ public class CustomUserDetails implements UserDetails {
     public Long getUserId() { return user.getId(); }
     public Long getRestaurantId() { return user.getRestaurant().getId(); }
     public UserRole getRole() { return user.getRole(); }
+    public String getFullName() { return user.getFullName(); }
 
     @Override  //“Я переопределяю метод, который обязателен по интерфейсу UserDetails”.
     public Collection<? extends GrantedAuthority> getAuthorities() {

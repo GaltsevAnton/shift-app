@@ -301,6 +301,8 @@ public class WeekService {
         }
 
         ManagerWeekResponse res = new ManagerWeekResponse();
+        res.setWeekStart(ws);          // ← добавить
+        res.setWeekEnd(we);            // ← добавить
         res.setStatus(status);
         res.setRows(rows);
         return res;
