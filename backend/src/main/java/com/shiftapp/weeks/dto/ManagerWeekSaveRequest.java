@@ -1,5 +1,6 @@
 package com.shiftapp.weeks.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -11,7 +12,7 @@ public class ManagerWeekSaveRequest {
     private LocalDate weekStart;
 
     @NotNull
-    private Long userId; // кого редактируем
+    private Long userId;
 
     @NotNull
     private List<DayInput> days;
@@ -32,6 +33,9 @@ public class ManagerWeekSaveRequest {
         private LocalTime startTime;
         private LocalTime endTime;
 
+        @JsonProperty("last")
+        private boolean isLast;
+
         public LocalDate getDate() { return date; }
         public void setDate(LocalDate date) { this.date = date; }
 
@@ -43,5 +47,11 @@ public class ManagerWeekSaveRequest {
 
         public LocalTime getEndTime() { return endTime; }
         public void setEndTime(LocalTime endTime) { this.endTime = endTime; }
+
+        @JsonProperty("last")
+        public boolean isLast() { return isLast; }
+
+        @JsonProperty("last")
+        public void setLast(boolean last) { this.isLast = last; }
     }
 }

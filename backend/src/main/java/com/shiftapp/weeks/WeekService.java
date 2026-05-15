@@ -42,12 +42,36 @@ public class WeekService {
                 .orElse(WeekStatusType.RECEIVING);
     }
 
+    // Вспомогательный метод: заполнить StaffWeekDay из Preference
+    private StaffWeekDay buildDay(LocalDate date, Preference p) {
+        StaffWeekDay day = new StaffWeekDay();
+        day.setDate(date);
+        if (p == null) {
+            day.setOff(false);
+            day.setStartTime(null);
+            day.setEndTime(null);
+            day.setLast(false);
+        } else if (p.getStartTime() == null && !p.isLast()) {
+            // нет начала и не Last → выходной
+            day.setOff(true);
+            day.setStartTime(null);
+            day.setEndTime(null);
+            day.setLast(false);
+        } else {
+            day.setOff(false);
+            day.setStartTime(p.getStartTime());
+            day.setLast(p.isLast());
+            // если isLast = true, endTime не нужен
+            day.setEndTime(p.isLast() ? null : p.getEndTime());
+        }
+        return day;
+    }
+
     // ===== STAFF: weeks list by month =====
     @Transactional(readOnly = true)
     public List<WeekRowResponse> staffWeeks(Long restaurantId, YearMonth ym) {
         LocalDate monthStart = ym.atDay(1);
         LocalDate monthEnd = ym.atEndOfMonth();
-
         LocalDate firstWeekStart = mondayOf(monthStart);
         LocalDate lastWeekStart = mondayOf(monthEnd);
 
@@ -82,27 +106,7 @@ public class WeekService {
         List<StaffWeekDay> days = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LocalDate d = ws.plusDays(i);
-            Preference p = map.get(d);
-
-            StaffWeekDay day = new StaffWeekDay();
-            day.setDate(d);
-
-            if (p == null) {
-                day.setOff(false);
-                day.setStartTime(null);
-                day.setEndTime(null);
-            } else {
-                if (p.getStartTime() == null || p.getEndTime() == null) {
-                    day.setOff(true);
-                    day.setStartTime(null);
-                    day.setEndTime(null);
-                } else {
-                    day.setOff(false);
-                    day.setStartTime(p.getStartTime());
-                    day.setEndTime(p.getEndTime());
-                }
-            }
-            days.add(day);
+            days.add(buildDay(d, map.get(d)));
         }
 
         StaffWeekResponse res = new StaffWeekResponse();
@@ -139,19 +143,16 @@ public class WeekService {
                 throw new IllegalArgumentException("date out of week: " + d.getDate());
             }
 
+            // Сотрудник не может выставить isLast — игнорируем, всегда false
             if (!d.isOff()) {
                 if (d.getStartTime() == null || d.getEndTime() == null) {
                     throw new IllegalArgumentException("start/end required when not off");
                 }
-
                 int startMin = d.getStartTime().getHour() * 60 + d.getStartTime().getMinute();
-                int endMin = d.getEndTime().getHour() * 60 + d.getEndTime().getMinute();
-
+                int endMin   = d.getEndTime().getHour()   * 60 + d.getEndTime().getMinute();
                 if (endMin <= startMin) endMin += 24 * 60;
-
                 int duration = endMin - startMin;
-
-                if (duration < 30) throw new IllegalArgumentException("duration too short (min 30 minutes)");
+                if (duration < 30)      throw new IllegalArgumentException("duration too short (min 30 minutes)");
                 if (duration > 16 * 60) throw new IllegalArgumentException("duration too long (max 16 hours)");
             }
 
@@ -161,6 +162,7 @@ public class WeekService {
             p.setUser(user);
             p.setRestaurant(restaurant);
             p.setWorkDate(d.getDate());
+            p.setLast(false); // сотрудник не может выставить Last
 
             if (d.isOff()) {
                 p.setStartTime(null);
@@ -214,8 +216,8 @@ public class WeekService {
             to.setWorkDate(dstDate);
             to.setStartTime(from.getStartTime());
             to.setEndTime(from.getEndTime());
+            to.setLast(from.isLast()); // копируем isLast
             preferenceRepository.save(to);
-
             copied++;
         }
 
@@ -261,9 +263,8 @@ public class WeekService {
 
         Map<Long, Map<LocalDate, Preference>> byUser = new HashMap<>();
         for (Preference p : allPrefs) {
-            byUser
-                .computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
-                .put(p.getWorkDate(), p);
+            byUser.computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
+                  .put(p.getWorkDate(), p);
         }
 
         List<ManagerStaffWeekRow> rows = new ArrayList<>();
@@ -273,24 +274,7 @@ public class WeekService {
             List<StaffWeekDay> days = new ArrayList<>();
             for (int i = 0; i < 7; i++) {
                 LocalDate d = ws.plusDays(i);
-                Preference p = map.get(d);
-
-                StaffWeekDay day = new StaffWeekDay();
-                day.setDate(d);
-                if (p == null) {
-                    day.setOff(false);
-                    day.setStartTime(null);
-                    day.setEndTime(null);
-                } else if (p.getStartTime() == null && p.getEndTime() == null) {
-                    day.setOff(true);
-                    day.setStartTime(null);
-                    day.setEndTime(null);
-                } else {
-                    day.setOff(false);
-                    day.setStartTime(p.getStartTime());
-                    day.setEndTime(p.getEndTime());
-                }
-                days.add(day);
+                days.add(buildDay(d, map.get(d)));
             }
 
             ManagerStaffWeekRow row = new ManagerStaffWeekRow();
@@ -301,8 +285,8 @@ public class WeekService {
         }
 
         ManagerWeekResponse res = new ManagerWeekResponse();
-        res.setWeekStart(ws);          // ← добавить
-        res.setWeekEnd(we);            // ← добавить
+        res.setWeekStart(ws);
+        res.setWeekEnd(we);
         res.setStatus(status);
         res.setRows(rows);
         return res;
@@ -322,6 +306,11 @@ public class WeekService {
         var restaurant = restaurantRepository.findById(restaurantId).orElseThrow();
 
         for (var d : req.getDays()) {
+            System.out.println(">>> DAY=" + d.getDate() 
+            + " off=" + d.isOff() 
+            + " last=" + d.isLast() 
+            + " start=" + d.getStartTime()
+            + " end=" + d.getEndTime());
             if (d.getDate().isBefore(ws) || d.getDate().isAfter(we)) {
                 throw new IllegalArgumentException("date out of week: " + d.getDate());
             }
@@ -336,13 +325,17 @@ public class WeekService {
             if (d.isOff()) {
                 p.setStartTime(null);
                 p.setEndTime(null);
+                p.setLast(false);
             } else {
                 p.setStartTime(d.getStartTime());
-                p.setEndTime(d.getEndTime());
+                p.setLast(d.isLast());
+                // если isLast = true — endTime не сохраняем
+                p.setEndTime(d.isLast() ? null : d.getEndTime());
             }
             preferenceRepository.save(p);
         }
 
+        
         return "SAVED";
     }
 }

@@ -3,7 +3,6 @@ package com.shiftapp.preferences;
 import com.shiftapp.restaurants.Restaurant;
 import com.shiftapp.users.User;
 import jakarta.persistence.*;
-
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -33,6 +32,9 @@ public class Preference {
     @Column(name = "end_time", nullable = true)
     private LocalTime endTime;
 
+    @Column(name = "is_last", nullable = false)
+    private boolean last = false;  // поле "last", колонка "is_last"
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private PreferenceStatus status = PreferenceStatus.DRAFT;
@@ -46,6 +48,7 @@ public class Preference {
     public Preference() {}
 
     public Long getId() { return id; }
+
     public Restaurant getRestaurant() { return restaurant; }
     public void setRestaurant(Restaurant restaurant) { this.restaurant = restaurant; }
 
@@ -60,6 +63,9 @@ public class Preference {
 
     public LocalTime getEndTime() { return endTime; }
     public void setEndTime(LocalTime endTime) { this.endTime = endTime; }
+
+    public boolean isLast() { return last; }
+    public void setLast(boolean last) { this.last = last; }
 
     public PreferenceStatus getStatus() { return status; }
     public void setStatus(PreferenceStatus status) { this.status = status; }

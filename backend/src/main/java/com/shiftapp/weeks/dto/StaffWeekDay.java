@@ -8,6 +8,7 @@ public class StaffWeekDay {
     private boolean off;
     private LocalTime startTime;
     private LocalTime endTime;
+    private boolean last;  // true = работает до конца (L), endTime игнорируется
 
     public LocalDate getDate() { return date; }
     public void setDate(LocalDate date) { this.date = date; }
@@ -17,4 +18,6 @@ public class StaffWeekDay {
     public void setStartTime(LocalTime startTime) { this.startTime = startTime; }
     public LocalTime getEndTime() { return endTime; }
     public void setEndTime(LocalTime endTime) { this.endTime = endTime; }
+    public boolean isLast() { return last; }
+    public void setLast(boolean last) { this.last = last; }
 }
