@@ -26,7 +26,6 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    // список всех пользователей ресторана
     public List<UserResponse> list(Long restaurantId) {
         return repo.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
                 .stream()
@@ -34,51 +33,45 @@ public class UserService {
                 .toList();
     }
 
-    // создать нового пользователя
     @Transactional
     public UserResponse create(Long restaurantId, UserCreateRequest req) {
         if (repo.findByLogin(req.login).isPresent()) {
             throw new RuntimeException("Login already exists");
         }
-
         User u = new User();
         u.setRestaurant(em.getReference(Restaurant.class, restaurantId));
         u.setLogin(req.login);
         u.setFullName(req.fullName);
         u.setPosition(req.position);
+        u.setDepartment(req.department);
         u.setRole(req.role);
         u.setActive(true);
         u.setPasswordHash(passwordEncoder.encode(req.password));
-
         repo.save(u);
         return UserResponse.from(u);
     }
 
-    // обновить пользователя
     @Transactional
     public UserResponse update(Long restaurantId, Long id, UserUpdateRequest req) {
         User u = repo.findByIdAndRestaurant_Id(id, restaurantId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // если меняем логин — проверяем уникальность
         if (!u.getLogin().equals(req.login) && repo.findByLogin(req.login).isPresent()) {
             throw new RuntimeException("Login already exists");
         }
-
         u.setLogin(req.login);
         u.setFullName(req.fullName);
         u.setPosition(req.position);
+        u.setDepartment(req.department);
         u.setRole(req.role);
         u.setActive(req.active);
 
         if (req.password != null && !req.password.isBlank()) {
             u.setPasswordHash(passwordEncoder.encode(req.password));
         }
-
         return UserResponse.from(u);
     }
 
-    // удалить пользователя
     @Transactional
     public void delete(Long restaurantId, Long id) {
         User u = repo.findByIdAndRestaurant_Id(id, restaurantId)

@@ -5,7 +5,8 @@ import com.shiftapp.users.User;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "preferences")
@@ -26,14 +27,14 @@ public class Preference {
     @Column(name = "work_date", nullable = false)
     private LocalDate workDate;
 
-    @Column(name = "start_time", nullable = true)
-    private LocalTime startTime;
+    // off=true означает выходной (нет слотов)
+    @Column(name = "is_off", nullable = false)
+    private boolean off = false;
 
-    @Column(name = "end_time", nullable = true)
-    private LocalTime endTime;
-
-    @Column(name = "is_last", nullable = false)
-    private boolean last = false;  // поле "last", колонка "is_last"
+    @OneToMany(mappedBy = "preference", cascade = CascadeType.ALL, orphanRemoval = true,
+               fetch = FetchType.LAZY)
+    @OrderBy("slotOrder ASC")
+    private List<ShiftSlot> slots = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -58,14 +59,11 @@ public class Preference {
     public LocalDate getWorkDate() { return workDate; }
     public void setWorkDate(LocalDate workDate) { this.workDate = workDate; }
 
-    public LocalTime getStartTime() { return startTime; }
-    public void setStartTime(LocalTime startTime) { this.startTime = startTime; }
+    public boolean isOff() { return off; }
+    public void setOff(boolean off) { this.off = off; }
 
-    public LocalTime getEndTime() { return endTime; }
-    public void setEndTime(LocalTime endTime) { this.endTime = endTime; }
-
-    public boolean isLast() { return last; }
-    public void setLast(boolean last) { this.last = last; }
+    public List<ShiftSlot> getSlots() { return slots; }
+    public void setSlots(List<ShiftSlot> slots) { this.slots = slots; }
 
     public PreferenceStatus getStatus() { return status; }
     public void setStatus(PreferenceStatus status) { this.status = status; }

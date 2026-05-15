@@ -1,8 +1,8 @@
 package com.shiftapp.weeks;
 
 import com.shiftapp.common.CurrentUser;
+import com.shiftapp.weeks.dto.ManagerStaffWeekSaveRequest;
 import com.shiftapp.weeks.dto.ManagerWeekResponse;
-import com.shiftapp.weeks.dto.ManagerWeekSaveRequest;
 import com.shiftapp.weeks.dto.WeekRowResponse;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +24,7 @@ public class ManagerWeekController {
     @GetMapping("/weeks")
     public List<WeekRowResponse> weeks(@RequestParam String month) {
         var me = CurrentUser.require();
-        YearMonth ym = YearMonth.parse(month); // "2026-02"
+        YearMonth ym = YearMonth.parse(month);
         return weekService.managerWeeks(me.getRestaurantId(), ym);
     }
 
@@ -35,7 +35,7 @@ public class ManagerWeekController {
     }
 
     @PostMapping("/week/save")
-    public String save(@RequestBody @Valid ManagerWeekSaveRequest req) {
+    public String save(@RequestBody @Valid ManagerStaffWeekSaveRequest req) {
         var me = CurrentUser.require();
         return weekService.managerSaveStaffWeek(me.getRestaurantId(), me.getUserId(), req);
     }

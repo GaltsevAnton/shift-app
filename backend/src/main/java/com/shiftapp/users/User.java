@@ -30,7 +30,10 @@ public class User {
     private String fullName;
 
     @Column(length = 100)
-    private String position;  // должность — только для фильтра/отображения
+    private String position;
+
+    @Column(length = 100)
+    private String department;
 
     @Column(nullable = false)
     private boolean active = true;
@@ -40,7 +43,6 @@ public class User {
 
     public User() {}
 
-    // getters/setters
     public Long getId() { return id; }
     public Restaurant getRestaurant() { return restaurant; }
     public void setRestaurant(Restaurant restaurant) { this.restaurant = restaurant; }
@@ -54,6 +56,8 @@ public class User {
     public void setFullName(String fullName) { this.fullName = fullName; }
     public String getPosition() { return position; }
     public void setPosition(String position) { this.position = position; }
+    public String getDepartment() { return department; }
+    public void setDepartment(String department) { this.department = department; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }

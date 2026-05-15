@@ -23,12 +23,6 @@ public class PreferenceService {
 
     @Transactional
     public PreferenceResponse upsertForUser(Long userId, UpsertPreferenceRequest req) {
-        if (req.getStartTime() != null && req.getEndTime() != null) {
-            if (!req.getEndTime().isAfter(req.getStartTime())) {
-                throw new IllegalArgumentException("endTime must be after startTime");
-            }
-        }
-
         User user = userRepository.findById(userId).orElseThrow();
 
         Preference pref = preferenceRepository
@@ -38,8 +32,6 @@ public class PreferenceService {
         pref.setUser(user);
         pref.setRestaurant(user.getRestaurant());
         pref.setWorkDate(req.getWorkDate());
-        pref.setStartTime(req.getStartTime());
-        pref.setEndTime(req.getEndTime());
         pref.setComment(req.getComment());
 
         if (pref.getStatus() == null) pref.setStatus(PreferenceStatus.DRAFT);
@@ -56,7 +48,7 @@ public class PreferenceService {
 
     @Transactional(readOnly = true)
     public List<PreferenceResponse> listForRestaurant(Long restaurantId, LocalDate from, LocalDate to) {
-        return preferenceRepository.findByRestaurant_IdAndWorkDateBetween(restaurantId, from, to)
+        return preferenceRepository.findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to)
                 .stream().map(this::toResponse).toList();
     }
 
@@ -66,8 +58,6 @@ public class PreferenceService {
         r.setUserId(p.getUser().getId());
         r.setUserName(p.getUser().getFullName());
         r.setWorkDate(p.getWorkDate());
-        r.setStartTime(p.getStartTime());
-        r.setEndTime(p.getEndTime());
         r.setStatus(p.getStatus());
         r.setComment(p.getComment());
         return r;

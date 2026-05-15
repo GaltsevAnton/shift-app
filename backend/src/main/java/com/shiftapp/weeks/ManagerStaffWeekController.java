@@ -3,10 +3,9 @@ package com.shiftapp.weeks;
 import com.shiftapp.common.CurrentUser;
 import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
+import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.users.UserRepository;
-import com.shiftapp.weeks.dto.StaffWeekDay;
-import com.shiftapp.weeks.dto.StaffWeekResponse;
-import com.shiftapp.weeks.dto.StaffWeekSaveRequest;
+import com.shiftapp.weeks.dto.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -17,18 +16,21 @@ import java.util.*;
 @RequestMapping("/api/manager")
 public class ManagerStaffWeekController {
 
+    private final WeekService weekService;
     private final WeekStatusRepository weekStatusRepository;
     private final PreferenceRepository preferenceRepository;
     private final UserRepository userRepository;
 
     public ManagerStaffWeekController(
+            WeekService weekService,
             WeekStatusRepository weekStatusRepository,
             PreferenceRepository preferenceRepository,
             UserRepository userRepository
     ) {
-        this.weekStatusRepository = weekStatusRepository;
-        this.preferenceRepository = preferenceRepository;
-        this.userRepository = userRepository;
+        this.weekService            = weekService;
+        this.weekStatusRepository   = weekStatusRepository;
+        this.preferenceRepository   = preferenceRepository;
+        this.userRepository         = userRepository;
     }
 
     private static LocalDate mondayOf(LocalDate d) {
@@ -47,16 +49,16 @@ public class ManagerStaffWeekController {
         Long rid = me.getRestaurantId();
 
         var staff = userRepository.findById(userId).orElseThrow();
-        if (!staff.getRestaurant().getId().equals(rid)) {
+        if (!staff.getRestaurant().getId().equals(rid))
             throw new IllegalArgumentException("User belongs to another restaurant");
-        }
 
         LocalDate ws = mondayOf(weekStart);
         LocalDate we = ws.plusDays(6);
 
         WeekStatusType status = getStatusOrDefault(rid, ws);
 
-        List<Preference> prefs = preferenceRepository.findByUser_IdAndWorkDateBetween(userId, ws, we);
+        List<Preference> prefs =
+                preferenceRepository.findByUser_IdAndWorkDateBetweenWithSlots(userId, ws, we);
         Map<LocalDate, Preference> map = new HashMap<>();
         for (Preference p : prefs) map.put(p.getWorkDate(), p);
 
@@ -68,21 +70,38 @@ public class ManagerStaffWeekController {
             StaffWeekDay day = new StaffWeekDay();
             day.setDate(d);
 
-            if (p == null) {
-                day.setOff(false);
-                day.setStartTime(null);
-                day.setEndTime(null);
-                day.setLast(false);
-            } else if (p.getStartTime() == null && !p.isLast()) {
-                day.setOff(true);
-                day.setStartTime(null);
-                day.setEndTime(null);
-                day.setLast(false);
+            if (p == null || p.isOff() || p.getSlots().isEmpty()) {
+                day.setOff(p == null || p.isOff());
+                day.setSlots(Collections.emptyList());
             } else {
                 day.setOff(false);
-                day.setStartTime(p.getStartTime());
-                day.setLast(p.isLast());
-                day.setEndTime(p.isLast() ? null : p.getEndTime());
+                List<SlotDto> slotDtos = new ArrayList<>();
+                for (ShiftSlot s : p.getSlots()) {
+                    slotDtos.add(new SlotDto(
+                            s.getStartTime(),
+                            s.isLast() ? null : s.getEndTime(),
+                            s.isLast(),
+                            s.getWorkplace()
+                    ));
+                }
+                day.setSlots(slotDtos);
+
+                // flat fields
+                p.getSlots().stream()
+                        .map(ShiftSlot::getStartTime)
+                        .filter(Objects::nonNull)
+                        .min(Comparator.naturalOrder())
+                        .ifPresent(day::setStartTime);
+
+                boolean anyLast = p.getSlots().stream().anyMatch(ShiftSlot::isLast);
+                day.setLast(anyLast);
+                if (!anyLast) {
+                    p.getSlots().stream()
+                            .map(ShiftSlot::getEndTime)
+                            .filter(Objects::nonNull)
+                            .max(Comparator.naturalOrder())
+                            .ifPresent(day::setEndTime);
+                }
             }
             days.add(day);
         }
@@ -94,51 +113,10 @@ public class ManagerStaffWeekController {
     }
 
     @PostMapping("/staff-week/save")
-    public String saveStaffWeek(@RequestBody StaffWeekSaveRequest req, @RequestParam Long userId) {
+    public String saveStaffWeek(
+            @RequestBody ManagerStaffWeekSaveRequest req,
+            @RequestParam Long userId) {
         var me = CurrentUser.require();
-        Long rid = me.getRestaurantId();
-
-        var staff = userRepository.findById(userId).orElseThrow();
-        if (!staff.getRestaurant().getId().equals(rid)) {
-            throw new IllegalArgumentException("User belongs to another restaurant");
-        }
-
-        LocalDate ws = mondayOf(req.getWeekStart());
-        WeekStatusType status = getStatusOrDefault(rid, ws);
-        if (status == WeekStatusType.CONFIRMED) {
-            throw new IllegalArgumentException("Week is locked (CONFIRMED)");
-        }
-
-        LocalDate we = ws.plusDays(6);
-
-        if (req.getDays() == null || req.getDays().size() != 7) {
-            throw new IllegalArgumentException("days must be 7 items");
-        }
-
-        for (var d : req.getDays()) {
-            if (d.getDate().isBefore(ws) || d.getDate().isAfter(we)) {
-                throw new IllegalArgumentException("date out of week: " + d.getDate());
-            }
-
-            Preference p = preferenceRepository.findByUser_IdAndWorkDate(userId, d.getDate())
-                    .orElseGet(Preference::new);
-
-            p.setUser(staff);
-            p.setRestaurant(staff.getRestaurant());
-            p.setWorkDate(d.getDate());
-
-            if (d.isOff()) {
-                p.setStartTime(null);
-                p.setEndTime(null);
-                p.setLast(false);
-            } else {
-                p.setStartTime(d.getStartTime());
-                p.setLast(d.isLast());
-                p.setEndTime(d.isLast() ? null : d.getEndTime());
-            }
-            preferenceRepository.save(p);
-        }
-
-        return "SAVED";
+        return weekService.managerSaveStaffWeek(me.getRestaurantId(), userId, req);
     }
 }

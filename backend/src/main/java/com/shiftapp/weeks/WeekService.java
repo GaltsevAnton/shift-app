@@ -2,6 +2,8 @@ package com.shiftapp.weeks;
 
 import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
+import com.shiftapp.preferences.ShiftSlot;
+import com.shiftapp.preferences.ShiftSlotRepository;
 import com.shiftapp.restaurants.RestaurantRepository;
 import com.shiftapp.users.UserRepository;
 import com.shiftapp.weeks.dto.*;
@@ -16,22 +18,26 @@ import java.util.*;
 @Service
 public class WeekService {
 
-    private final WeekStatusRepository weekStatusRepository;
-    private final RestaurantRepository restaurantRepository;
-    private final UserRepository userRepository;
-    private final PreferenceRepository preferenceRepository;
+    private final WeekStatusRepository    weekStatusRepository;
+    private final RestaurantRepository    restaurantRepository;
+    private final UserRepository          userRepository;
+    private final PreferenceRepository    preferenceRepository;
+    private final ShiftSlotRepository     slotRepository;
 
     public WeekService(WeekStatusRepository weekStatusRepository,
                        RestaurantRepository restaurantRepository,
                        UserRepository userRepository,
-                       PreferenceRepository preferenceRepository) {
+                       PreferenceRepository preferenceRepository,
+                       ShiftSlotRepository slotRepository) {
         this.weekStatusRepository = weekStatusRepository;
         this.restaurantRepository = restaurantRepository;
-        this.userRepository = userRepository;
+        this.userRepository       = userRepository;
         this.preferenceRepository = preferenceRepository;
+        this.slotRepository       = slotRepository;
     }
 
     // ===== helpers =====
+
     public static LocalDate mondayOf(LocalDate d) {
         return d.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     }
@@ -42,38 +48,88 @@ public class WeekService {
                 .orElse(WeekStatusType.RECEIVING);
     }
 
-    // Вспомогательный метод: заполнить StaffWeekDay из Preference
-    private StaffWeekDay buildDay(LocalDate date, Preference p) {
+    /**
+     * Строит StaffWeekDay для сотрудника:
+     * - flat поля: earliest startTime, latest endTime (или last=true если хоть один слот last)
+     * - slots: null (сотрудник не видит детализацию)
+     */
+    private StaffWeekDay buildDayForStaff(LocalDate date, Preference p) {
         StaffWeekDay day = new StaffWeekDay();
         day.setDate(date);
-        if (p == null) {
-            day.setOff(false);
+
+        if (p == null || p.isOff() || p.getSlots().isEmpty()) {
+            boolean isOff = (p != null && p.isOff()) ||
+                            (p != null && p.getSlots().isEmpty());
+            day.setOff(isOff || p == null);
             day.setStartTime(null);
             day.setEndTime(null);
             day.setLast(false);
-        } else if (p.getStartTime() == null && !p.isLast()) {
-            // нет начала и не Last → выходной
-            day.setOff(true);
-            day.setStartTime(null);
-            day.setEndTime(null);
-            day.setLast(false);
-        } else {
-            day.setOff(false);
-            day.setStartTime(p.getStartTime());
-            day.setLast(p.isLast());
-            // если isLast = true, endTime не нужен
-            day.setEndTime(p.isLast() ? null : p.getEndTime());
+            return day;
         }
+
+        List<ShiftSlot> slots = p.getSlots();
+        day.setOff(false);
+
+        // Earliest start
+        LocalTime earliest = slots.stream()
+                .map(ShiftSlot::getStartTime)
+                .filter(Objects::nonNull)
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+        day.setStartTime(earliest);
+
+        // Any slot has last=true?
+        boolean anyLast = slots.stream().anyMatch(ShiftSlot::isLast);
+        day.setLast(anyLast);
+
+        if (anyLast) {
+            day.setEndTime(null);
+        } else {
+            // Latest end
+            LocalTime latest = slots.stream()
+                    .map(ShiftSlot::getEndTime)
+                    .filter(Objects::nonNull)
+                    .max(Comparator.naturalOrder())
+                    .orElse(null);
+            day.setEndTime(latest);
+        }
+
+        return day;
+    }
+
+    /**
+     * Строит StaffWeekDay для менеджера:
+     * - flat поля (для совместимости)
+     * - slots: полный список слотов
+     */
+    private StaffWeekDay buildDayForManager(LocalDate date, Preference p) {
+        StaffWeekDay day = buildDayForStaff(date, p);
+
+        if (p == null || p.isOff() || p.getSlots().isEmpty()) {
+            day.setSlots(Collections.emptyList());
+            return day;
+        }
+
+        List<SlotDto> slotDtos = new ArrayList<>();
+        for (ShiftSlot s : p.getSlots()) {
+            slotDtos.add(new SlotDto(
+                    s.getStartTime(),
+                    s.isLast() ? null : s.getEndTime(),
+                    s.isLast(),
+                    s.getWorkplace()
+            ));
+        }
+        day.setSlots(slotDtos);
         return day;
     }
 
     // ===== STAFF: weeks list by month =====
     @Transactional(readOnly = true)
     public List<WeekRowResponse> staffWeeks(Long restaurantId, YearMonth ym) {
-        LocalDate monthStart = ym.atDay(1);
-        LocalDate monthEnd = ym.atEndOfMonth();
+        LocalDate monthStart    = ym.atDay(1);
+        LocalDate monthEnd      = ym.atEndOfMonth();
         LocalDate firstWeekStart = mondayOf(monthStart);
-        LocalDate lastWeekStart = mondayOf(monthEnd);
+        LocalDate lastWeekStart  = mondayOf(monthEnd);
 
         List<WeekRowResponse> out = new ArrayList<>();
         for (LocalDate ws = firstWeekStart; !ws.isAfter(lastWeekStart); ws = ws.plusWeeks(1)) {
@@ -93,20 +149,19 @@ public class WeekService {
         LocalDate we = ws.plusDays(6);
 
         var user = userRepository.findById(userId).orElseThrow();
-        if (!user.getRestaurant().getId().equals(restaurantId)) {
+        if (!user.getRestaurant().getId().equals(restaurantId))
             throw new IllegalArgumentException("User belongs to another restaurant");
-        }
 
         WeekStatusType status = getStatusOrDefault(restaurantId, ws);
 
-        List<Preference> prefs = preferenceRepository.findByUser_IdAndWorkDateBetween(userId, ws, we);
+        List<Preference> prefs = preferenceRepository.findByUser_IdAndWorkDateBetweenWithSlots(userId, ws, we);
         Map<LocalDate, Preference> map = new HashMap<>();
         for (Preference p : prefs) map.put(p.getWorkDate(), p);
 
         List<StaffWeekDay> days = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LocalDate d = ws.plusDays(i);
-            days.add(buildDay(d, map.get(d)));
+            days.add(buildDayForStaff(d, map.get(d)));
         }
 
         StaffWeekResponse res = new StaffWeekResponse();
@@ -115,45 +170,34 @@ public class WeekService {
         return res;
     }
 
-    // ===== STAFF: save week =====
+    // ===== STAFF: save week (flat — один слот на день) =====
     @Transactional
     public String staffSaveWeek(Long restaurantId, Long userId, StaffWeekSaveRequest req) {
         LocalDate ws = mondayOf(req.getWeekStart());
         WeekStatusType status = getStatusOrDefault(restaurantId, ws);
-
-        if (status != WeekStatusType.RECEIVING) {
+        if (status != WeekStatusType.RECEIVING)
             throw new IllegalArgumentException("Week is locked (status=" + status + ")");
-        }
 
         LocalDate we = ws.plusDays(6);
-
-        if (req.getDays() == null || req.getDays().size() != 7) {
+        if (req.getDays() == null || req.getDays().size() != 7)
             throw new IllegalArgumentException("days must be 7 items");
-        }
 
-        var user = userRepository.findById(userId).orElseThrow();
-        if (!user.getRestaurant().getId().equals(restaurantId)) {
+        var user       = userRepository.findById(userId).orElseThrow();
+        if (!user.getRestaurant().getId().equals(restaurantId))
             throw new IllegalArgumentException("User belongs to another restaurant");
-        }
 
         var restaurant = restaurantRepository.findById(restaurantId).orElseThrow();
 
         for (var d : req.getDays()) {
-            if (d.getDate().isBefore(ws) || d.getDate().isAfter(we)) {
+            if (d.getDate().isBefore(ws) || d.getDate().isAfter(we))
                 throw new IllegalArgumentException("date out of week: " + d.getDate());
-            }
 
-            // Сотрудник не может выставить isLast — игнорируем, всегда false
             if (!d.isOff()) {
-                if (d.getStartTime() == null || d.getEndTime() == null) {
+                if (d.getStartTime() == null || d.getEndTime() == null)
                     throw new IllegalArgumentException("start/end required when not off");
-                }
-                int startMin = d.getStartTime().getHour() * 60 + d.getStartTime().getMinute();
-                int endMin   = d.getEndTime().getHour()   * 60 + d.getEndTime().getMinute();
-                if (endMin <= startMin) endMin += 24 * 60;
-                int duration = endMin - startMin;
-                if (duration < 30)      throw new IllegalArgumentException("duration too short (min 30 minutes)");
-                if (duration > 16 * 60) throw new IllegalArgumentException("duration too long (max 16 hours)");
+                int dur = calcDuration(d.getStartTime(), d.getEndTime());
+                if (dur < 30)      throw new IllegalArgumentException("duration too short");
+                if (dur > 16 * 60) throw new IllegalArgumentException("duration too long");
             }
 
             Preference p = preferenceRepository.findByUser_IdAndWorkDate(userId, d.getDate())
@@ -162,18 +206,25 @@ public class WeekService {
             p.setUser(user);
             p.setRestaurant(restaurant);
             p.setWorkDate(d.getDate());
-            p.setLast(false); // сотрудник не может выставить Last
 
             if (d.isOff()) {
-                p.setStartTime(null);
-                p.setEndTime(null);
+                p.setOff(true);
+                p.getSlots().clear();
             } else {
-                p.setStartTime(d.getStartTime());
-                p.setEndTime(d.getEndTime());
+                p.setOff(false);
+                p.getSlots().clear();
+
+                ShiftSlot slot = new ShiftSlot();
+                slot.setPreference(p);
+                slot.setSlotOrder(0);
+                slot.setStartTime(d.getStartTime());
+                slot.setLast(false); // сотрудник не может выставить Last
+                slot.setEndTime(d.getEndTime());
+                slot.setWorkplace(null);
+                p.getSlots().add(slot);
             }
             preferenceRepository.save(p);
         }
-
         return "SAVED";
     }
 
@@ -182,19 +233,17 @@ public class WeekService {
     public String staffCopyPrevWeek(Long restaurantId, Long userId, LocalDate weekStart) {
         LocalDate dstWs = mondayOf(weekStart);
         WeekStatusType status = getStatusOrDefault(restaurantId, dstWs);
-        if (status != WeekStatusType.RECEIVING) {
+        if (status != WeekStatusType.RECEIVING)
             throw new IllegalArgumentException("Week is locked (status=" + status + ")");
-        }
 
         var user = userRepository.findById(userId).orElseThrow();
-        if (!user.getRestaurant().getId().equals(restaurantId)) {
+        if (!user.getRestaurant().getId().equals(restaurantId))
             throw new IllegalArgumentException("User belongs to another restaurant");
-        }
 
         LocalDate srcWs = dstWs.minusWeeks(1);
         LocalDate srcWe = srcWs.plusDays(6);
 
-        List<Preference> src = preferenceRepository.findByUser_IdAndWorkDateBetween(userId, srcWs, srcWe);
+        List<Preference> src = preferenceRepository.findByUser_IdAndWorkDateBetweenWithSlots(userId, srcWs, srcWe);
         Map<LocalDate, Preference> srcMap = new HashMap<>();
         for (Preference p : src) srcMap.put(p.getWorkDate(), p);
 
@@ -214,13 +263,23 @@ public class WeekService {
             to.setUser(user);
             to.setRestaurant(restaurant);
             to.setWorkDate(dstDate);
-            to.setStartTime(from.getStartTime());
-            to.setEndTime(from.getEndTime());
-            to.setLast(from.isLast()); // копируем isLast
+            to.setOff(from.isOff());
+            to.getSlots().clear();
+
+            int order = 0;
+            for (ShiftSlot s : from.getSlots()) {
+                ShiftSlot copy = new ShiftSlot();
+                copy.setPreference(to);
+                copy.setSlotOrder(order++);
+                copy.setStartTime(s.getStartTime());
+                copy.setEndTime(s.getEndTime());
+                copy.setLast(s.isLast());
+                copy.setWorkplace(s.getWorkplace());
+                to.getSlots().add(copy);
+            }
             preferenceRepository.save(to);
             copied++;
         }
-
         return "COPIED=" + copied;
     }
 
@@ -259,7 +318,8 @@ public class WeekService {
         var staffList = userRepository.findByRestaurant_IdAndRoleOrderByFullNameAsc(
                 restaurantId, com.shiftapp.users.UserRole.STAFF);
 
-        List<Preference> allPrefs = preferenceRepository.findByRestaurant_IdAndWorkDateBetween(restaurantId, ws, we);
+        List<Preference> allPrefs =
+                preferenceRepository.findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, ws, we);
 
         Map<Long, Map<LocalDate, Preference>> byUser = new HashMap<>();
         for (Preference p : allPrefs) {
@@ -274,7 +334,7 @@ public class WeekService {
             List<StaffWeekDay> days = new ArrayList<>();
             for (int i = 0; i < 7; i++) {
                 LocalDate d = ws.plusDays(i);
-                days.add(buildDay(d, map.get(d)));
+                days.add(buildDayForManager(d, map.get(d)));
             }
 
             ManagerStaffWeekRow row = new ManagerStaffWeekRow();
@@ -292,50 +352,61 @@ public class WeekService {
         return res;
     }
 
-    // ===== MANAGER: save one staff week =====
+    // ===== MANAGER: save one staff week (with slots) =====
     @Transactional
-    public String managerSaveStaffWeek(Long restaurantId, Long managerId, ManagerWeekSaveRequest req) {
+    public String managerSaveStaffWeek(Long restaurantId, Long userId, ManagerStaffWeekSaveRequest req) {
         LocalDate ws = mondayOf(req.getWeekStart());
         LocalDate we = ws.plusDays(6);
 
-        var user = userRepository.findById(req.getUserId()).orElseThrow();
-        if (!user.getRestaurant().getId().equals(restaurantId)) {
+        var user = userRepository.findById(userId).orElseThrow();
+        if (!user.getRestaurant().getId().equals(restaurantId))
             throw new IllegalArgumentException("User belongs to another restaurant");
-        }
 
         var restaurant = restaurantRepository.findById(restaurantId).orElseThrow();
 
         for (var d : req.getDays()) {
-            System.out.println(">>> DAY=" + d.getDate() 
-            + " off=" + d.isOff() 
-            + " last=" + d.isLast() 
-            + " start=" + d.getStartTime()
-            + " end=" + d.getEndTime());
-            if (d.getDate().isBefore(ws) || d.getDate().isAfter(we)) {
+            if (d.getDate().isBefore(ws) || d.getDate().isAfter(we))
                 throw new IllegalArgumentException("date out of week: " + d.getDate());
-            }
 
-            Preference p = preferenceRepository.findByUser_IdAndWorkDate(req.getUserId(), d.getDate())
+            Preference p = preferenceRepository.findByUser_IdAndWorkDate(userId, d.getDate())
                     .orElseGet(Preference::new);
 
             p.setUser(user);
             p.setRestaurant(restaurant);
             p.setWorkDate(d.getDate());
 
-            if (d.isOff()) {
-                p.setStartTime(null);
-                p.setEndTime(null);
-                p.setLast(false);
+            boolean hasSlots = d.getSlots() != null && !d.getSlots().isEmpty();
+
+            if (d.isOff() || !hasSlots) {
+                p.setOff(true);
+                p.getSlots().clear();
             } else {
-                p.setStartTime(d.getStartTime());
-                p.setLast(d.isLast());
-                // если isLast = true — endTime не сохраняем
-                p.setEndTime(d.isLast() ? null : d.getEndTime());
+                p.setOff(false);
+                p.getSlots().clear();
+
+                int order = 0;
+                for (var si : d.getSlots()) {
+                    ShiftSlot slot = new ShiftSlot();
+                    slot.setPreference(p);
+                    slot.setSlotOrder(order++);
+                    slot.setStartTime(si.getStartTime());
+                    slot.setLast(si.isLast());
+                    slot.setEndTime(si.isLast() ? null : si.getEndTime());
+                    slot.setWorkplace(si.getWorkplace());
+                    p.getSlots().add(slot);
+                }
             }
             preferenceRepository.save(p);
         }
-
-        
         return "SAVED";
+    }
+
+    // ===== private helpers =====
+
+    private int calcDuration(LocalTime start, LocalTime end) {
+        int s = start.getHour() * 60 + start.getMinute();
+        int e = end.getHour()   * 60 + end.getMinute();
+        if (e <= s) e += 24 * 60;
+        return e - s;
     }
 }
