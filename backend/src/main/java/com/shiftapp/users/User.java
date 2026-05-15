@@ -1,8 +1,11 @@
 package com.shiftapp.users;
 
 import com.shiftapp.restaurants.Restaurant;
+import com.shiftapp.settings.department.Department;
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -32,8 +35,13 @@ public class User {
     @Column(length = 100)
     private String position;
 
-    @Column(length = 100)
-    private String department;
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+        name = "user_departments",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "department_id")
+    )
+    private Set<Department> departments = new HashSet<>();
 
     @Column(nullable = false)
     private boolean active = true;
@@ -56,8 +64,8 @@ public class User {
     public void setFullName(String fullName) { this.fullName = fullName; }
     public String getPosition() { return position; }
     public void setPosition(String position) { this.position = position; }
-    public String getDepartment() { return department; }
-    public void setDepartment(String department) { this.department = department; }
+    public Set<Department> getDepartments() { return departments; }
+    public void setDepartments(Set<Department> departments) { this.departments = departments; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }

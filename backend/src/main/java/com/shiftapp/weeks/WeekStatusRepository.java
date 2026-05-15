@@ -7,6 +7,12 @@ import java.util.List;
 import java.util.Optional;
 
 public interface WeekStatusRepository extends JpaRepository<WeekStatus, Long> {
+
     Optional<WeekStatus> findByRestaurant_IdAndWeekStart(Long restaurantId, LocalDate weekStart);
-    List<WeekStatus> findByRestaurant_IdAndWeekStartBetween(Long restaurantId, LocalDate from, LocalDate to);
+
+    List<WeekStatus> findByRestaurant_IdAndWeekStartBetween(
+            Long restaurantId,
+            LocalDate from,
+            LocalDate to
+    );
 }

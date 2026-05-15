@@ -1,6 +1,8 @@
 package com.shiftapp.users;
 
 import com.shiftapp.restaurants.Restaurant;
+import com.shiftapp.settings.department.Department;
+import com.shiftapp.settings.department.DepartmentRepository;
 import com.shiftapp.users.dto.UserCreateRequest;
 import com.shiftapp.users.dto.UserResponse;
 import com.shiftapp.users.dto.UserUpdateRequest;
@@ -10,19 +12,25 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class UserService {
 
     private final UserRepository repo;
+    private final DepartmentRepository departmentRepo;
     private final PasswordEncoder passwordEncoder;
 
     @PersistenceContext
     private EntityManager em;
 
-    public UserService(UserRepository repo, PasswordEncoder passwordEncoder) {
-        this.repo = repo;
+    public UserService(UserRepository repo,
+                       DepartmentRepository departmentRepo,
+                       PasswordEncoder passwordEncoder) {
+        this.repo           = repo;
+        this.departmentRepo = departmentRepo;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -43,7 +51,7 @@ public class UserService {
         u.setLogin(req.login);
         u.setFullName(req.fullName);
         u.setPosition(req.position);
-        u.setDepartment(req.department);
+        u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
         u.setActive(true);
         u.setPasswordHash(passwordEncoder.encode(req.password));
@@ -62,7 +70,7 @@ public class UserService {
         u.setLogin(req.login);
         u.setFullName(req.fullName);
         u.setPosition(req.position);
-        u.setDepartment(req.department);
+        u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
         u.setActive(req.active);
 
@@ -77,5 +85,18 @@ public class UserService {
         User u = repo.findByIdAndRestaurant_Id(id, restaurantId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         repo.delete(u);
+    }
+
+    // ── helpers ──
+    private Set<Department> resolveDepartments(Long restaurantId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return new HashSet<>();
+        var deps = departmentRepo.findAllById(ids);
+        // проверяем что все отделы принадлежат этому ресторану
+        deps.forEach(d -> {
+            if (!d.getRestaurant().getId().equals(restaurantId)) {
+                throw new RuntimeException("Department does not belong to this restaurant");
+            }
+        });
+        return new HashSet<>(deps);
     }
 }
