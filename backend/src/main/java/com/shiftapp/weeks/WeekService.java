@@ -268,19 +268,45 @@ public class WeekService {
             to.setUser(user);
             to.setRestaurant(restaurant);
             to.setWorkDate(dstDate);
-            to.setOff(from.isOff());
             to.getSlots().clear();
-
-            int order = 0;
-            for (ShiftSlot s : from.getSlots()) {
-                ShiftSlot copy = new ShiftSlot();
-                copy.setPreference(to);
-                copy.setSlotOrder(order++);
-                copy.setStartTime(s.getStartTime());
-                copy.setEndTime(s.getEndTime());
-                copy.setLast(s.isLast());
-                copy.setWorkplace(s.getWorkplace());
-                to.getSlots().add(copy);
+            
+            if (from.isOff()) {
+                to.setOff(true);
+            } else {
+                to.setOff(false);
+            
+                boolean hasLast = from.getSlots().stream().anyMatch(ShiftSlot::isLast);
+            
+                if (hasLast) {
+                    // если был L — берём только earliest startTime, один слот без endTime
+                    LocalTime earliestStart = from.getSlots().stream()
+                            .map(ShiftSlot::getStartTime)
+                            .filter(Objects::nonNull)
+                            .min(Comparator.naturalOrder())
+                            .orElse(null);
+            
+                    ShiftSlot copy = new ShiftSlot();
+                    copy.setPreference(to);
+                    copy.setSlotOrder(0);
+                    copy.setStartTime(earliestStart);
+                    copy.setEndTime(null);
+                    copy.setLast(false);
+                    copy.setWorkplace(null);
+                    to.getSlots().add(copy);
+                } else {
+                    // без L — копируем все слоты как есть
+                    int order = 0;
+                    for (ShiftSlot s : from.getSlots()) {
+                        ShiftSlot copy = new ShiftSlot();
+                        copy.setPreference(to);
+                        copy.setSlotOrder(order++);
+                        copy.setStartTime(s.getStartTime());
+                        copy.setEndTime(s.getEndTime());
+                        copy.setLast(false);
+                        copy.setWorkplace(s.getWorkplace());
+                        to.getSlots().add(copy);
+                    }
+                }
             }
             preferenceRepository.save(to);
             copied++;
