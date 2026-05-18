@@ -22,7 +22,7 @@ public class SecurityConfig {
 
     @Bean
     //“Создай этот объект один раз при запуске и храни его внутри Spring.
-    // Потом, если кому-то нужен такой объект — давай ему этот же самый.”
+    // Потом, если кому-то нужен такой объект — давай ему этот же самый.”ф
     CorsConfigurationSource corsConfigurationSource() {     //CORS — это правила и разрешения для браузера
         //CorsConfigurationSource - Это тип (интерфейс) из Spring
         //corsConfigurationSource() - это имя метода, его ты выбираешь сам
@@ -31,7 +31,11 @@ public class SecurityConfig {
         CorsConfiguration cfg = new CorsConfiguration();
 
         // Vite dev server
-        cfg.setAllowedOrigins(List.of("http://localhost:5173"));
+        cfg.setAllowedOrigins(List.of(
+                "http://localhost:5173",
+                "http://192.168.1.54:5173",
+                "https://hanno-shift.duckdns.org"
+        ));
 
         cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
         cfg.setAllowedHeaders(List.of("Authorization","Content-Type"));

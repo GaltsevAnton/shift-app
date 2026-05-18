@@ -193,13 +193,18 @@ public class WeekService {
                 throw new IllegalArgumentException("date out of week: " + d.getDate());
 
             if (!d.isOff()) {
-                if (d.getStartTime() == null || d.getEndTime() == null)
-                    throw new IllegalArgumentException("start/end required when not off");
-                int dur = calcDuration(d.getStartTime(), d.getEndTime());
-                if (dur < 30)      throw new IllegalArgumentException("duration too short");
-                if (dur > 16 * 60) throw new IllegalArgumentException("duration too long");
+                // если оба времени пустые — считаем выходным
+                if (d.getStartTime() == null && d.getEndTime() == null) {
+                    d.setOff(true);
+                } else {
+                    if (d.getStartTime() == null || d.getEndTime() == null)
+                        throw new IllegalArgumentException("開始・終了時間を両方入力してください");
+                    int dur = calcDuration(d.getStartTime(), d.getEndTime());
+                    if (dur < 30)      throw new IllegalArgumentException("勤務時間が短すぎます（30分以上）");
+                    if (dur > 16 * 60) throw new IllegalArgumentException("勤務時間が長すぎます（最大16時間）");
+                }
             }
-
+            
             Preference p = preferenceRepository.findByUser_IdAndWorkDate(userId, d.getDate())
                     .orElseGet(Preference::new);
 

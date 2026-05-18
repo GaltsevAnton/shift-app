@@ -13,10 +13,10 @@ import jakarta.validation.constraints.NotBlank; //подключаем вали�
 // и не может быть строкой из пробелов " " тоже нельзя
 
 public class LoginRequest {
-    @NotBlank
+    @NotBlank(message = "ログインIDを入力してください")
     private String login;
-
-    @NotBlank
+    
+    @NotBlank(message = "パスワードを入力してください")
     private String password;
 
     // Геттеры — чтобы читать значения в контроллере

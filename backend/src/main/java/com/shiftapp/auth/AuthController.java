@@ -48,7 +48,7 @@ public class AuthController {       //Это имя класса. Обычно �
                             // req = переменная, в которой лежат данные, которые ввёл пользователь.
                             // @Valid = перед запуском метода проверь валидацию, т.е. включить валидацию в DTO
         var user = userRepository.findByLogin(req.getLogin())
-                .orElseThrow(() -> new RuntimeException("Invalid login or password"));
+                .orElseThrow(() -> new RuntimeException("ログインIDまたはパスワードが正しくありません"));
         // в переменную user записываем из БД черз userRepository ищем логин полученный из DTO
         
         // findByLogin("anton") ищет в БД, не просто логин, а возвращает весь User-объект, например:
@@ -62,14 +62,14 @@ public class AuthController {       //Это имя класса. Обычно �
         // }
 
         if (!user.isActive()) {
-            throw new RuntimeException("User is inactive");
+            throw new RuntimeException("このアカウントは無効です。管理者にお問い合わせください");
         } 
         //“Если пользователь НЕ активен — останови логин и выдай ошибку.”
         // if (условие) { ... } = “если условие истинно, выполнить код внутри { }
         // isActive() — метод, который возвращает boolean (true или false).
 
         if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
-            throw new RuntimeException("Invalid login or password");
+            throw new RuntimeException("ログインIDまたはパスワードが正しくありません");
         }
         // LoginRequest — это DTO (данные, которые ввёл пользователь).
         // User — это Entity/модель из базы, не DTO
