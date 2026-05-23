@@ -33,7 +33,7 @@ public class SecurityConfig {
         // Vite dev server
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:5173",
-                "http://192.168.1.54:5173",
+                "http://192.168.1.19:5173",
                 "https://hanno-shift.duckdns.org"
         ));
 
