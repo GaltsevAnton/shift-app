@@ -141,7 +141,7 @@ settingsPositionsList/Create/Update/Delete
 settingsDepartmentsList/Create/Update/Delete
 ```
 
-**`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth
+**`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth, mgrFilterPos, mgrFilterDept, mgrFilterWp, mgrColVisibility
 
 ### 5.2 `app/App.jsx`
 
@@ -163,10 +163,20 @@ const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'cl
 ### 5.4 Pages
 
 - **`ManagerTablePage.jsx`**:
-  - Sticky: **職種・役職** (`left:0`, 70px), **氏名** (`left:70px`, 140px)
+  - Sticky: **職種・役職** (`left:0`, 70px), **部署** (`left:70px`, 90px), **氏名** (`left:160px`, 140px)
   - `rowSpan` по `maxSlots`, workplace под временем серым текстом
   - Попап `CellPopover`: `position: fixed` + `getBoundingClientRect()`
   - Месяц в `localStorage.managerSelectedMonth`
+  - **SortBar** — постоянная полоса под topBar:
+    - `表示列▼` — дропдаун скрытия столбцов 職種・役職 / 部署 (сохраняется в `mgrColVisibility`)
+    - `職種・役職▼` — каскадный фильтр по должности
+    - `部署▼` — каскадный фильтр по отделу (зависит от выбранных 職種)
+    - `表示フィルター▼` — фильтр по 場所 + 場所なし + 休み (зависит от 職種+部署)
+    - `リセット` — кнопка сброса всех фильтров (появляется только при активных фильтрах)
+    - Сортировка по 氏名 / 職種・役職 / 部署 (↑↓)
+  - **Каскадный фильтр**: 職種 → 部署 → 場所, обратный каскад тоже работает
+  - Состояние фильтров сохраняется в localStorage (`mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`)
+  - Кнопка **📥 Excel** — выгрузка `filteredStaff` в `.xlsx` через SheetJS (`npm install xlsx`)
 
 - **`EmployeesPage.jsx`**: position → `<select>`, 部署 → чекбоксы (ManyToMany)
 - **`SettingsPage.jsx`**: табы 勤務場所 / 職種・役職 / 部署
@@ -236,3 +246,5 @@ cd frontend && npm run dev -- --host  # + локальная сеть
 - Попап — `position: fixed` + `getBoundingClientRect()`
 - iOS автозум — `font-size: max(16px, 1em)`
 - Автологаут — 30 мин, в `App.jsx`, сбрасывается любым действием пользователя
+- Excel экспорт — `import * as XLSX from "xlsx"` (статический, не динамический), `npm install xlsx`
+- Фильтры localStorage очищать в `clearToken()`: `mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`, `mgrColVisibility`

@@ -16,6 +16,10 @@ export function clearToken() {
   localStorage.removeItem("staffSelectedMonth");
   localStorage.removeItem("staffSelectedWeek");
   localStorage.removeItem("managerSelectedMonth");
+  localStorage.removeItem("mgrFilterPos");
+  localStorage.removeItem("mgrFilterDept");
+  localStorage.removeItem("mgrFilterWp");
+  localStorage.removeItem("mgrColVisibility");
 }
 
 async function request(path, { method = "GET", body, auth = true } = {}) {

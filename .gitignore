@@ -1,0 +1,4 @@
+# report-service
+report-service/venv/
+report-service/__pycache__/
+report-service/**/__pycache__/
