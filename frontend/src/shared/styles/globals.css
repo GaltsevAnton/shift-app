@@ -8,18 +8,17 @@
 }
 
 html, body {
-  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  min-height: 100%;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
-  background: #fff;
+  background: #f0f1f6;
   color: #111;
 }
 
-/* root не должен ограничивать ширину и центрировать */
-#root {
-  min-height: 100%;
+/* Prevent iOS auto-zoom on input focus */
+input, select, textarea {
+  font-size: max(16px, 1em);
 }

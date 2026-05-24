@@ -8,8 +8,15 @@ export default function LoginPage({ onLoggedIn }) {
     <div className={styles.page}>
       <div className={styles.card}>
         <div className={styles.header}>
+          <div className={styles.brand}>
+            <img src="/logo.png" alt="logo" className={styles.brandLogo} />
+            <div className={styles.brandTexts}>
+              <span className={styles.brandHotel}>ホテル・ヘリテイジ</span>
+              <span className={styles.brandApp}>HannoSHIFT</span>
+            </div>
+          </div>
           <h2 className={styles.title}>Login</h2>
-          <p className={styles.sub}>役割を選択してログインしてください</p>
+          <p className={styles.sub}>ログインIDとパスワードを入力してください</p>
         </div>
 
         <div className={styles.body}>

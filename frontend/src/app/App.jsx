@@ -5,6 +5,7 @@ import ManagerTablePage from "../pages/manager/ManagerTablePage";
 import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
 import StaffMonthPage from "../pages/staff/StaffMonthPage";
 import EmployeesPage from "../pages/manager/EmployeesPage";
+import SettingsPage from "../pages/manager/SettingsPage";
 
 export default function App() {
   const [token, setTokenState] = useState(getToken());
@@ -20,6 +21,27 @@ export default function App() {
     clearToken();
     setTokenState(null);
   }
+  
+  // Автологаут через 30 минут бездействия
+  useEffect(() => {
+    if (!token) return;
+  
+    const TIMEOUT = 30 * 60 * 1000; // 30 минут
+    let timer = setTimeout(onLogout, TIMEOUT);
+  
+    function reset() {
+      clearTimeout(timer);
+      timer = setTimeout(onLogout, TIMEOUT);
+    }
+  
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(e => window.addEventListener(e, reset));
+  
+    return () => {
+      clearTimeout(timer);
+      events.forEach(e => window.removeEventListener(e, reset));
+    };
+  }, [token]);
 
   function go(view) {
     localStorage.setItem("managerView", view);
@@ -34,7 +56,6 @@ export default function App() {
   if (role === "STAFF") return <StaffMonthPage onLogout={onLogout} />;
 
   // MANAGER / ADMIN — с sidebar
-  // PREFS = личные смены менеджера (через стафф-эндпоинты, обычный StaffMonthPage)
   if (managerView === "PREFS") {
     return (
       <StaffMonthPage
@@ -43,6 +64,11 @@ export default function App() {
       />
     );
   }
-  if (managerView === "EMPLOYEES") return <EmployeesPage        view={managerView} onNavigate={go} onLogout={onLogout} />;
-  return                                  <ManagerTablePage     view={managerView} onNavigate={go} onLogout={onLogout} />;
+  if (managerView === "EMPLOYEES")
+    return <EmployeesPage    view={managerView} onNavigate={go} onLogout={onLogout} />;
+  if (managerView === "SETTINGS")
+    return <SettingsPage     view={managerView} onNavigate={go} onLogout={onLogout} />;
+
+  // SHIFTS — default
+  return <ManagerTablePage   view={managerView} onNavigate={go} onLogout={onLogout} />;
 }

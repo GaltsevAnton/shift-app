@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE;
 
 export function getToken() {
   return localStorage.getItem("accessToken");
@@ -13,6 +13,9 @@ export function clearToken() {
   localStorage.removeItem("appRole");
   localStorage.removeItem("staffName");
   localStorage.removeItem("managerView");
+  localStorage.removeItem("staffSelectedMonth");
+  localStorage.removeItem("staffSelectedWeek");
+  localStorage.removeItem("managerSelectedMonth");
 }
 
 async function request(path, { method = "GET", body, auth = true } = {}) {
@@ -88,10 +91,11 @@ export const api = {
   staffCopyPrev: (weekStart) =>
     request(`/api/staff/week/copy-prev?weekStart=${weekStart}`, { method: "POST" }),
 
-  // ===== MANAGER: staff week =====
+  // ===== MANAGER: staff week (с слотами) =====
   managerStaffWeek: (userId, weekStart) =>
     request(`/api/manager/staff-week?userId=${userId}&weekStart=${weekStart}`),
 
+  // days: [{date, off, slots:[{startTime,endTime,last,workplace}]}]
   managerStaffWeekSave: (userId, weekStart, days) =>
     request(`/api/manager/staff-week/save?userId=${userId}`, {
       method: "POST",
@@ -124,4 +128,45 @@ export const api = {
 
   managerEmployeesDelete: (id) =>
     request(`/api/manager/employees/${id}`, { method: "DELETE" }),
+
+  managerMonth: (month) => request(`/api/manager/month?month=${month}`),
+
+  // ===== SETTINGS: WORKPLACES =====
+  settingsWorkplacesList: () =>
+    request("/api/manager/settings/workplaces"),
+
+  settingsWorkplacesCreate: (payload) =>
+    request("/api/manager/settings/workplaces", { method: "POST", body: payload }),
+
+  settingsWorkplacesUpdate: (id, payload) =>
+    request(`/api/manager/settings/workplaces/${id}`, { method: "PUT", body: payload }),
+
+  settingsWorkplacesDelete: (id) =>
+    request(`/api/manager/settings/workplaces/${id}`, { method: "DELETE" }),
+
+  // ===== SETTINGS: POSITIONS =====
+  settingsPositionsList: () =>
+    request("/api/manager/settings/positions"),
+
+  settingsPositionsCreate: (payload) =>
+    request("/api/manager/settings/positions", { method: "POST", body: payload }),
+
+  settingsPositionsUpdate: (id, payload) =>
+    request(`/api/manager/settings/positions/${id}`, { method: "PUT", body: payload }),
+
+  settingsPositionsDelete: (id) =>
+    request(`/api/manager/settings/positions/${id}`, { method: "DELETE" }),
+
+  // ===== SETTINGS: DEPARTMENTS =====
+  settingsDepartmentsList: () =>
+    request("/api/manager/settings/departments"),
+
+  settingsDepartmentsCreate: (payload) =>
+    request("/api/manager/settings/departments", { method: "POST", body: payload }),
+
+  settingsDepartmentsUpdate: (id, payload) =>
+    request(`/api/manager/settings/departments/${id}`, { method: "PUT", body: payload }),
+
+  settingsDepartmentsDelete: (id) =>
+    request(`/api/manager/settings/departments/${id}`, { method: "DELETE" }),
 };

@@ -1,109 +1,45 @@
-// import { useState } from "react";
-// import { api, setToken } from "../../../shared/api/api";
-// import styles from "./LoginPage.module.css";
-
-// export default function LoginForm({ onLoggedIn }) {
-//   const [mode, setMode] = useState(localStorage.getItem("appRole") || "MANAGER");
-//   const [login, setLoginState] = useState(mode === "MANAGER" ? "manager" : "anton");
-//   const [password, setPassword] = useState(mode === "MANAGER" ? "manager123" : "pass123");
-//   const [err, setErr] = useState(null);
-//   const [loading, setLoading] = useState(false);
-
-//   function applyMode(nextMode) {
-//     setMode(nextMode);
-//     localStorage.setItem("appRole", nextMode);
-//     setLoginState(nextMode === "MANAGER" ? "manager" : "anton");
-//     setPassword(nextMode === "MANAGER" ? "manager123" : "pass123");
-//   }
-
-//   async function submit(e) {
-//     e.preventDefault();
-//     setErr(null);
-//     setLoading(true);
-//     try {
-//       const res = await api.login(login, password);
-
-//       // ВАЖНО: роль ставим из выбранного режима, а не из JWT
-//       setToken(res.accessToken, mode);
-
-//       localStorage.setItem("staffName", login);
-//       onLoggedIn();
-//     } catch (e) {
-//       setErr(e.message || String(e));
-//     } finally {
-//       setLoading(false);
-//     }
-//   }
-
-//   return (
-//     <div>
-//       <div className={styles.tabs}>
-//         <button
-//           onClick={() => applyMode("MANAGER")}
-//           className={`${styles.tab} ${mode === "MANAGER" ? styles.tabActive : ""}`}
-//           type="button"
-//         >
-//           Manager
-//         </button>
-//         <button
-//           onClick={() => applyMode("STAFF")}
-//           className={`${styles.tab} ${mode === "STAFF" ? styles.tabActive : ""}`}
-//           type="button"
-//         >
-//           Staff
-//         </button>
-//       </div>
-
-//       <form onSubmit={submit} className={styles.form}>
-//         <label className={styles.fieldLabel}>
-//           Login
-//           <input
-//             value={login}
-//             onChange={(e) => setLoginState(e.target.value)}
-//             className={styles.input}
-//           />
-//         </label>
-
-//         <label className={styles.fieldLabel}>
-//           Password
-//           <input
-//             type="password"
-//             value={password}
-//             onChange={(e) => setPassword(e.target.value)}
-//             className={styles.input}
-//           />
-//         </label>
-
-//         <button disabled={loading} className={styles.btn}>
-//           {loading ? "..." : "Login"}
-//         </button>
-
-//         {err && <div className={styles.err}>{err}</div>}
-//       </form>
-
-//       <div className={styles.footer}>appRole = {mode} (stored in localStorage)</div>
-//     </div>
-//   );
-// }
 import { useState } from "react";
 import { api, setToken } from "../../../shared/api/api";
 import styles from "./LoginPage.module.css";
 
-// Читаем роль из JWT payload (без верификации подписи — только для UI)
 function getRoleFromToken(token) {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.role || "STAFF"; // "MANAGER" | "STAFF" | "ADMIN"
+    return payload.role || "STAFF";
   } catch {
     return "STAFF";
   }
 }
 
+function getFullNameFromToken(token) {
+  try {
+    const base64 = token.split(".")[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
+      atob(base64).split('').map(c =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+      ).join('')
+    );
+    const payload = JSON.parse(json);
+    return payload.fullName || payload.name || payload.sub || "";
+  } catch {
+    return "";
+  }
+}
+
+function resetViewportZoom() {
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (!vp) return;
+  vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0');
+  setTimeout(() => {
+    vp.setAttribute('content', 'width=device-width, initial-scale=1.0');
+  }, 300);
+}
+
 export default function LoginForm({ onLoggedIn }) {
   const [login, setLoginState] = useState("");
   const [password, setPassword] = useState("");
-  const [err, setErr] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [err, setErr]           = useState(null);
+  const [loading, setLoading]   = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -112,12 +48,13 @@ export default function LoginForm({ onLoggedIn }) {
     try {
       const res = await api.login(login, password);
 
-      // роль берём из токена, не из UI
       const role = getRoleFromToken(res.accessToken);
       localStorage.setItem("appRole", role);
-      localStorage.setItem("staffName", login);
+      const fullName = getFullNameFromToken(res.accessToken);
+      localStorage.setItem("staffName", fullName || login);
       setToken(res.accessToken);
 
+      resetViewportZoom();
       onLoggedIn();
     } catch (e) {
       setErr(e.message || String(e));
@@ -129,7 +66,7 @@ export default function LoginForm({ onLoggedIn }) {
   return (
     <form onSubmit={submit} className={styles.form}>
       <label className={styles.fieldLabel}>
-        Login
+        Login ID
         <input
           value={login}
           onChange={(e) => setLoginState(e.target.value)}

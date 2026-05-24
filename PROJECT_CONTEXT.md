@@ -5,22 +5,19 @@
 
 ---
 
-## 1) Главные решения проекта (фиксируем)
+## 1) Главные решения проекта
 
 - Репозиторий: **monorepo** (backend + frontend)
 - **Единая сущность пользователя** (`com.shiftapp.users`) — и менеджеры, и персонал.
-  Роли различаются через `UserRole`: `STAFF`, `MANAGER`, `ADMIN`
-- Пакет `com.shiftapp.employees` — **удалён полностью**
-- JWT-аутентификация:
-  - Единый логин для всех: `/api/auth/login`
-  - Роль зашита в JWT claim `role`
-- Доступы:
-  - `/api/manager/**` → роль MANAGER
-  - `/api/staff/**` → роль STAFF или MANAGER
-- Frontend:
-  - Токен хранится в `localStorage.accessToken`
-  - Роль UI хранится в `localStorage.appRole` — читается из JWT payload (`atob`)
-  - Навигация менеджера: `localStorage.managerView` — значения: `SHIFTS`, `PREFS`, `EMPLOYEES`
+  Роли: `STAFF`, `MANAGER`, `ADMIN`
+- JWT-аутентификация: единый логин `/api/auth/login`, роль в claim `role`, имя в claim `fullName`
+- Доступы: `/api/manager/**` → MANAGER, `/api/staff/**` → STAFF или MANAGER
+- Frontend: токен в `localStorage.accessToken`, роль в `localStorage.appRole`, имя в `localStorage.staffName`
+- Навигация менеджера: `localStorage.managerView` — значения: `SHIFTS`, `PREFS`, `EMPLOYEES`, `SETTINGS`
+- Сохранение состояния: `staffSelectedMonth`, `staffSelectedWeek`, `managerSelectedMonth` в localStorage
+- Все эти ключи очищаются в `clearToken()` при логауте
+- **Автологаут**: 30 минут бездействия → автоматический выход (в `App.jsx`)
+- Название приложения: **HannoSHIFT** (ホテル・ヘリテイジ / 飯能 sta.)
 
 ---
 
@@ -34,216 +31,208 @@
 ## 3) Backend: ключевые модули и файлы
 
 ### 3.1 Auth / Security
-Папка: `backend/src/main/java/com/shiftapp/auth`
+`backend/src/main/java/com/shiftapp/auth`
 
-- **`AuthController.java`** — `POST /api/auth/login`, возвращает JWT
-- **`JwtService.java`** — создаёт/читает JWT (userId, restaurantId, role)
-- **`JwtAuthFilter.java`** — фильтр, кладёт пользователя в SecurityContext
-- **`dto/LoginRequest.java`** — `{ login, password }`
-- **`dto/LoginResponse.java`** — `{ accessToken }`
-- **`security/CustomUserDetails.java`** — обёртка над User для Spring Security
-- **`security/CustomUserDetailsService.java`** — загружает пользователя по username
+- **`JwtService.java`** — создаёт JWT с claims: `uid`, `rid`, `role`, `fullName`
+- **`AuthController.java`** — `POST /api/auth/login`
+  - Ошибки на японском: `ログインIDまたはパスワードが正しくありません`, `このアカウントは無効です`
+  - `LoginRequest.java` — `@NotBlank` с японскими сообщениями валидации
+- **`security/CustomUserDetails.java`** — методы: `getUserId()`, `getRestaurantId()`, `getRole()`, `getFullName()`
 
-### 3.2 Common / App config
-Папка: `backend/src/main/java/com/shiftapp/common`
+### 3.2 Common
+`backend/src/main/java/com/shiftapp/common`
 
-- **`SecurityConfig.java`** — правила доступа, CORS (localhost:5173)
-- **`CurrentUser.java`** — `require()` → `CustomUserDetails` (userId, restaurantId, role)
-- **`HealthController.java`** — `GET /api/health` → "OK"
-- **`SecurityBeans.java`** — BCrypt PasswordEncoder
-- **`SeedData.java`** — тестовые данные при старте (`@Profile("!prod")`):
-  - ресторан "Hanno Restaurant"
-  - менеджер `manager / manager123`
-  - сотрудник `anton / pass123`
+- **`GlobalExceptionHandler.java`** — `@RestControllerAdvice`, обрабатывает `RuntimeException` и `MethodArgumentNotValidException`, возвращает `{"message": "..."}` с HTTP 400/403
+- **`SecurityConfig.java`** — CORS разрешён для `localhost:5173`, `192.168.1.19:5173`, `hanno-shift.duckdns.org`
 
 ### 3.3 Users
-Папка: `backend/src/main/java/com/shiftapp/users`
+`backend/src/main/java/com/shiftapp/users`
 
-- **`User.java`** — таблица `users`: id, restaurant, login, passwordHash, role, fullName, active, createdAt
-- **`UserRepository.java`** — findByLogin, existsByLogin, findByIdAndRestaurant_Id, findAllByRestaurant_IdOrderByIdDesc, findByRestaurant_IdAndRoleOrderByFullNameAsc
-- **`UserRole.java`** — enum: `STAFF`, `MANAGER`, `ADMIN`
-- **`UserService.java`** — CRUD пользователей, BCrypt хэш
+- **`User.java`** — поля: id, restaurant, login, passwordHash, role, fullName, **position** (nullable), **departments** (ManyToMany → `user_departments`), active, createdAt
+- **`UserResponse.java`** — включает `position` и `departments: [{id, name}]`
+- **`UserCreateRequest.java`** — login, fullName, position, **departmentIds: List\<Long\>**, role, password
+- **`UserUpdateRequest.java`** — login, fullName, position, **departmentIds: List\<Long\>**, role, active, password
+- **`UserRepository.java`** — `findAllByRestaurant_IdOrderByIdDesc` с `LEFT JOIN FETCH u.departments`
 - **`ManagerUserController.java`** — `/api/manager/employees` (CRUD)
-- **`dto/UserCreateRequest.java`** — `{ login, fullName, role, password }`
-- **`dto/UserUpdateRequest.java`** — `{ login, fullName, role, active, password? }`
-- **`dto/UserResponse.java`** — без passwordHash, статический метод `from(User u)`
 
-### 3.4 Preferences
-Папка: `backend/src/main/java/com/shiftapp/preferences`
+### 3.4 Preferences и ShiftSlots
+`backend/src/main/java/com/shiftapp/preferences`
 
-- **`Preference.java`** — таблица `preferences`, колонка `employee_id` (`@JoinColumn(name="employee_id")`)
-- **`PreferenceRepository.java`** — findByUser_IdAndWorkDate, findByUser_IdAndWorkDateBetween, findByRestaurant_IdAndWorkDateBetween
-- **`PreferenceService.java`** — upsertForUser, получить за период
-- **`StaffPreferenceController.java`** — `/api/staff/...`
-- **`ManagerPreferenceController.java`** — `/api/manager/...`
-- **`dto/UpsertPreferenceRequest.java`** — date, startTime, endTime, comment
-- **`dto/PreferenceResponse.java`** — все поля + userId, userName
-- **`PreferenceStatus.java`** — enum: DRAFT, SUBMITTED
+- **`Preference.java`** — id, restaurant, user, workDate, **off** (`is_off`), slots (OneToMany), status, comment
+  - `startTime`, `endTime`, `is_last` удалены → переехали в `shift_slots`
+- **`ShiftSlot.java`** — id, preference, slotOrder, startTime, endTime, **last** (`is_last`), **workplace**
+  - До **5 слотов** на день
+- **`PreferenceRepository.java`** — методы с и без `WithSlots` (JOIN FETCH)
+- **`ShiftSlotRepository.java`** — пакет `com.shiftapp.preferences`
 
 ### 3.5 Weeks
-Папка: `backend/src/main/java/com/shiftapp/weeks`
+`backend/src/main/java/com/shiftapp/weeks`
 
-- **`WeekService.java`** — вся бизнес-логика недель:
-  - `staffWeeks(restaurantId, ym)` — список недель месяца
-  - `staffWeek(restaurantId, userId, weekStart)` — детали недели для сотрудника
-  - `staffSaveWeek(...)` — сохранить пожелания (только если статус RECEIVING)
-  - `staffCopyPrevWeek(...)` — скопировать с прошлой недели
-  - `managerWeeks(restaurantId, ym)` — список недель (= staffWeeks)
-  - `managerWeek(restaurantId, weekStart)` — неделя со всеми сотрудниками → `ManagerWeekResponse`
-  - `managerSaveStaffWeek(restaurantId, managerId, req)` — сохранить без проверки статуса
-  - `managerSetWeekStatus(restaurantId, managerId, weekStart, status)` — сменить статус
+- **`WeekService.java`**:
+  - `buildDayForStaff` — earliest start, latest end (или last=true)
+  - `buildDayForManager` — flat + slots
+  - `staffSaveWeek` — валидация времён, один слот
+  - `staffCopyPrevWeek` — если есть L: копирует только earliest startTime, endTime=null; если нет L: всё как есть
+  - `managerSaveStaffWeek` — массив слотов с workplace и isLast
 
-- **`WeekStatus.java`** — таблица статусов недель
-- **`WeekStatusRepository.java`** — findByRestaurant_IdAndWeekStart
-- **`WeekStatusType.java`** — enum: `RECEIVING`, `DRAFTING`, `CONFIRMED`
+- **`ManagerMonthController.java`** — оптимизирован: **3 SQL запроса** на весь месяц
+- **`WeekStatusRepository.java`** — `findByRestaurant_IdAndWeekStartBetween`
+- **`ManagerStaffWeekController.java`** — POST принимает `ManagerStaffWeekSaveRequest`
 
-- **Контроллеры:**
-  - `StaffWeekController.java` — `/api/staff/weeks`, `/api/staff/week`, `/api/staff/week/save`, `/api/staff/week/copy-prev`
-  - `ManagerWeekController.java` — `/api/manager/weeks`, `/api/manager/week`, `/api/manager/week/save`
-  - `ManagerWeekStatusController.java` — `POST /api/manager/week-status?weekStart=&status=`
-  - ~~`ManagerWeeksController.java`~~ — **удалён** (дублировал `/api/manager/weeks`)
-  - `ManagerStaffWeekController.java` — `/api/manager/staff-week`, `/api/manager/staff-week/save`
+### 3.6 Settings
+`backend/src/main/java/com/shiftapp/settings`
 
-- **DTO:**
-  - `WeekRowResponse` — weekStart, weekEnd, status
-  - `StaffWeekResponse` — status, List\<StaffWeekDay\>
-  - `StaffWeekDay` — date, off, startTime, endTime
-  - `StaffWeekSaveRequest` — weekStart, List\<DayInput\>
-  - `ManagerWeekResponse` — status, List\<ManagerStaffWeekRow\>
-  - `ManagerStaffWeekRow` — userId, userName, List\<StaffWeekDay\>
-  - `ManagerWeekSaveRequest` — weekStart, userId, List\<DayInput\>
-
-### 3.6 Shifts
-Папка: `backend/src/main/java/com/shiftapp/shifts`
-
-- **`Shift.java`** — таблица `shifts` (утверждённое расписание)
-- **`ShiftRepository.java`**, **`ShiftService.java`**
-- **`ManagerShiftController.java`** — bulk-сохранение, копирование недели
-- **`dto/BulkShiftRequest.java`**, **`dto/BulkShiftItem.java`**, **`dto/CopyWeekRequest.java`**
-- **`ShiftStatus.java`** — enum статуса смены
+- **`workplace/`** — `/api/manager/settings/workplaces`
+- **`position/`** — `/api/manager/settings/positions`
+- **`department/`** — `/api/manager/settings/departments`
 
 ### 3.7 Restaurants
-Папка: `backend/src/main/java/com/shiftapp/restaurants`
-
-- **`Restaurant.java`** — таблица `restaurants`: id, name
-- **`RestaurantRepository.java`**
+- **`Restaurant.java`** — id, name
 
 ---
 
-## 4) Frontend: ключевые файлы
+## 4) SQL миграции (выполнены вручную)
 
-Папка: `frontend/src`
+```sql
+ALTER TABLE users ADD COLUMN position VARCHAR(100);
 
-### 4.1 API client — `shared/api/api.js`
+CREATE TABLE shift_slots (
+    id BIGSERIAL PRIMARY KEY,
+    preference_id BIGINT NOT NULL REFERENCES preferences(id) ON DELETE CASCADE,
+    slot_order INT NOT NULL DEFAULT 0,
+    start_time TIME, end_time TIME,
+    is_last BOOLEAN NOT NULL DEFAULT FALSE,
+    workplace VARCHAR(100)
+);
+ALTER TABLE preferences ADD COLUMN IF NOT EXISTS is_off BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE preferences DROP COLUMN IF EXISTS start_time;
+ALTER TABLE preferences DROP COLUMN IF EXISTS end_time;
+ALTER TABLE preferences DROP COLUMN IF EXISTS is_last;
+CREATE INDEX idx_shift_slots_preference_id ON shift_slots(preference_id);
 
-Все методы объекта `api`:
+CREATE TABLE workplaces (id BIGSERIAL PRIMARY KEY, restaurant_id BIGINT NOT NULL REFERENCES restaurants(id), name VARCHAR(100) NOT NULL);
+CREATE TABLE positions  (id BIGSERIAL PRIMARY KEY, restaurant_id BIGINT NOT NULL REFERENCES restaurants(id), name VARCHAR(100) NOT NULL);
+CREATE TABLE departments(id BIGSERIAL PRIMARY KEY, restaurant_id BIGINT NOT NULL REFERENCES restaurants(id), name VARCHAR(100) NOT NULL);
+
+ALTER TABLE users DROP COLUMN IF EXISTS department;
+CREATE TABLE user_departments (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    department_id BIGINT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, department_id)
+);
+```
+
+---
+
+## 5) Frontend: ключевые файлы
+
+### 5.1 `shared/api/api.js`
 
 ```js
-// AUTH
 login(login, password)
-
-// MANAGER USERS
-managerUsers()
-
-// MANAGER SHIFTS
-managerShifts(from, to)
-bulkShifts(shifts)
-copyWeek(fromWeekStart, toWeekStart, overwrite)
-
-// MANAGER WEEKS
-managerWeeks(month)           // GET /api/manager/weeks?month=
-managerWeek(weekStart)        // GET /api/manager/week?weekStart=
-managerWeekSave(weekStart, userId, days)  // POST /api/manager/week/save
-setWeekStatus(weekStart, status)          // POST /api/manager/week-status?weekStart=&status=
-
-// MANAGER STAFF WEEK
+managerMonth(month)
 managerStaffWeek(userId, weekStart)
-managerStaffWeekSave(userId, weekStart, days)
-
-// MANAGER EMPLOYEES
-managerEmployeesList()
-managerEmployeesCreate(payload)
-managerEmployeesUpdate(id, payload)
-managerEmployeesDelete(id)
-
-// STAFF
-staffWeeks(month)             // GET /api/staff/weeks?month=
-staffWeek(weekStart)          // GET /api/staff/week?weekStart=
-staffWeekSave(weekStart, days)
-staffCopyPrev(weekStart)
+managerStaffWeekSave(userId, weekStart, days)  // days: [{date, off, slots:[{startTime,endTime,last,workplace}]}]
+managerEmployeesList/Create/Update/Delete
+setWeekStatus(weekStart, status)
+staffWeeks(month) / staffWeek(weekStart) / staffWeekSave(weekStart, days) / staffCopyPrev(weekStart)
+settingsWorkplacesList/Create/Update/Delete
+settingsPositionsList/Create/Update/Delete
+settingsDepartmentsList/Create/Update/Delete
 ```
 
-При 401 — `clearToken()` + `window.location.reload()`.
+**`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth
 
-### 4.2 App shell — `app/App.jsx`
+### 5.2 `app/App.jsx`
 
-Логика:
 - Нет токена → `LoginPage`
-- `appRole === "STAFF"` → `StaffMonthPage` (без sidebar)
-- `appRole === "MANAGER"` / `"ADMIN"` → менеджерский вид по `localStorage.managerView`:
-  - `"PREFS"` → `StaffMonthPage` с пропсом `managerNav` (личные смены менеджера, с sidebar)
-  - `"EMPLOYEES"` → `EmployeesPage`
-  - `"SHIFTS"` (default) → `ManagerTablePage`
+- `STAFF` → `StaffMonthPage`
+- `MANAGER/ADMIN` по `managerView`: `PREFS` / `EMPLOYEES` / `SETTINGS` / `SHIFTS` (default)
+- **Автологаут** — `useEffect` слушает события мыши/клавиатуры/касания, сбрасывает таймер 30 мин:
+```js
+const TIMEOUT = 30 * 60 * 1000;
+const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+```
 
-### 4.3 Layouts
+### 5.3 Layouts
 
-- **`app/layouts/ManagerLayout.jsx`** — sidebar слева:
-  - Вверху: лого ShiftApp
-  - Меню: ⚙️ Manager, 👥 Employees
-  - Внизу: кнопка с аватаром + именем + подписью "📅 希望シフト" (личные смены менеджера) → `PREFS`
-  - Logout
-  - Принимает пропсы: `name`, `view`, `onNavigate`, `onLogout`, `children`
+- **`ManagerLayout.jsx`** — sidebar: `SHIFTS` 📅, `EMPLOYEES` 👥, `SETTINGS` ⚙️
+- **`AppShell.module.css`** — стили sidebar + `.centeredContent`
+- Sidebar: `56px` → `220px` при hover, `position: fixed`, контент `margin-left: 56px`
 
-- **`app/layouts/StaffLayout.jsx`** — обёртка для обычного сотрудника
-- **`app/layouts/AppShell.module.css`** — все стили: `.managerShell`, `.sidebar`, `.sidebarItem`, `.sidebarItemActive`, `.sidebarItemPersonal`, `.sidebarPersonalInfo`, `.sidebarPersonalHint`, `.sidebarLogout` и т.д.
-- **`app/layouts/AppHeader.jsx`** — шапка (используется в StaffLayout)
+### 5.4 Pages
 
-### 4.4 Pages
+- **`ManagerTablePage.jsx`**:
+  - Sticky: **職種・役職** (`left:0`, 70px), **氏名** (`left:70px`, 140px)
+  - `rowSpan` по `maxSlots`, workplace под временем серым текстом
+  - Попап `CellPopover`: `position: fixed` + `getBoundingClientRect()`
+  - Месяц в `localStorage.managerSelectedMonth`
 
-- **`pages/auth/LoginPage.jsx`** — страница логина
-- **`pages/manager/ManagerTablePage.jsx`** — таблица смен, принимает `{ view, onNavigate, onLogout }`
-- **`pages/manager/ManagerWeekPage.jsx`** — 希望シフト менеджера (редактирование смен всех сотрудников), принимает `{ view, onNavigate, onLogout }`
-- **`pages/manager/EmployeesPage.jsx`** — CRUD аккаунтов, принимает `{ view, onNavigate, onLogout }`
-- **`pages/staff/StaffMonthPage.jsx`** — месячный вид, принимает `{ onLogout, managerNav? }`. Если `managerNav` передан — оборачивается в `ManagerLayout` (личные смены менеджера)
-- **`pages/staff/StaffWeekPage.jsx`** — редактирование пожеланий на неделю
+- **`EmployeesPage.jsx`**: position → `<select>`, 部署 → чекбоксы (ManyToMany)
+- **`SettingsPage.jsx`**: табы 勤務場所 / 職種・役職 / 部署
+- **`LoginPage.jsx`**: лого + HannoSHIFT в шапке
 
-### 4.5 Feature components
+### 5.5 Staff компоненты
 
-- **`features/auth/components/LoginForm.jsx`** — роль определяется из JWT (`atob`), переключатель удалён
-- **`features/managerShift/components/*`** — таблица смен менеджера
-- **`features/managerWeek/components/ManagerWeekEditor.jsx`** — редактор недели (выбор сотрудника, смена статуса, редактирование дней)
-- **`features/staffShift/components/StaffMonth.jsx`** — месячный список недель
-- **`features/staffShift/components/StaffWeek.jsx`** — редактор недели сотрудника
+- **`StaffMonth.jsx`**: месяц и неделя в localStorage, восстанавливаются после перезагрузки
+- **`StaffWeek.jsx`**:
+  - Видит earliest/latest (бэкенд), не может ставить L
+  - Подсказки: при `RECEIVING` — серый текст, при `CONFIRMED` — предупреждение
+  - `saving` и `copying` state — блокируют кнопки на время запроса
+  - Валидация до `setSaving(true)` — при ошибке кнопка не блокируется
+
+### 5.6 Mobile / UX
+
+- `globals.css`: `font-size: max(16px, 1em)` — предотвращает автозум iOS
+- `LoginForm.jsx`: `font-size: 16px`, сброс зума viewport после логина
+- `StaffMonth/Week.module.css`: убран `min-height`, `table-layout: fixed`
+- `main.jsx`: **StrictMode убран** — иначе двойной рендер = двойные запросы
 
 ---
 
-## 5) Запуск (dev)
+## 6) Статусы смен
 
-Backend:
 ```
-cd backend
-mvn spring-boot:run
+RECEIVING  受付中  #F0F0F0
+DRAFTING   作成中  #F6EAB3
+CONFIRMED  確定    #85A175
 ```
-- health: `GET http://localhost:8080/api/health`
-- `application.yml`: `ddl-auto: create-drop` (база пересоздаётся при каждом запуске)
-
-Frontend:
-```
-cd frontend
-npm install
-npm run dev
-```
-- `http://localhost:5173`
 
 ---
 
-## 6) Важные детали / ловушки
+## 7) Функция L и мульти-слоты
 
-- **`Preference.employee_id`** — колонка в БД `employee_id`, Java-поле `user`. `@JoinColumn(name = "employee_id")` явно указан. Не менять.
-- **`SeedData`** не запускается в prod (`@Profile("!prod")`).
-- **`CurrentUser.require()`** — используется во всех контроллерах. Возвращает `CustomUserDetails` → `getUserId()`, `getRestaurantId()`, `getRole()`.
-- **`ddl-auto: create-drop`** — в prod менять на `validate` + Flyway.
-- **`/api/manager/employees`** — URL намеренно оставлен (не `/users`), чтобы не менять фронт.
-- **`ManagerWeeksController.java` удалён** — дублировал `GET /api/manager/weeks` из `ManagerWeekController`.
-- **Менеджер редактирует свои смены** через стафф-эндпоинты (`/api/staff/...`) — доступ разрешён для MANAGER роли в `SecurityConfig`.
-- **`managerSaveStaffWeek`** — не проверяет статус недели (менеджер может редактировать всегда).
+- `last=true` = работает до конца, endTime=null
+- Сотрудник видит L но не может ставить
+- Копирование (`staffCopyPrevWeek`): если есть L → только earliest startTime, endTime=null; без L → всё как есть
+- Менеджер: до 5 слотов на день, каждый со своим workplace/временем
+
+---
+
+## 8) Деплой и запуск
+
+**Dev:**
+```bash
+cd backend && mvn spring-boot:run
+cd frontend && npm run dev           # localhost
+cd frontend && npm run dev -- --host  # + локальная сеть
+```
+`.env.local`: `VITE_API_BASE=http://192.168.1.19:8080` для тестов на телефоне
+
+**Production:** nginx → `/var/www/shift-app/`, Spring Boot jar
+- Мануал: `sudo cp manual.pdf /var/www/shift-app/manual.pdf` → `https://hanno-shift.duckdns.org/manual.pdf`
+
+---
+
+## 9) Ловушки
+
+- `ManagerWeekResponse.rows` — не `staff`
+- `ManagerStaffWeekController` и `ManagerWeekController./week/save` — оба используют `ManagerStaffWeekSaveRequest`
+- `ShiftSlotRepository` — в пакете `preferences`, не `weeks`
+- `Preference` — нет `startTime/endTime/isLast`, всё в `ShiftSlot`
+- `UserRepository` — `LEFT JOIN FETCH u.departments` обязателен (LazyInitializationException)
+- `ManagerMonthController` — 3 запроса на месяц, не N×3
+- `StrictMode` убран из `main.jsx`
+- Попап — `position: fixed` + `getBoundingClientRect()`
+- iOS автозум — `font-size: max(16px, 1em)`
+- Автологаут — 30 мин, в `App.jsx`, сбрасывается любым действием пользователя
