@@ -61,6 +61,40 @@ function safeJson(text) {
   }
 }
 
+async function fetchBlob(path, options = {}) {
+  const headers = { ...(options.body ? { "Content-Type": "application/json" } : {}) };
+  const t = getToken();
+  if (t) headers["Authorization"] = `Bearer ${t}`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: options.body || undefined,
+  });
+
+  if (res.status === 401) {
+    clearToken();
+    window.location.reload();
+    return;
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename\*=UTF-8''(.+)/);
+  const filename = match ? decodeURIComponent(match[1]) : "report.xlsx";
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export const api = {
   // ===== AUTH =====
   login: (login, password) =>
@@ -173,4 +207,21 @@ export const api = {
 
   settingsDepartmentsDelete: (id) =>
     request(`/api/manager/settings/departments/${id}`, { method: "DELETE" }),
+
+  // ===== REPORTS =====
+  reportShiftAll: (ym) =>
+    fetchBlob(`/api/manager/reports/shift/all?ym=${ym}`),
+
+  reportShiftDept: (ym, department) =>
+    fetchBlob(`/api/manager/reports/shift/dept?ym=${ym}&department=${encodeURIComponent(department)}`),
+
+  reportTimesheet: (ym) =>
+    fetchBlob(`/api/manager/reports/timesheet?ym=${ym}`),
+
+  reportShiftFiltered: (ym, userIds) =>
+    fetchBlob(`/api/manager/reports/shift/filtered?ym=${ym}`, {
+      method: "POST",
+      body: JSON.stringify(userIds),
+    }),
+
 };

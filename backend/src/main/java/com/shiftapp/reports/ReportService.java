@@ -63,6 +63,12 @@ public class ReportService {
         return callPython("/generate/timesheet", payload);
     }
 
+    @Transactional(readOnly = true)
+    public byte[] generateShiftFiltered(Long restaurantId, String ym, List<Long> userIds) {
+        Map<String, Object> payload = buildPayloadForUsers(restaurantId, ym, userIds);
+        return callPython("/generate/shift/all", payload);
+    }
+
     // ── Сборка данных ────────────────────────────────────────────────────
 
     private Map<String, Object> buildPayload(Long restaurantId, String ym, String department) {
@@ -114,6 +120,54 @@ public class ReportService {
         payload.put("ym",         ym);
         payload.put("hotelName",  hotelName);
         payload.put("department", department);
+        payload.put("staff",      staffData);
+        return payload;
+    }
+
+    private Map<String, Object> buildPayloadForUsers(Long restaurantId, String ym, List<Long> userIds) {
+        YearMonth yearMonth  = YearMonth.parse(ym);
+        LocalDate monthStart = yearMonth.atDay(1);
+        LocalDate monthEnd   = yearMonth.atEndOfMonth();
+    
+        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+                .stream()
+                .filter(u -> u.getRole() == UserRole.STAFF && u.isActive())
+                .filter(u -> userIds.contains(u.getId()))
+                .toList();
+    
+        List<Preference> allPrefs = preferenceRepository
+                .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, monthStart, monthEnd);
+    
+        Map<Long, Map<LocalDate, Preference>> byUser = new HashMap<>();
+        for (Preference p : allPrefs) {
+            byUser.computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
+                  .put(p.getWorkDate(), p);
+        }
+    
+        List<Map<String, Object>> staffData = new ArrayList<>();
+        for (User u : allStaff) {
+            Map<LocalDate, Preference> prefMap =
+                    byUser.getOrDefault(u.getId(), Collections.emptyMap());
+    
+            List<Map<String, Object>> days = new ArrayList<>();
+            for (LocalDate date = monthStart; !date.isAfter(monthEnd); date = date.plusDays(1)) {
+                days.add(buildDay(date, prefMap.get(date)));
+            }
+    
+            Map<String, Object> staffEntry = new LinkedHashMap<>();
+            staffEntry.put("userId",      u.getId());
+            staffEntry.put("userName",    u.getFullName());
+            staffEntry.put("position",    u.getPosition());
+            staffEntry.put("departments", u.getDepartments().stream()
+                    .map(Department::getName).toList());
+            staffEntry.put("days", days);
+            staffData.add(staffEntry);
+        }
+    
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("ym",         ym);
+        payload.put("hotelName",  hotelName);
+        payload.put("department", null);
         payload.put("staff",      staffData);
         return payload;
     }

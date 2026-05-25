@@ -84,6 +84,34 @@ function loadFilterSet(key) {
   } catch (_) { return null; }
 }
 
+function AlertModal({ message, onClose }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      background: "rgba(0,0,0,0.3)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 12, padding: "28px 32px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+        minWidth: 280, maxWidth: 360, textAlign: "center",
+      }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+        <div style={{ fontSize: 14, color: "#333", marginBottom: 24, lineHeight: 1.6 }}>
+          {message}
+        </div>
+        <button onClick={onClose} style={{
+          background: "#2F5496", color: "#fff", border: "none",
+          borderRadius: 8, padding: "8px 28px", fontSize: 14,
+          cursor: "pointer",
+        }}>
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── CellPopover ───────────────────────────────────────── */
 function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
   const isOff = day.off && (!day.slots || day.slots.length === 0);
@@ -450,6 +478,10 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [statusLoading, setStatusLoading] = useState({});
   const [savingCell, setSavingCell]       = useState(null);
   const [openCell, setOpenCell]           = useState(null);
+  const [reportMenuOpen, setReportMenuOpen] = useState(false);
+  const [reportLoading, setReportLoading]   = useState(false);
+  const [alertMsg, setAlertMsg] = useState(null);
+  const reportMenuRef = useRef();
   const cellAnchorRefs = useRef({});
 
   const [sortConfig, setSortConfig] = useState({ field:"name", dir:"asc" });
@@ -517,6 +549,17 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   useEffect(() => {
     try { localStorage.setItem("mgrColVisibility", JSON.stringify(colVisibility)); } catch (_) { /* ignore */ }
   }, [colVisibility]);
+
+  useEffect(() => {
+    if (!reportMenuOpen) return;
+    function onDown(e) {
+      if (reportMenuRef.current && !reportMenuRef.current.contains(e.target)) {
+        setReportMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [reportMenuOpen]);
 
   function applyWeeks(weeks) {
     setWeeksRaw(weeks);
@@ -756,6 +799,36 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     setVisibleWorkplaces(new Set([...workplaces.map(w => w.name), "__none__", "__off__"]));
   }
 
+  async function handleReport(type) {
+    setReportMenuOpen(false);
+    setReportLoading(true);
+    try {
+      if (type === "all") {
+        await api.reportShiftAll(ym);
+      } else if (type === "timesheet") {
+        await api.reportTimesheet(ym);
+      } else if (type === "filtered") {
+        const userIds = filteredStaff.map(s => s.userId);
+        await api.reportShiftFiltered(ym, userIds);
+      } else if (type === "dept") {
+        const selectedDepts = [...visibleDepartments];
+        if (selectedDepts.length === 0) {
+          setAlertMsg("部署を選択してください。");
+          return;
+        }
+        if (selectedDepts.length > 1) {
+          setAlertMsg("部署別シフト表は1つの部署のみ選択してください。");
+          return;
+        }
+        await api.reportShiftDept(ym, selectedDepts[0]);
+      }
+    } catch (e) {
+      setAlertMsg("レポートの生成に失敗しました: " + e.message);
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   function exportToExcel() {
     const [y, m] = ym.split("-").map(Number);
     const days = Array.from({ length: daysInMonth(ym) }, (_, i) => i + 1);
@@ -952,9 +1025,61 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             onChange={e => { localStorage.setItem("managerSelectedMonth",e.target.value); setYm(e.target.value); }}>
             {monthOptions.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
           </select>
-          <button type="button" className={styles.exportBtn} onClick={exportToExcel} disabled={loading || filteredStaff.length === 0}>
+
+          <button type="button" className={styles.exportBtn}
+            onClick={exportToExcel}
+            disabled={loading || filteredStaff.length === 0}>
             📥 Excel
           </button>
+
+          <div ref={reportMenuRef} style={{ position: "relative" }}>
+            <button type="button" className={styles.exportBtn}
+              onClick={() => setReportMenuOpen(v => !v)}
+              disabled={loading || reportLoading}>
+              {reportLoading ? "..." : "📊 レポート▼"}
+            </button>
+            {reportMenuOpen && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, zIndex: 1000,
+                background: "#fff", border: "1px solid #ccc", borderRadius: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: 200, marginTop: 4,
+              }}>
+                <button type="button" onClick={() => handleReport("all")}
+                  style={{ display:"block", width:"100%", padding:"10px 16px",
+                    textAlign:"left", border:"none", background:"none",
+                    cursor:"pointer", fontSize:13 }}
+                  onMouseEnter={e => e.target.style.background="#f5f5f5"}
+                  onMouseLeave={e => e.target.style.background="none"}>
+                  📋 全員シフト表
+                </button>
+                <button type="button" onClick={() => handleReport("dept")}
+                  style={{ display:"block", width:"100%", padding:"10px 16px",
+                    textAlign:"left", border:"none", background:"none",
+                    cursor:"pointer", fontSize:13 }}
+                  onMouseEnter={e => e.target.style.background="#f5f5f5"}
+                  onMouseLeave={e => e.target.style.background="none"}>
+                  🏢 部署別シフト表
+                </button>
+                <button type="button" onClick={() => handleReport("timesheet")}
+                  style={{ display:"block", width:"100%", padding:"10px 16px",
+                    textAlign:"left", border:"none", background:"none",
+                    cursor:"pointer", fontSize:13 }}
+                  onMouseEnter={e => e.target.style.background="#f5f5f5"}
+                  onMouseLeave={e => e.target.style.background="none"}>
+                  🕐 勤怠集計表
+                </button>
+                <button type="button" onClick={() => handleReport("filtered")}
+                  style={{ display:"block", width:"100%", padding:"10px 16px",
+                    textAlign:"left", border:"none", background:"none",
+                    cursor:"pointer", fontSize:13 }}
+                  onMouseEnter={e => e.target.style.background="#f5f5f5"}
+                  onMouseLeave={e => e.target.style.background="none"}>
+                  🔍 選択中スタッフのシフト表
+                </button>
+              </div>
+            )}
+          </div>
+
           <span className={styles.topHint}>📅 シフト管理</span>
         </div>
 
@@ -1136,6 +1261,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           </div>
         )}
       </div>
+      {alertMsg && <AlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </ManagerLayout>
   );
 }

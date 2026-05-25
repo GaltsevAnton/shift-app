@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -64,6 +65,22 @@ public class ReportController {
 
         byte[] data = reportService.generateTimesheet(user.getRestaurantId(), ym);
         String filename = "勤怠_" + ym + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * POST /api/manager/reports/shift/filtered
+     * Шифт-таблица по выбранным сотрудникам
+     */
+    @PostMapping("/shift/filtered")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> shiftFiltered(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam String ym,
+            @RequestBody List<Long> userIds) {
+
+        byte[] data = reportService.generateShiftFiltered(user.getRestaurantId(), ym, userIds);
+        String filename = "シフト_" + ym + "_選択.xlsx";
         return xlsxResponse(data, filename);
     }
 
