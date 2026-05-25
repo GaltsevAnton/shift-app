@@ -84,6 +84,57 @@ function loadFilterSet(key) {
   } catch (_) { return null; }
 }
 
+function ContextMenu({ x, y, userId, date, copiedPattern, selectedCount, onEdit, onCopy, onPaste, onClose }) {
+  const ref = useRef();
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (rect.right > vw) ref.current.style.left = `${x - rect.width}px`;
+    if (rect.bottom > vh) ref.current.style.top = `${y - rect.height}px`;
+  }, [x, y]);
+
+  const menuStyle = {
+    position: "fixed", top: y, left: x, zIndex: 3000,
+    background: "#fff", borderRadius: 8,
+    boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+    border: "1px solid #e0e0e0",
+    minWidth: 180, overflow: "hidden",
+  };
+  const itemStyle = {
+    display: "block", width: "100%", padding: "10px 16px",
+    textAlign: "left", border: "none", background: "none",
+    cursor: "pointer", fontSize: 13, color: "#333",
+  };
+
+  return (
+    <div ref={ref} style={menuStyle} onMouseDown={e => e.stopPropagation()}>
+      <button style={itemStyle}
+        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+        onMouseLeave={e => e.target.style.background = "none"}
+        onClick={() => { onEdit(); onClose(); }}>
+        ✏️ 編集
+      </button>
+      <div style={{ height: 1, background: "#eee", margin: "2px 0" }} />
+      <button style={itemStyle}
+        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+        onMouseLeave={e => e.target.style.background = "none"}
+        onClick={() => { onCopy(); onClose(); }}>
+        📋 このパターンをコピー
+      </button>
+      {copiedPattern && (
+        <button style={itemStyle}
+          onMouseEnter={e => e.target.style.background = "#EBF3FF"}
+          onMouseLeave={e => e.target.style.background = "none"}
+          onClick={() => { onPaste(); onClose(); }}>
+          📅 {selectedCount > 1 ? `${selectedCount}日に適用` : "コピーを適用"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function BulkPopover({ onClose, onSave, workplaces }) {
   const [off, setOff] = useState(false);
   const [slots, setSlots] = useState([emptySlot()]);
@@ -591,6 +642,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [selectedCells, setSelectedCells] = useState([]); // [{userId, date}]
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null); // {x, y, userId, date}
+  const [copiedPattern, setCopiedPattern] = useState(null); // {off, slots}
   const reportMenuRef = useRef();
   const cellAnchorRefs = useRef({});
 
@@ -670,6 +723,15 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [reportMenuOpen]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function onDown(e) {
+      setContextMenu(null);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [contextMenu]);
 
   function applyWeeks(weeks) {
     setWeeksRaw(weeks);
@@ -925,6 +987,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       setSelectedCells([]);
       setOpenCell(isOpen ? null : { userId, date });
     }
+  }
+
+  function handleContextMenu(e, userId, date) {
+    e.preventDefault();
+    setOpenCell(null);
+    // setSelectedCells([]);
+    setContextMenu({ x: e.clientX, y: e.clientY, userId, date });
   }
 
   async function saveBulkCells(patch) {
@@ -1388,7 +1457,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                 style={{padding:0,verticalAlign:"top",position:"relative"}}>
                                 <div className={styles.cellAnchor}
                                   ref={el=>{anchorRef.current=el;}}
-                                  onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}>
+                                  onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
+                                  onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
                                   ) : day.off || slots.length === 0 ? (
@@ -1468,6 +1538,30 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             ✕ 選択解除
           </button>
         </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          userId={contextMenu.userId}
+          date={contextMenu.date}
+          selectedCount={selectedCells.length}
+          copiedPattern={copiedPattern}
+          onEdit={() => setOpenCell({ userId: contextMenu.userId, date: contextMenu.date })}
+          onCopy={() => {
+            const day = getDayData(contextMenu.userId, contextMenu.date);
+            setCopiedPattern({ off: day.off, slots: day.slots || [] });
+          }}
+          onPaste={() => {
+            if (selectedCells.length > 0) {
+              saveBulkCells(copiedPattern);
+            } else {
+              saveCell(contextMenu.userId, contextMenu.date, copiedPattern);
+            }
+          }}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       {bulkOpen && (
