@@ -84,6 +84,113 @@ function loadFilterSet(key) {
   } catch (_) { return null; }
 }
 
+function BulkPopover({ onClose, onSave, workplaces }) {
+  const [off, setOff] = useState(false);
+  const [slots, setSlots] = useState([emptySlot()]);
+
+  function updateSlot(i, field, value) {
+    setSlots(prev => {
+      const next = [...prev];
+      next[i] = { ...next[i], [field]: value };
+      if (field === "last" && value) next[i].endTime = "";
+      return next;
+    });
+  }
+  function addSlot() {
+    if (slots.length >= MAX_SLOTS) return;
+    setSlots(prev => [...prev, emptySlot()]);
+  }
+  function removeSlot(i) {
+    if (slots.length <= 1) return;
+    setSlots(prev => prev.filter((_, idx) => idx !== i));
+  }
+  function handleSave() {
+    if (off) { onSave({ off: true, slots: [] }); return; }
+    const validSlots = slots
+      .filter(s => s.startTime)
+      .map(s => ({
+        startTime: s.startTime,
+        endTime: s.last ? null : (s.endTime || null),
+        last: s.last,
+        workplace: s.workplace || null,
+      }));
+    onSave(validSlots.length === 0
+      ? { off: true, slots: [] }
+      : { off: false, slots: validSlots });
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      background: "rgba(0,0,0,0.15)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className={styles.popover} style={{ position: "relative", top: "auto", left: "auto" }}>
+        <label className={styles.popRow}>
+          <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck} />
+          <span className={styles.popRowLabel}>休日</span>
+        </label>
+        {!off && (
+          <>
+            {slots.map((slot, i) => (
+              <div key={i} className={styles.slotBlock}>
+                <div className={styles.slotHeader}>
+                  <span className={styles.slotNum}>#{i + 1}</span>
+                  {slots.length > 1 && (
+                    <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
+                  )}
+                </div>
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>場所</span>
+                  <select className={styles.popSelect} value={slot.workplace} onChange={e => updateSlot(i, "workplace", e.target.value)}>
+                    <option value="">— 未選択 —</option>
+                    {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
+                  </select>
+                </div>
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>開始</span>
+                  <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i, "startTime", e.target.value)}>
+                    <option value="">--</option>
+                    {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>終了</span>
+                  {slot.last ? (
+                    <span className={styles.popLastBadge}>L</span>
+                  ) : (
+                    <select className={styles.popSelect} value={slot.endTime} onChange={e => updateSlot(i, "endTime", e.target.value)}>
+                      <option value="">--</option>
+                      {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  )}
+                </div>
+                <label className={styles.popRow}>
+                  <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i, "last", e.target.checked)} className={styles.popCheck} />
+                  <span className={styles.popRowLabel}>
+                    <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
+                  </span>
+                </label>
+              </div>
+            ))}
+            {slots.length < MAX_SLOTS && (
+              <button type="button" className={styles.slotAddBtn} onClick={addSlot}>
+                ＋ 勤務場所を追加
+              </button>
+            )}
+          </>
+        )}
+        <div className={styles.popActions}>
+          <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
+          <button className={styles.popSave} onClick={handleSave}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AlertModal({ message, onClose }) {
   return (
     <div style={{
@@ -481,6 +588,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [reportMenuOpen, setReportMenuOpen] = useState(false);
   const [reportLoading, setReportLoading]   = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
+  const [selectedCells, setSelectedCells] = useState([]); // [{userId, date}]
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const reportMenuRef = useRef();
   const cellAnchorRefs = useRef({});
 
@@ -797,6 +907,66 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     setVisiblePositions(new Set(positionOptions));
     setVisibleDepartments(new Set(departments.map(d => d.name)));
     setVisibleWorkplaces(new Set([...workplaces.map(w => w.name), "__none__", "__off__"]));
+  }
+
+  function handleCellClick(e, userId, date, isOpen, isSaving) {
+    if (isSaving) return;
+    if (e.shiftKey) {
+      e.preventDefault();
+      setOpenCell(null);
+      setSelectedCells(prev => {
+        // если уже выбраны ячейки другого сотрудника — сбрасываем
+        if (prev.length > 0 && prev[0].userId !== userId) return [{ userId, date }];
+        const exists = prev.find(c => c.date === date);
+        if (exists) return prev.filter(c => c.date !== date);
+        return [...prev, { userId, date }];
+      });
+    } else {
+      setSelectedCells([]);
+      setOpenCell(isOpen ? null : { userId, date });
+    }
+  }
+
+  async function saveBulkCells(patch) {
+    setBulkSaving(true);
+    try {
+      // Группируем по неделям
+      const byWeek = new Map();
+      for (const { userId, date } of selectedCells) {
+        const week = findWeekForDate(weeksRaw, date);
+        if (!week) continue;
+        const key = `${userId}_${week.weekStart}`;
+        if (!byWeek.has(key)) byWeek.set(key, { userId, weekStart: week.weekStart, dates: [] });
+        byWeek.get(key).dates.push(date);
+      }
+      for (const { userId, weekStart, dates } of byWeek.values()) {
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(weekStart);
+          d.setDate(d.getDate() + i);
+          const ds = d.toISOString().slice(0, 10);
+          if (dates.includes(ds)) {
+            days.push({ date: ds, off: patch.off, slots: patch.slots });
+          } else {
+            const existing = data[weekStart]?.staffById?.[userId]?.dayMap?.[ds]
+              || { date: ds, off: true, slots: [] };
+            days.push({
+              date: ds, off: existing.off,
+              slots: (existing.slots || []).map(s => ({
+                startTime: s.startTime, endTime: s.endTime, last: s.last, workplace: s.workplace,
+              })),
+            });
+          }
+        }
+        await api.managerStaffWeekSave(userId, weekStart, days);
+      }
+      await load(ym, true);
+      setSelectedCells([]);
+    } catch (e) {
+      setAlertMsg("保存に失敗しました: " + e.message);
+    } finally {
+      setBulkSaving(false);
+    }
   }
 
   async function handleReport(type) {
@@ -1180,7 +1350,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                             </td>
                             <td className={styles.tdDepartment} rowSpan={maxSlots}
                               style={{ ...(!colVisibility.department ? {display:"none"} : {}), ...(!colVisibility.position ? {left:0} : {}) }}>
-                              {(staffDepts[staff.userId]||[]).join("、")}
+                              {(staffDepts[staff.userId]||[]).map((d, i) => (
+                                <div key={i}>{d}</div>
+                              ))}
                             </td>
                             <td className={styles.tdName} rowSpan={maxSlots}
                               style={{ left: !colVisibility.position && !colVisibility.department ? 0 : !colVisibility.position ? 90 : !colVisibility.department ? 70 : 160 }}>
@@ -1195,26 +1367,28 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           const isWeekStart = weeksRaw.some(w=>monthDaysInWeek(ym,w.weekStart)[0]===d);
                           const wd    = getDayOfWeek(ym,d);
                           const isWknd = wd===0||wd===6;
+                          const isSelected = selectedCells.some(c => c.userId === staff.userId && c.date === date);
+                          const isSaving   = savingCell === `${staff.userId}_${date}`;
+                          const isOpen     = openCell?.userId === staff.userId && openCell?.date === date;
                           const cellCls = [
                             styles.cell,
-                            isWknd?styles.cellWknd:"",
-                            openCell?.userId===staff.userId&&openCell?.date===date?styles.cellOpen:"",
-                            isWeekStart?styles.cellWeekStart:"",
+                            isWknd ? styles.cellWknd : "",
+                            isOpen ? styles.cellOpen : "",
+                            isWeekStart ? styles.cellWeekStart : "",
+                            isSelected ? styles.cellSelected : "",
                           ].join(" ");
 
                           if (subIdx===0) {
                             const key = `${staff.userId}_${date}`;
                             if (!cellAnchorRefs.current[key]) cellAnchorRefs.current[key]={current:null};
                             const anchorRef = cellAnchorRefs.current[key];
-                            const isSaving  = savingCell===key;
-                            const isOpen    = openCell?.userId===staff.userId&&openCell?.date===date;
 
                             return (
                               <td key={d} className={cellCls} rowSpan={maxSlots}
                                 style={{padding:0,verticalAlign:"top",position:"relative"}}>
                                 <div className={styles.cellAnchor}
                                   ref={el=>{anchorRef.current=el;}}
-                                  onClick={()=>!isSaving&&setOpenCell(isOpen?null:{userId:staff.userId,date})}>
+                                  onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}>
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
                                   ) : day.off || slots.length === 0 ? (
@@ -1261,6 +1435,49 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           </div>
         )}
       </div>
+
+      {selectedCells.length > 0 && (
+        <div style={{
+          position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+          background: "#1F4E79", color: "#fff", borderRadius: 12,
+          padding: "12px 24px", display: "flex", alignItems: "center", gap: 16,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.3)", zIndex: 1500,
+        }}>
+          <span style={{ fontSize: 14 }}>
+            📅 {selectedCells.length}日選択中
+          </span>
+          <button
+            onClick={() => {
+              // открываем попап с пустыми данными
+              setBulkOpen(true);
+            }}
+            disabled={bulkSaving}
+            style={{
+              background: "#fff", color: "#1F4E79", border: "none",
+              borderRadius: 8, padding: "6px 16px", fontSize: 13,
+              cursor: "pointer", fontWeight: "bold",
+            }}>
+            ✏️ 一括編集
+          </button>
+          <button
+            onClick={() => setSelectedCells([])}
+            style={{
+              background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.5)",
+              borderRadius: 8, padding: "6px 16px", fontSize: 13, cursor: "pointer",
+            }}>
+            ✕ 選択解除
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkPopover
+          workplaces={workplaces}
+          onClose={() => setBulkOpen(false)}
+          onSave={patch => { setBulkOpen(false); saveBulkCells(patch); }}
+        />
+      )}
+
       {alertMsg && <AlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </ManagerLayout>
   );

@@ -9,10 +9,9 @@
   Строка 5: 役職 | 氏名 | 日  | 1 | 2 | ... | 31
   Строка 6:       |      | 曜日| 金| 土 | ... | 日
   На каждого сотрудника 4 строки:
-    R+0: 役職(merge R..R+3) | 氏名(merge) | 出勤 | start1\nstart2...
+    R+0: 役職(merge R..R+2) | 氏名(merge) | 出勤 | start1\nstart2...
     R+1:                    |             | 退勤 | end1\nend2...
-    R+2:                    |             | 職場 | [пусто — подпись]
-    R+3:                    |             | [merge C9:C10 в оригинале — пусто] | wp1\nwp2...
+    R+2:                    |             | 職場 | 
 """
 
 import io
@@ -205,32 +204,32 @@ def build(req: ReportRequest) -> bytes:
     # ── Данные сотрудников ────────────────────────────────────────────────
     base_row = 7
     for staff_idx, s in enumerate(staff):
-        r = base_row + staff_idx * 4
+        r = base_row + staff_idx * 3
         # row_bg = C_ROW_ODD if staff_idx % 2 == 0 else C_ROW_EVEN
         row_bg = C_ROW_ODD
 
-        # Merge A(r..r+3) — 役職
-        ws.merge_cells(f"A{r}:A{r+3}")
+        # Merge A(r..2) — 役職
+        ws.merge_cells(f"A{r}:A{r+2}")
         c = ws[f"A{r}"]
         c.value     = s.position or ""
         c.font      = _font(size=8, color="555555")
         c.fill      = _fill(row_bg)
         c.alignment = _align(h="center")
         c.border    = _thin()
-        _apply_outer_border(ws, r, r+3, 1, 1)
+        _apply_outer_border(ws, r, r+2, 1, 1)
 
-        # Merge B(r..r+3) — 氏名
-        ws.merge_cells(f"B{r}:B{r+3}")
+        # Merge B(r..r+2) — 氏名
+        ws.merge_cells(f"B{r}:B{r+2}")
         c = ws[f"B{r}"]
         c.value     = s.userName
         c.font      = _font(size=9)     #bold=True, 
         c.fill      = _fill(row_bg)
         c.alignment = _align(h="center")
         c.border    = _thin()
-        _apply_outer_border(ws, r, r+3, 2, 2)
+        _apply_outer_border(ws, r, r+2, 2, 2)
 
         # C labels: 出勤 / 退勤 / 職場 / (пусто)
-        labels = ["出勤", "退勤", "職場", ""]
+        labels = ["出勤", "退勤", "職場"]
         for sub, label in enumerate(labels):
             c = ws.cell(row=r + sub, column=3)
             c.value     = label
@@ -253,14 +252,14 @@ def build(req: ReportRequest) -> bytes:
 
             if d.off or not d.slots:
                 # Merge всех 4 строк для 休
-                ws.merge_cells(f"{get_column_letter(col)}{r}:{get_column_letter(col)}{r+3}")
+                ws.merge_cells(f"{get_column_letter(col)}{r}:{get_column_letter(col)}{r+2}")
                 c = ws.cell(row=r, column=col)
                 c.value     = "休"
                 c.font      = _font(color=C_OFF_FG, bold=True, size=10)
                 c.fill      = _fill(C_OFF_BG)
                 c.alignment = _align()
                 c.border    = _thin()
-                _apply_outer_border(ws, r, r+3, col, col)
+                _apply_outer_border(ws, r, r+2, col, col)
             else:
                 slots = d.slots
                 # Строка 出勤 (r+0): начало через \n
@@ -272,13 +271,12 @@ def build(req: ReportRequest) -> bytes:
                     ("L" if sl.last else _format_time(sl.endTime)) for sl in slots
                 )
                 # Строка 職場 label (r+2): уже поставлен
-                # Строка r+3: workplace через \n
+                # Строка r+2: workplace через \n
                 workplaces = "\n".join(sl.workplace or "" for sl in slots)
 
                 for sub, (val, is_label_row) in enumerate([
                     (starts,     False),
                     (ends,       False),
-                    ("",         True),   # строка 職場 — label уже в C
                     (workplaces, False),
                 ]):
                     c = ws.cell(row=r + sub, column=col)
@@ -299,11 +297,11 @@ def build(req: ReportRequest) -> bytes:
         is_first = staff_idx == 0
         is_last  = staff_idx == len(staff) - 1
 
-        for sub_row in range(r, r + 4):
+        for sub_row in range(r, r + 3):
             for col_idx in range(1, 4 + total):
                 c = ws.cell(row=sub_row, column=col_idx)
                 top    = thick if (sub_row == r and is_first) else no
-                bottom = thick if sub_row == r + 3 else no
+                bottom = thick if sub_row == r + 2 else no
                 left   = thick if col_idx == 1 else no
                 right  = thick if col_idx == 3 + total else no
                 if any([top != no, bottom != no, left != no, right != no]):
@@ -315,7 +313,7 @@ def build(req: ReportRequest) -> bytes:
                         right  = right  if right  != no else existing.right,
                     )          
     # ── Внешняя рамка всей таблицы ───────────────────────────────────────
-    last_data_row = base_row + len(staff) * 4 - 1
+    last_data_row = base_row + len(staff) * 3 - 1
     last_data_col = 3 + total
 
     thick = Side(style="medium", color="000000")

@@ -724,3 +724,13 @@ tr[data-staff]:first-of-type td { border-top: 2px solid #e2e8f0; }
   transition: background 0.12s;
 }
 .filterResultClear:hover { background: #dbeafe; }
+
+.cellSelected {
+  outline: 2px solid #2F5496;
+  outline-offset: -2px;
+  background: #EBF3FF !important;
+}
+
+.table {
+  user-select: none;
+}
