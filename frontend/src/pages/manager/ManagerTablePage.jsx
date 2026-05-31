@@ -45,7 +45,7 @@ function getName() {
   try {
     const t = localStorage.getItem("accessToken");
     return t ? JSON.parse(atob(t.split(".")[1])).fullName||"" : "";
-  } catch (_) { return ""; }
+  } catch { return ""; }
 }
 function findWeekForDate(weeks, date) {
   return weeks.find(w => {
@@ -75,16 +75,16 @@ function emptySlot() {
 
 /* ─── localStorage helpers ──────────────────────────────── */
 function saveFilterSet(key, set) {
-  try { localStorage.setItem(key, JSON.stringify([...set])); } catch (_) { /* ignore */ }
+  try { localStorage.setItem(key, JSON.stringify([...set])); } catch { /* ignore */ }
 }
 function loadFilterSet(key) {
   try {
     const raw = localStorage.getItem(key);
     return raw ? new Set(JSON.parse(raw)) : null;
-  } catch (_) { return null; }
+  } catch { return null; }
 }
 
-function ContextMenu({ x, y, userId, date, copiedPattern, selectedCount, onEdit, onCopy, onPaste, onClose }) {
+function ContextMenu({ x, y, copiedPattern, selectedCount, onEdit, onCopy, onPaste, onClose }) {
   const ref = useRef();
 
   useEffect(() => {
@@ -652,7 +652,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     try {
       const raw = localStorage.getItem("mgrColVisibility");
       return raw ? JSON.parse(raw) : { position: true, department: true };
-    } catch (_) { return { position: true, department: true }; }
+    } catch { return { position: true, department: true }; }
   });
   const [visibleWorkplaces, setVisibleWorkplaces]   = useState(() => loadFilterSet("mgrFilterWp")   || new Set());
   const [visiblePositions, setVisiblePositions]     = useState(() => loadFilterSet("mgrFilterPos")  || new Set());
@@ -693,7 +693,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       setVisiblePositions (savedPos  && savedPos.size  > 0 ? savedPos  : allPosSet);
       setVisibleDepartments(savedDept && savedDept.size > 0 ? savedDept : allDeptSet);
       applyWeeks(weeks);
-    } catch (_) {
+    } catch {
       if (!silent) { setWeeksRaw([]); setData({}); setAllStaff([]); }
     } finally {
       if (!silent) setLoading(false);
@@ -710,7 +710,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   useEffect(() => { saveFilterSet("mgrFilterDept", visibleDepartments); }, [visibleDepartments]);
   useEffect(() => { saveFilterSet("mgrFilterWp",   visibleWorkplaces);  }, [visibleWorkplaces]);
   useEffect(() => {
-    try { localStorage.setItem("mgrColVisibility", JSON.stringify(colVisibility)); } catch (_) { /* ignore */ }
+    try { localStorage.setItem("mgrColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
   }, [colVisibility]);
 
   useEffect(() => {
@@ -726,7 +726,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
 
   useEffect(() => {
     if (!contextMenu) return;
-    function onDown(e) {
+    function onDown() {
       setContextMenu(null);
     }
     document.addEventListener("mousedown", onDown);
@@ -767,6 +767,12 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     return max;
   }
 
+  function countOffDays(userId) {
+    return dayNums.filter(d => {
+      const day = getDayData(userId, dateStr(ym, d));
+      return day.off || !day.slots || day.slots.length === 0;
+    }).length;
+  }
   /* ── каскадный фильтр ── */
 
   // Все уникальные 職種 в системе (для дропдауна верхнего уровня)
@@ -863,7 +869,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     try {
       await api.setWeekStatus(weekStart, newStatus);
       setData(p => ({...p,[weekStart]:{...p[weekStart],status:newStatus}}));
-    } catch (_) { alert("ステータスの変更に失敗しました"); }
+    } catch { alert("ステータスの変更に失敗しました"); }
     finally { setStatusLoading(p => ({...p,[weekStart]:false})); }
   }
 
@@ -1354,6 +1360,10 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                       </th>
                     );
                   })}
+                  <th className={styles.thDay} style={{ minWidth: 44 }}>
+                    <span className={styles.thNum}>公休</span>
+                    <span className={styles.thWd}>数</span>
+                  </th>
                 </tr>
                 <tr>
                   <th className={styles.thNameSub} style={!colVisibility.position ? {display:"none"} : {}}></th>
@@ -1396,6 +1406,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                       </th>
                     );
                   })}
+                  <th className={styles.thNameSub}></th>
                 </tr>
               </thead>
 
@@ -1496,6 +1507,12 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           }
                           return null;
                         })}
+                        {subIdx === 0 && (
+                          <td rowSpan={maxSlots} className={styles.cell}
+                            style={{ textAlign: "center", verticalAlign: "middle", fontWeight: "bold", fontSize: 13 }}>
+                            {countOffDays(staff.userId)}
+                          </td>
+                        )}
                       </tr>
                     ));
                   })

@@ -123,6 +123,7 @@ def build(req: ReportRequest) -> bytes:
     for i, _ in enumerate(days):
         col = get_column_letter(4 + i)
         ws.column_dimensions[col].width = 6
+    ws.column_dimensions[get_column_letter(4 + total)].width = 5
 
     # ── Строка 1: пусто ───────────────────────────────────────────────────
     ws.row_dimensions[1].height = 6
@@ -160,8 +161,7 @@ def build(req: ReportRequest) -> bytes:
     for cell_addr, label in [("A5", "役職"), ("B5", "氏名")]:
         c = ws[cell_addr]
         c.value     = label
-        c.font      = _font(size=9) # bold=True, color=C_HEADER_FG,
-        # c.fill      = _fill(C_HEADER_BG)
+        c.font      = _font(size=9)
         c.alignment = _align()
         c.border    = _thin()
 
@@ -169,8 +169,7 @@ def build(req: ReportRequest) -> bytes:
     for r, label in [(5, "日"), (6, "曜日")]:
         c = ws.cell(row=r, column=3)
         c.value     = label
-        c.font      = _font(size=7) #bold=True, color=C_HEADER_FG, 
-        # c.fill      = _fill(C_HEADER_BG)
+        c.font      = _font(size=7) 
         c.alignment = _align()
         c.border    = _thin()
 
@@ -188,24 +187,30 @@ def build(req: ReportRequest) -> bytes:
         # Строка 5: число
         c = ws.cell(row=5, column=col)
         c.value     = day
-        c.font      = _font(size=8)     #bold=True, color=C_HEADER_FG if not (is_sat or is_sun) else "000000", 
-        # c.fill      = _fill(bg)
+        c.font      = _font(size=8)
         c.alignment = _align()
         c.border    = _thin()
 
         # Строка 6: день недели
         c = ws.cell(row=6, column=col)
         c.value     = WD_JA[wd]
-        c.font      = _font(size=8)     #bold=True, color=C_OFF_FG if is_sun else ("1F4E79" if is_sat else "000000"), 
-        # c.fill      = _fill(bg)
+        c.font      = _font(size=8)
         c.alignment = _align()
         c.border    = _thin()
+
+    # ── Заголовок 公休数 ──
+    ws.merge_cells(f"{get_column_letter(4 + total)}5:{get_column_letter(4 + total)}6")
+    c = ws.cell(row=5, column=4 + total)
+    c.value     = "公休\n数"
+    c.font      = _font(size=7)
+    c.alignment = _align()
+    c.border    = _thin()
+    _apply_outer_border(ws, 5, 6, 4 + total, 4 + total)
 
     # ── Данные сотрудников ────────────────────────────────────────────────
     base_row = 7
     for staff_idx, s in enumerate(staff):
         r = base_row + staff_idx * 3
-        # row_bg = C_ROW_ODD if staff_idx % 2 == 0 else C_ROW_EVEN
         row_bg = C_ROW_ODD
 
         # Merge A(r..2) — 役職
@@ -222,7 +227,7 @@ def build(req: ReportRequest) -> bytes:
         ws.merge_cells(f"B{r}:B{r+2}")
         c = ws[f"B{r}"]
         c.value     = s.userName
-        c.font      = _font(size=9)     #bold=True, 
+        c.font      = _font(size=9)
         c.fill      = _fill(row_bg)
         c.alignment = _align(h="center")
         c.border    = _thin()
@@ -233,7 +238,7 @@ def build(req: ReportRequest) -> bytes:
         for sub, label in enumerate(labels):
             c = ws.cell(row=r + sub, column=3)
             c.value     = label
-            c.font      = _font(size=7, color="333333")     #bold=bool(label),
+            c.font      = _font(size=7, color="333333")
             c.fill      = _fill(C_LABEL_BG)
             c.alignment = _align()
             c.border    = _thin()
@@ -245,7 +250,6 @@ def build(req: ReportRequest) -> bytes:
             wd  = _weekday(ym, day)
             is_sat = wd == 6
             is_sun = wd == 0
-            # day_bg = C_SAT_BG if is_sat else (C_SUN_BG if is_sun else row_bg)
             day_bg = row_bg
 
             d = _day_data(s, day, ym)
@@ -291,6 +295,20 @@ def build(req: ReportRequest) -> bytes:
                     else:
                         c.font = _font(size=8)
 
+        # ── Ячейка 公休数 ──
+        off_count = sum(
+            1 for day_num in days
+            if not _day_data(s, day_num, ym).slots or _day_data(s, day_num, ym).off
+        )
+        off_col = 4 + total
+        ws.merge_cells(f"{get_column_letter(off_col)}{r}:{get_column_letter(off_col)}{r+2}")
+        c = ws.cell(row=r, column=off_col)
+        c.value     = off_count
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+        _apply_outer_border(ws, r, r+2, off_col, off_col)
+
         # ── Внешняя рамка строки сотрудника ──────────────────────────────────
         thick = Side(style="medium", color="000000")
         no    = Side(style=None)
@@ -314,7 +332,7 @@ def build(req: ReportRequest) -> bytes:
                     )          
     # ── Внешняя рамка всей таблицы ───────────────────────────────────────
     last_data_row = base_row + len(staff) * 3 - 1
-    last_data_col = 3 + total
+    last_data_col = 4 + total
 
     thick = Side(style="medium", color="000000")
     no    = Side(style=None)

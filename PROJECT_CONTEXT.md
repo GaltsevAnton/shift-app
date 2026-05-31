@@ -7,7 +7,7 @@
 
 ## 1) Главные решения проекта
 
-- Репозиторий: **monorepo** (backend + frontend)
+- Репозиторий: **monorepo** (backend + frontend + report-service)
 - **Единая сущность пользователя** (`com.shiftapp.users`) — и менеджеры, и персонал.
   Роли: `STAFF`, `MANAGER`, `ADMIN`
 - JWT-аутентификация: единый логин `/api/auth/login`, роль в claim `role`, имя в claim `fullName`
@@ -25,6 +25,7 @@
 
 - `backend/` — Spring Boot (Java, Maven)
 - `frontend/` — React (Vite)
+- `report-service/` — Python FastAPI (Excel-отчёты)
 
 ---
 
@@ -86,7 +87,20 @@
 - **`position/`** — `/api/manager/settings/positions`
 - **`department/`** — `/api/manager/settings/departments`
 
-### 3.7 Restaurants
+### 3.7 Reports
+`backend/src/main/java/com/shiftapp/reports`
+
+- **`ReportController.java`** — прокси к Python-сервису, эндпоинты:
+  - `GET /api/manager/reports/shift/all?ym=` — сводный шифт всех сотрудников
+  - `GET /api/manager/reports/shift/dept?ym=&department=` — шифт по отделу
+  - `GET /api/manager/reports/timesheet?ym=` — табель учёта рабочего времени
+  - `POST /api/manager/reports/shift/filtered?ym=` — шифт по выбранным userId (body: `List<Long>`)
+- **`ReportService.java`** — собирает данные из БД, вызывает FastAPI через `RestTemplate`
+  - Важно: `objectMapper.writeValueAsBytes(payload)` — UTF-8 без системной кодировки Windows
+  - `report.service.url` из `application.yml` (default: `http://localhost:8001`)
+  - hotelName захардкожен как `static final` (не из yml — проблема кодировки Windows)
+
+### 3.8 Restaurants
 - **`Restaurant.java`** — id, name
 
 ---
@@ -120,87 +134,125 @@ CREATE TABLE user_departments (
     department_id BIGINT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, department_id)
 );
+
+ALTER TABLE preferences ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
 ```
 
 ---
 
-## 5) Frontend: ключевые файлы
+## 5) Report Service (Python FastAPI)
 
-### 5.1 `shared/api/api.js`
+### 5.1 Структура
+```
+report-service/
+  main.py               # FastAPI app, port 8001
+  models.py             # Pydantic: ReportRequest, StaffModel, DayModel, SlotModel
+  requirements.txt      # fastapi, uvicorn, openpyxl, pydantic
+  routers/shift.py      # POST /generate/shift/dept|all, /generate/timesheet
+  builders/
+    shift_dept.py       # Шифт по отделу (4-строчный формат: 出勤/退勤/職場)
+    shift_all.py        # Сводный шифт всех сотрудников
+    timesheet.py        # Табель учёта рабочего времени
+  shift-report.service  # systemd unit для прода
+```
+
+### 5.2 Запуск (Windows dev)
+```bash
+cd report-service
+source venv/Scripts/activate
+uvicorn main:app --host 127.0.0.1 --port 8001 --reload
+```
+Или через `start.bat` в папке `report-service`.
+
+### 5.3 Настройки печати в builders
+- `landscape`, A4, fitToPage, узкие поля — настраивается в каждом builder перед `buf = io.BytesIO()`
+
+### 5.4 Ловушки report-service
+- `hotelName` в `ReportService.java` — `static final String`, не из yml (кодировка Windows)
+- Spring Boot → FastAPI: использовать `RestTemplate` + `objectMapper.writeValueAsBytes()`, не `HttpClient`
+- `Content-Type: application/json` без `; charset=utf-8` — FastAPI не принимает с charset
+- venv не коммитить в git (`.gitignore`: `report-service/venv/`)
+
+---
+
+## 6) Frontend: ключевые файлы
+
+### 6.1 `shared/api/api.js`
 
 ```js
 login(login, password)
 managerMonth(month)
 managerStaffWeek(userId, weekStart)
-managerStaffWeekSave(userId, weekStart, days)  // days: [{date, off, slots:[{startTime,endTime,last,workplace}]}]
+managerStaffWeekSave(userId, weekStart, days)
 managerEmployeesList/Create/Update/Delete
 setWeekStatus(weekStart, status)
 staffWeeks(month) / staffWeek(weekStart) / staffWeekSave(weekStart, days) / staffCopyPrev(weekStart)
 settingsWorkplacesList/Create/Update/Delete
 settingsPositionsList/Create/Update/Delete
 settingsDepartmentsList/Create/Update/Delete
+// Reports (через fetchBlob):
+reportShiftAll(ym)
+reportShiftDept(ym, department)
+reportTimesheet(ym)
+reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 ```
+
+**`fetchBlob(path, options)`** — скачивает файл, читает `Content-Disposition` для имени файла.
 
 **`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth, mgrFilterPos, mgrFilterDept, mgrFilterWp, mgrColVisibility
 
-### 5.2 `app/App.jsx`
+### 6.2 `app/App.jsx`
 
 - Нет токена → `LoginPage`
 - `STAFF` → `StaffMonthPage`
 - `MANAGER/ADMIN` по `managerView`: `PREFS` / `EMPLOYEES` / `SETTINGS` / `SHIFTS` (default)
-- **Автологаут** — `useEffect` слушает события мыши/клавиатуры/касания, сбрасывает таймер 30 мин:
-```js
-const TIMEOUT = 30 * 60 * 1000;
-const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
-```
+- **Автологаут** — 30 мин бездействия
 
-### 5.3 Layouts
+### 6.3 Layouts
 
 - **`ManagerLayout.jsx`** — sidebar: `SHIFTS` 📅, `EMPLOYEES` 👥, `SETTINGS` ⚙️
-- **`AppShell.module.css`** — стили sidebar + `.centeredContent`
 - Sidebar: `56px` → `220px` при hover, `position: fixed`, контент `margin-left: 56px`
 
-### 5.4 Pages
+### 6.4 Pages
 
 - **`ManagerTablePage.jsx`**:
-  - Sticky: **職種・役職** (`left:0`, 70px), **部署** (`left:70px`, 90px), **氏名** (`left:160px`, 140px)
-  - `rowSpan` по `maxSlots`, workplace под временем серым текстом
-  - Попап `CellPopover`: `position: fixed` + `getBoundingClientRect()`
-  - Месяц в `localStorage.managerSelectedMonth`
-  - **SortBar** — постоянная полоса под topBar:
-    - `表示列▼` — дропдаун скрытия столбцов 職種・役職 / 部署 (сохраняется в `mgrColVisibility`)
-    - `職種・役職▼` — каскадный фильтр по должности
-    - `部署▼` — каскадный фильтр по отделу (зависит от выбранных 職種)
-    - `表示フィルター▼` — фильтр по 場所 + 場所なし + 休み (зависит от 職種+部署)
-    - `リセット` — кнопка сброса всех фильтров (появляется только при активных фильтрах)
-    - Сортировка по 氏名 / 職種・役職 / 部署 (↑↓)
-  - **Каскадный фильтр**: 職種 → 部署 → 場所, обратный каскад тоже работает
-  - Состояние фильтров сохраняется в localStorage (`mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`)
-  - Кнопка **📥 Excel** — выгрузка `filteredStaff` в `.xlsx` через SheetJS (`npm install xlsx`)
+  - Sticky колонки: **職種・役職** (70px), **部署** (90px), **氏名** (140px)
+  - 部署 отображается в колонку (через `<div>` на каждый отдел)
+  - **SortBar** — фильтры, сортировка, управление столбцами
+  - **Кнопка 📥 Excel** — `xlsx-js-style`, стилизованный экспорт (`import * as XLSX from "xlsx-js-style"`)
+  - **Кнопка 📊 レポート▼** — дропдаун с 4 типами отчётов:
+    - 📋 全員シフト表
+    - 🏢 部署別シフト表 (требует ровно 1 выбранный отдел)
+    - 🕐 勤怠集計表
+    - 🔍 選択中スタッフのシフト表
+  - **AlertModal** — красивый попап вместо `alert()`
+  - **Shift+клик** — выделение нескольких ячеек одного сотрудника (`selectedCells`)
+    - Панель внизу: `N日選択中` + `✏️ 一括編集` + `✕ 選択解除`
+    - `BulkPopover` — попап массового редактирования (стиль как CellPopover)
+    - `saveBulkCells(patch)` — группирует по неделям, сохраняет через `managerStaffWeekSave`
+  - **Правая кнопка мыши** — контекстное меню (`ContextMenu`):
+    - ✏️ 編集 — открыть CellPopover
+    - 📋 このパターンをコピー — копирует `{off, slots}` в `copiedPattern`
+    - 📅 コピーを適用 / `N日に適用` — вставляет в одну ячейку или все выделенные
+  - `user-select: none` на `.table` — предотвращает выделение текста при Shift+клик
 
 - **`EmployeesPage.jsx`**: position → `<select>`, 部署 → чекбоксы (ManyToMany)
 - **`SettingsPage.jsx`**: табы 勤務場所 / 職種・役職 / 部署
 - **`LoginPage.jsx`**: лого + HannoSHIFT в шапке
 
-### 5.5 Staff компоненты
+### 6.5 Staff компоненты
 
-- **`StaffMonth.jsx`**: месяц и неделя в localStorage, восстанавливаются после перезагрузки
-- **`StaffWeek.jsx`**:
-  - Видит earliest/latest (бэкенд), не может ставить L
-  - Подсказки: при `RECEIVING` — серый текст, при `CONFIRMED` — предупреждение
-  - `saving` и `copying` state — блокируют кнопки на время запроса
-  - Валидация до `setSaving(true)` — при ошибке кнопка не блокируется
+- **`StaffMonth.jsx`**: месяц и неделя в localStorage
+- **`StaffWeek.jsx`**: видит earliest/latest, не может ставить L
 
-### 5.6 Mobile / UX
+### 6.6 Mobile / UX
 
 - `globals.css`: `font-size: max(16px, 1em)` — предотвращает автозум iOS
-- `LoginForm.jsx`: `font-size: 16px`, сброс зума viewport после логина
-- `StaffMonth/Week.module.css`: убран `min-height`, `table-layout: fixed`
-- `main.jsx`: **StrictMode убран** — иначе двойной рендер = двойные запросы
+- `main.jsx`: **StrictMode убран**
 
 ---
 
-## 6) Статусы смен
+## 7) Статусы смен
 
 ```
 RECEIVING  受付中  #F0F0F0
@@ -210,34 +262,33 @@ CONFIRMED  確定    #85A175
 
 ---
 
-## 7) Функция L и мульти-слоты
+## 8) Функция L и мульти-слоты
 
 - `last=true` = работает до конца, endTime=null
 - Сотрудник видит L но не может ставить
-- Копирование (`staffCopyPrevWeek`): если есть L → только earliest startTime, endTime=null; без L → всё как есть
 - Менеджер: до 5 слотов на день, каждый со своим workplace/временем
 
 ---
 
-## 8) Деплой и запуск
+## 9) Деплой и запуск
 
 **Dev:**
 ```bash
 cd backend && mvn spring-boot:run
-cd frontend && npm run dev           # localhost
-cd frontend && npm run dev -- --host  # + локальная сеть
+cd frontend && npm run dev
+cd report-service && source venv/Scripts/activate && uvicorn main:app --host 127.0.0.1 --port 8001 --reload
 ```
-`.env.local`: `VITE_API_BASE=http://192.168.1.19:8080` для тестов на телефоне
 
-**Production:** nginx → `/var/www/shift-app/`, Spring Boot jar
-- Мануал: `sudo cp manual.pdf /var/www/shift-app/manual.pdf` → `https://hanno-shift.duckdns.org/manual.pdf`
+**Production:**
+- nginx → `/var/www/shift-app/`, Spring Boot jar
+- report-service → systemd `shift-report.service`, порт 8001 (только localhost)
+- Spring Boot проксирует `/api/manager/reports/**` → `http://localhost:8001`
 
 ---
 
-## 9) Ловушки
+## 10) Ловушки
 
 - `ManagerWeekResponse.rows` — не `staff`
-- `ManagerStaffWeekController` и `ManagerWeekController./week/save` — оба используют `ManagerStaffWeekSaveRequest`
 - `ShiftSlotRepository` — в пакете `preferences`, не `weeks`
 - `Preference` — нет `startTime/endTime/isLast`, всё в `ShiftSlot`
 - `UserRepository` — `LEFT JOIN FETCH u.departments` обязателен (LazyInitializationException)
@@ -245,6 +296,10 @@ cd frontend && npm run dev -- --host  # + локальная сеть
 - `StrictMode` убран из `main.jsx`
 - Попап — `position: fixed` + `getBoundingClientRect()`
 - iOS автозум — `font-size: max(16px, 1em)`
-- Автологаут — 30 мин, в `App.jsx`, сбрасывается любым действием пользователя
-- Excel экспорт — `import * as XLSX from "xlsx"` (статический, не динамический), `npm install xlsx`
+- Автологаут — 30 мин, в `App.jsx`
+- Excel экспорт — `import * as XLSX from "xlsx-js-style"` (не xlsx!)
 - Фильтры localStorage очищать в `clearToken()`: `mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`, `mgrColVisibility`
+- ReportService: `hotelName` — `static final`, не из yml
+- ReportService: `RestTemplate` + `writeValueAsBytes()`, не `HttpClient`
+- ContextMenu: НЕ сбрасывать `selectedCells` при правом клике (иначе теряется выделение)
+- venv не коммитить (`report-service/venv/` в `.gitignore`)
