@@ -47,7 +47,7 @@
 - **`SecurityConfig.java`** — CORS разрешён для `localhost:5173`, `192.168.1.19:5173`, `hanno-shift.duckdns.org`
 
 ### 3.3 Users
-`backend/src/main/java/com/shiftapp/users`
+`backend/src/main/java/com/shiftapp.users`
 
 - **`User.java`** — поля: id, restaurant, login, passwordHash, role, fullName, **position** (nullable), **departments** (ManyToMany → `user_departments`), active, createdAt
 - **`UserResponse.java`** — включает `position` и `departments: [{id, name}]`
@@ -150,8 +150,8 @@ report-service/
   requirements.txt      # fastapi, uvicorn, openpyxl, pydantic
   routers/shift.py      # POST /generate/shift/dept|all, /generate/timesheet
   builders/
-    shift_dept.py       # Шифт по отделу (4-строчный формат: 出勤/退勤/職場)
-    shift_all.py        # Сводный шифт всех сотрудников
+    shift_dept.py       # Шифт по отделу (3 строки на сотрудника: 出勤/退勤/職場), 公休数
+    shift_all.py        # Сводный шифт всех сотрудников (3 строки: 出勤/退勤/職場), 公休数
     timesheet.py        # Табель учёта рабочего времени
   shift-report.service  # systemd unit для прода
 ```
@@ -164,14 +164,20 @@ uvicorn main:app --host 127.0.0.1 --port 8001 --reload
 ```
 Или через `start.bat` в папке `report-service`.
 
-### 5.3 Настройки печати в builders
-- `landscape`, A4, fitToPage, узкие поля — настраивается в каждом builder перед `buf = io.BytesIO()`
+### 5.3 Формат отчётов shift_dept и shift_all
+- Колонки: 役職 | 部署 | 氏名 | メタ(出勤/退勤/職場) | 1..31 | 公休数
+- 3 строки на сотрудника, merged cells для 役職/部署/氏名/公休数
+- Цвета: суббота BDD7EE, воскресенье FCE4D6, будни DDEBF7
+- 公休数 — последний столбец, автоматический подсчёт выходных
+- `last_data_col = 4 + total` (включает 公休数)
+- `freeze_panes = "D7"` для shift_dept, `"E6"` для shift_all
 
 ### 5.4 Ловушки report-service
 - `hotelName` в `ReportService.java` — `static final String`, не из yml (кодировка Windows)
 - Spring Boot → FastAPI: использовать `RestTemplate` + `objectMapper.writeValueAsBytes()`, не `HttpClient`
 - `Content-Type: application/json` без `; charset=utf-8` — FastAPI не принимает с charset
 - venv не коммитить в git (`.gitignore`: `report-service/venv/`)
+- `shift_all.py` имеет 5 колонок перед днями (А=職種, B=部署, C=氏名, D=メタ), дни с колонки E
 
 ---
 
@@ -216,36 +222,43 @@ reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 ### 6.4 Pages
 
 - **`ManagerTablePage.jsx`**:
-  - Sticky колонки: **職種・役職** (70px), **部署** (90px), **氏名** (140px)
-  - 部署 отображается в колонку (через `<div>` на каждый отдел)
+  - Sticky колонки: **№** (28px), **職種・役職** (70px), **部署** (90px), **氏名** (140px)
+  - Все 4 колонки управляются через `表示列▼` дропдаун (`colVisibility.number/position/department`)
+  - `colVisibility` в localStorage `mgrColVisibility`: `{ number, position, department }`
+  - Классы CSS: `.thNumber` / `.tdNumber` для колонки №, `.thPosition` / `.tdPosition` для 職種
+  - Последний столбец: **公休数** — автоподсчёт выходных через `countOffDays(userId)`
   - **SortBar** — фильтры, сортировка, управление столбцами
-  - **Кнопка 📥 Excel** — `xlsx-js-style`, стилизованный экспорт (`import * as XLSX from "xlsx-js-style"`)
-  - **Кнопка 📊 レポート▼** — дропдаун с 4 типами отчётов:
-    - 📋 全員シフト表
-    - 🏢 部署別シフト表 (требует ровно 1 выбранный отдел)
-    - 🕐 勤怠集計表
-    - 🔍 選択中スタッフのシフト表
+  - **Кнопка 📥 Excel** — `xlsx-js-style`, стилизованный экспорт
+  - **Кнопка 📊 レポート▼** — дропдаун с 4 типами отчётов
   - **AlertModal** — красивый попап вместо `alert()`
   - **Shift+клик** — выделение нескольких ячеек одного сотрудника (`selectedCells`)
-    - Панель внизу: `N日選択中` + `✏️ 一括編集` + `✕ 選択解除`
-    - `BulkPopover` — попап массового редактирования (стиль как CellPopover)
-    - `saveBulkCells(patch)` — группирует по неделям, сохраняет через `managerStaffWeekSave`
-  - **Правая кнопка мыши** — контекстное меню (`ContextMenu`):
-    - ✏️ 編集 — открыть CellPopover
-    - 📋 このパターンをコピー — копирует `{off, slots}` в `copiedPattern`
-    - 📅 コピーを適用 / `N日に適用` — вставляет в одну ячейку или все выделенные
-  - `user-select: none` на `.table` — предотвращает выделение текста при Shift+клик
+  - **BulkPopover** — попап массового редактирования (стиль как CellPopover, центрирован)
+  - **ContextMenu** — правый клик: 編集 / コピー / 適用 (не сбрасывает selectedCells!)
+  - `user-select: none` на `.table`
 
 - **`EmployeesPage.jsx`**: position → `<select>`, 部署 → чекбоксы (ManyToMany)
 - **`SettingsPage.jsx`**: табы 勤務場所 / 職種・役職 / 部署
 - **`LoginPage.jsx`**: лого + HannoSHIFT в шапке
 
-### 6.5 Staff компоненты
+### 6.5 CSS классы таблицы (ManagerTablePage.module.css)
+
+```
+.thNumber   — заголовок №: sticky, width 28px
+.tdNumber   — ячейка №: sticky left:0, width 28px, z-index:4
+.thPosition — заголовок 職種: sticky left:0, width 70px
+.tdPosition — ячейка 職種: sticky left:0, width 70px
+.thDepartment / .tdDepartment — 部署: sticky left:70px, width 90px
+.thName / .tdName — 氏名: sticky left:160px, width 140px
+.cellSelected — синяя рамка выделенной ячейки
+.table — user-select: none
+```
+
+### 6.6 Staff компоненты
 
 - **`StaffMonth.jsx`**: месяц и неделя в localStorage
 - **`StaffWeek.jsx`**: видит earliest/latest, не может ставить L
 
-### 6.6 Mobile / UX
+### 6.7 Mobile / UX
 
 - `globals.css`: `font-size: max(16px, 1em)` — предотвращает автозум iOS
 - `main.jsx`: **StrictMode убран**
@@ -283,6 +296,8 @@ cd report-service && source venv/Scripts/activate && uvicorn main:app --host 127
 - nginx → `/var/www/shift-app/`, Spring Boot jar
 - report-service → systemd `shift-report.service`, порт 8001 (только localhost)
 - Spring Boot проксирует `/api/manager/reports/**` → `http://localhost:8001`
+- systemd user: `anadminsrv` (не ubuntu!)
+- report-service files: `/opt/report-service/`, venv: `/opt/report-service/venv/`
 
 ---
 
@@ -301,5 +316,8 @@ cd report-service && source venv/Scripts/activate && uvicorn main:app --host 127
 - Фильтры localStorage очищать в `clearToken()`: `mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`, `mgrColVisibility`
 - ReportService: `hotelName` — `static final`, не из yml
 - ReportService: `RestTemplate` + `writeValueAsBytes()`, не `HttpClient`
-- ContextMenu: НЕ сбрасывать `selectedCells` при правом клике (иначе теряется выделение)
+- ContextMenu: НЕ сбрасывать `selectedCells` при правом клике
 - venv не коммитить (`report-service/venv/` в `.gitignore`)
+- shift_dept.py: `last_data_col = 4 + total` (не `3 + total`!) — иначе рамка не охватывает 公休数
+- `.tdNumber` — отдельный CSS класс, НЕ использовать `.tdPosition` (иначе ширина 70px)
+- `colVisibility` в localStorage может быть без ключа `number` если сохранено до его добавления — нужно сбросить localStorage

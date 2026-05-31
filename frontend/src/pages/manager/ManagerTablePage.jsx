@@ -270,6 +270,40 @@ function AlertModal({ message, onClose }) {
   );
 }
 
+function ReportLoader() {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 3000,
+      background: "rgba(0,0,0,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 16, padding: "36px 48px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.22)",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 20,
+        minWidth: 260,
+      }}>
+        <div style={{
+          width: 48, height: 48,
+          border: "4px solid #E0E8F5",
+          borderTop: "4px solid #2F5496",
+          borderRadius: "50%",
+          animation: "mgr-spin 0.8s linear infinite",
+        }} />
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 15, fontWeight: "bold", color: "#1a1a1a", marginBottom: 6 }}>
+            レポートを生成中...
+          </div>
+          <div style={{ fontSize: 13, color: "#666" }}>
+            しばらくお待ちください
+          </div>
+        </div>
+        <style>{`@keyframes mgr-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    </div>
+  );
+}
+
 /* ─── CellPopover ───────────────────────────────────────── */
 function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
   const isOff = day.off && (!day.slots || day.slots.length === 0);
@@ -429,6 +463,7 @@ function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
   }, [open]);
 
   const COL_TOGGLES = [
+    { key: "number",     label: "№" },
     { key: "position",   label: "職種・役職" },
     { key: "department", label: "部署" },
   ];
@@ -651,8 +686,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [colVisibility, setColVisibility] = useState(() => {
     try {
       const raw = localStorage.getItem("mgrColVisibility");
-      return raw ? JSON.parse(raw) : { position: true, department: true };
-    } catch { return { position: true, department: true }; }
+      return raw ? JSON.parse(raw) : { number: true, position: true, department: true };
+    } catch { return { number: true, position: true, department: true }; }
   });
   const [visibleWorkplaces, setVisibleWorkplaces]   = useState(() => loadFilterSet("mgrFilterWp")   || new Set());
   const [visiblePositions, setVisiblePositions]     = useState(() => loadFilterSet("mgrFilterPos")  || new Set());
@@ -1059,10 +1094,12 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         const selectedDepts = [...visibleDepartments];
         if (selectedDepts.length === 0) {
           setAlertMsg("部署を選択してください。");
+          setReportLoading(false);
           return;
         }
         if (selectedDepts.length > 1) {
           setAlertMsg("部署別シフト表は1つの部署のみ選択してください。");
+          setReportLoading(false);
           return;
         }
         await api.reportShiftDept(ym, selectedDepts[0]);
@@ -1346,6 +1383,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             <table className={styles.table}>
               <thead>
                 <tr>
+                  <th className={styles.thNumber} style={!colVisibility.number ? {display:"none"} : {}}>№</th>
                   <th className={styles.thPosition} style={!colVisibility.position ? {display:"none"} : {}}>職種・役職</th>
                   <th className={styles.thDepartment}
                     style={{ ...(!colVisibility.department ? {display:"none"} : {}), ...(!colVisibility.position ? {left:0} : {}) }}>部署</th>
@@ -1366,6 +1404,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                   </th>
                 </tr>
                 <tr>
+                  <th className={styles.thNameSub} style={!colVisibility.number ? {display:"none"} : {}}></th>
                   <th className={styles.thNameSub} style={!colVisibility.position ? {display:"none"} : {}}></th>
                   <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
                     style={{ ...(!colVisibility.department ? {display:"none"} : {}), ...(!colVisibility.position ? {left:0} : {}) }}></th>
@@ -1424,6 +1463,10 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                       <tr key={`${staff.userId}_${subIdx}`} className={styles.staffRow} data-staff={staff.userId}>
                         {subIdx===0 && (
                           <>
+                            <td className={styles.tdNumber} rowSpan={maxSlots}
+                              style={!colVisibility.number ? {display:"none"} : {}}>
+                              {filteredStaff.indexOf(staff) + 1}
+                            </td>
                             <td className={styles.tdPosition} rowSpan={maxSlots}
                               style={!colVisibility.position ? {display:"none"} : {}}>
                               {positions[staff.userId]||""}
@@ -1589,7 +1632,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         />
       )}
 
-      {alertMsg && <AlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
+    {reportLoading && <ReportLoader />}
+    {alertMsg && <AlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </ManagerLayout>
   );
 }
