@@ -20,6 +20,10 @@ export function clearToken() {
   localStorage.removeItem("mgrFilterDept");
   localStorage.removeItem("mgrFilterWp");
   localStorage.removeItem("mgrColVisibility");
+  localStorage.removeItem("managerViewMode");
+  localStorage.removeItem("managerSelectedWeek");
+  localStorage.removeItem("managerRangeFrom");
+  localStorage.removeItem("managerRangeTo");
 }
 
 async function request(path, { method = "GET", body, auth = true } = {}) {
@@ -168,6 +172,9 @@ export const api = {
     request(`/api/manager/employees/${id}`, { method: "DELETE" }),
 
   managerMonth: (month) => request(`/api/manager/month?month=${month}`),
+
+  managerRange: (from, to) =>
+    request(`/api/manager/month?from=${from}&to=${to}`),
 
   // ===== SETTINGS: WORKPLACES =====
   settingsWorkplacesList: () =>

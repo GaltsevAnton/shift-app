@@ -10,10 +10,8 @@ import com.shiftapp.weeks.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.temporal.TemporalAdjusters;
+import java.time.*;
+import java.time.temporal.*;
 import java.util.*;
 
 @RestController
@@ -27,26 +25,39 @@ public class ManagerMonthController {
     private final PreferenceRepository   preferenceRepository;
 
     @GetMapping("/month")
-    public List<ManagerWeekResponse> getMonth(@RequestParam String month) {
+    public List<ManagerWeekResponse> getMonth(
+            @RequestParam(required = false) String month,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+
         var me = CurrentUser.require();
         Long restaurantId = me.getRestaurantId();
 
-        YearMonth ym       = YearMonth.parse(month);
-        LocalDate firstDay = ym.atDay(1);
-        LocalDate lastDay  = ym.atEndOfMonth();
+        LocalDate rangeFrom, rangeTo;
 
-        LocalDate rangeStart = firstDay.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        LocalDate rangeEnd   = lastDay.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY));
+        if (month != null) {
+            YearMonth ym = YearMonth.parse(month);
+            rangeFrom = ym.atDay(1);
+            rangeTo   = ym.atEndOfMonth();
+        } else if (from != null && to != null) {
+            rangeFrom = LocalDate.parse(from);
+            rangeTo   = LocalDate.parse(to);
+            long days = ChronoUnit.DAYS.between(rangeFrom, rangeTo) + 1;
+            if (days < 7)  throw new IllegalArgumentException("期間は7日以上を指定してください");
+            if (days > 35) throw new IllegalArgumentException("期間は35日以内を指定してください");
+        } else {
+            throw new IllegalArgumentException("month または from/to を指定してください");
+        }
 
-        // ── 1. Один запрос: все сотрудники ресторана ──
+        LocalDate rangeStart = rangeFrom.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate rangeEnd   = rangeTo.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY));
+
         var staffList = userRepository
                 .findByRestaurant_IdAndRoleOrderByFullNameAsc(restaurantId, UserRole.STAFF);
 
-        // ── 2. Один запрос: все preferences + slots за весь диапазон ──
         List<Preference> allPrefs = preferenceRepository
                 .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, rangeStart, rangeEnd);
 
-        // Индексируем: userId → date → preference
         Map<Long, Map<LocalDate, Preference>> prefsByUser = new HashMap<>();
         for (Preference p : allPrefs) {
             prefsByUser
@@ -54,7 +65,6 @@ public class ManagerMonthController {
                 .put(p.getWorkDate(), p);
         }
 
-        // ── 3. Один запрос: все статусы недель за диапазон ──
         List<WeekStatus> statuses = weekStatusRepository
                 .findByRestaurant_IdAndWeekStartBetween(restaurantId, rangeStart, rangeEnd);
         Map<LocalDate, WeekStatusType> statusMap = new HashMap<>();
@@ -62,11 +72,10 @@ public class ManagerMonthController {
             statusMap.put(ws.getWeekStart(), ws.getStatus());
         }
 
-        // ── 4. Собираем ответ по неделям ──
         List<ManagerWeekResponse> result = new ArrayList<>();
         LocalDate cursor = rangeStart;
 
-        while (!cursor.isAfter(lastDay)) {
+        while (!cursor.isAfter(rangeTo)) {
             LocalDate weekStart = cursor;
             LocalDate weekEnd   = cursor.plusDays(6);
 
@@ -104,7 +113,6 @@ public class ManagerMonthController {
         return result;
     }
 
-    /* ── buildDayForManager (копия из WeekService) ── */
     private StaffWeekDay buildDayForManager(LocalDate date, Preference p) {
         StaffWeekDay day = new StaffWeekDay();
         day.setDate(date);
@@ -128,7 +136,6 @@ public class ManagerMonthController {
         }
         day.setSlots(slotDtos);
 
-        // flat fields
         p.getSlots().stream()
                 .map(ShiftSlot::getStartTime)
                 .filter(Objects::nonNull)
