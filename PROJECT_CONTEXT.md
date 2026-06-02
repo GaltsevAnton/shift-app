@@ -15,6 +15,7 @@
 - Frontend: токен в `localStorage.accessToken`, роль в `localStorage.appRole`, имя в `localStorage.staffName`
 - Навигация менеджера: `localStorage.managerView` — значения: `SHIFTS`, `PREFS`, `EMPLOYEES`, `SETTINGS`
 - Сохранение состояния: `staffSelectedMonth`, `staffSelectedWeek`, `managerSelectedMonth` в localStorage
+- Режим отображения таблицы менеджера: `managerViewMode` (month/week/period), `managerSelectedWeek`, `managerRangeFrom`, `managerRangeTo`
 - Все эти ключи очищаются в `clearToken()` при логауте
 - **Автологаут**: 30 минут бездействия → автоматический выход (в `App.jsx`)
 - Название приложения: **HannoSHIFT** (ホテル・ヘリテイジ / 飯能 sta.)
@@ -76,7 +77,10 @@
   - `staffCopyPrevWeek` — если есть L: копирует только earliest startTime, endTime=null; если нет L: всё как есть
   - `managerSaveStaffWeek` — массив слотов с workplace и isLast
 
-- **`ManagerMonthController.java`** — оптимизирован: **3 SQL запроса** на весь месяц
+- **`ManagerMonthController.java`** — оптимизирован: **3 SQL запроса** на весь диапазон
+  - Принимает `?month=YYYY-MM` ИЛИ `?from=YYYY-MM-DD&to=YYYY-MM-DD`
+  - При `from/to`: валидация 7–35 дней на стороне backend
+  - Цикл по неделям идёт до `rangeTo` (не до конца месяца)
 - **`WeekStatusRepository.java`** — `findByRestaurant_IdAndWeekStartBetween`
 - **`ManagerStaffWeekController.java`** — POST принимает `ManagerStaffWeekSaveRequest`
 
@@ -187,7 +191,8 @@ uvicorn main:app --host 127.0.0.1 --port 8001 --reload
 
 ```js
 login(login, password)
-managerMonth(month)
+managerMonth(month)           // ?month=YYYY-MM
+managerRange(from, to)        // ?from=YYYY-MM-DD&to=YYYY-MM-DD
 managerStaffWeek(userId, weekStart)
 managerStaffWeekSave(userId, weekStart, days)
 managerEmployeesList/Create/Update/Delete
@@ -205,7 +210,7 @@ reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 
 **`fetchBlob(path, options)`** — скачивает файл, читает `Content-Disposition` для имени файла.
 
-**`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth, mgrFilterPos, mgrFilterDept, mgrFilterWp, mgrColVisibility
+**`clearToken()`** очищает: accessToken, appRole, staffName, managerView, staffSelectedMonth, staffSelectedWeek, managerSelectedMonth, mgrFilterPos, mgrFilterDept, mgrFilterWp, mgrColVisibility, **managerViewMode, managerSelectedWeek, managerRangeFrom, managerRangeTo**
 
 ### 6.2 `app/App.jsx`
 
@@ -213,6 +218,7 @@ reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 - `STAFF` → `StaffMonthPage`
 - `MANAGER/ADMIN` по `managerView`: `PREFS` / `EMPLOYEES` / `SETTINGS` / `SHIFTS` (default)
 - **Автологаут** — 30 мин бездействия
+- `<ManagerTablePage key={token} .../>` — key гарантирует сброс state при повторном логине
 
 ### 6.3 Layouts
 
@@ -222,19 +228,27 @@ reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 ### 6.4 Pages
 
 - **`ManagerTablePage.jsx`**:
+  - **Топбар**: Year `[年▼]` + Month `[月▼]` + табы `[月|週|期間]`
+    - Режим **月**: стандартный месячный вид
+    - Режим **週**: выпадающий список недель месяца (пн〜вс)
+    - Режим **期間**: два date-picker, диапазон 7–35 дней, валидация + счётчик дней
+  - **`displayDates`** — `useMemo`, массив строк `YYYY-MM-DD` — единый источник для столбцов таблицы
+  - Все даты вычисляются через локальные функции (не `toISOString()`) — важно для UTC+9
+  - Хелперы: `currentMondayLocal()`, `addDays(date, n)`, `weeksInMonth(ymStr)` — все используют локальное время
   - Sticky колонки: **№** (28px), **職種・役職** (70px), **部署** (90px), **氏名** (140px)
   - Все 4 колонки управляются через `表示列▼` дропдаун (`colVisibility.number/position/department`)
   - `colVisibility` в localStorage `mgrColVisibility`: `{ number, position, department }`
-  - Классы CSS: `.thNumber` / `.tdNumber` для колонки №, `.thPosition` / `.tdPosition` для 職種
   - Последний столбец: **公休数** — автоподсчёт выходных через `countOffDays(userId)`
   - **SortBar** — фильтры, сортировка, управление столбцами
-  - **Кнопка 📥 Excel** — `xlsx-js-style`, стилизованный экспорт
-  - **Кнопка 📊 レポート▼** — дропдаун с 4 типами отчётов
+  - **Кнопка 📥 Excel** — `xlsx-js-style`, стилизованный экспорт по `displayDates`
+  - **Кнопка 📊 レポート▼** — дропдаун с 4 типами отчётов + **ReportLoader** прелоадер
   - **AlertModal** — красивый попап вместо `alert()`
   - **Shift+клик** — выделение нескольких ячеек одного сотрудника (`selectedCells`)
   - **BulkPopover** — попап массового редактирования (стиль как CellPopover, центрирован)
   - **ContextMenu** — правый клик: 編集 / コピー / 適用 (не сбрасывает selectedCells!)
   - `user-select: none` на `.table`
+  - Шапка таблицы: Row 1 = статусы недель (`thWeek`), Row 2 = заголовки дней
+  - Узкие недели (1–2 дня): `statusSelect` показывает только цветной фон со стрелкой (`color: transparent`)
 
 - **`EmployeesPage.jsx`**: position → `<select>`, 部署 → чекбоксы (ManyToMany)
 - **`SettingsPage.jsx`**: табы 勤務場所 / 職種・役職 / 部署
@@ -243,12 +257,15 @@ reportShiftFiltered(ym, userIds)  // POST с body: JSON.stringify(userIds)
 ### 6.5 CSS классы таблицы (ManagerTablePage.module.css)
 
 ```
-.thNumber   — заголовок №: sticky, width 28px
+.thNumber   — заголовок №: width 28px, top: 34px (sticky row 2)
 .tdNumber   — ячейка №: sticky left:0, width 28px, z-index:4
-.thPosition — заголовок 職種: sticky left:0, width 70px
+.thPosition — заголовок 職種: sticky left:0, width 70px, top: 34px
 .tdPosition — ячейка 職種: sticky left:0, width 70px
-.thDepartment / .tdDepartment — 部署: sticky left:70px, width 90px
-.thName / .tdName — 氏名: sticky left:160px, width 140px
+.thDepartment / .tdDepartment — 部署: sticky left:70px, width 90px, top: 34px
+.thName / .tdName — 氏名: sticky left:160px, width 140px, top: 34px
+.thDay      — дни: sticky top: 34px (под строкой статусов)
+.thWeek     — статусы недель: sticky top: 0 (первая строка), overflow: hidden
+.thNameSub  — пустые ячейки Row 1: sticky top: 0
 .cellSelected — синяя рамка выделенной ячейки
 .table — user-select: none
 ```
@@ -307,13 +324,13 @@ cd report-service && source venv/Scripts/activate && uvicorn main:app --host 127
 - `ShiftSlotRepository` — в пакете `preferences`, не `weeks`
 - `Preference` — нет `startTime/endTime/isLast`, всё в `ShiftSlot`
 - `UserRepository` — `LEFT JOIN FETCH u.departments` обязателен (LazyInitializationException)
-- `ManagerMonthController` — 3 запроса на месяц, не N×3
+- `ManagerMonthController` — 3 запроса на диапазон, не N×3; принимает `month` ИЛИ `from/to`
 - `StrictMode` убран из `main.jsx`
 - Попап — `position: fixed` + `getBoundingClientRect()`
 - iOS автозум — `font-size: max(16px, 1em)`
 - Автологаут — 30 мин, в `App.jsx`
 - Excel экспорт — `import * as XLSX from "xlsx-js-style"` (не xlsx!)
-- Фильтры localStorage очищать в `clearToken()`: `mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`, `mgrColVisibility`
+- Фильтры localStorage очищать в `clearToken()`: `mgrFilterPos`, `mgrFilterDept`, `mgrFilterWp`, `mgrColVisibility`, `managerViewMode`, `managerSelectedWeek`, `managerRangeFrom`, `managerRangeTo`
 - ReportService: `hotelName` — `static final`, не из yml
 - ReportService: `RestTemplate` + `writeValueAsBytes()`, не `HttpClient`
 - ContextMenu: НЕ сбрасывать `selectedCells` при правом клике
@@ -321,3 +338,6 @@ cd report-service && source venv/Scripts/activate && uvicorn main:app --host 127
 - shift_dept.py: `last_data_col = 4 + total` (не `3 + total`!) — иначе рамка не охватывает 公休数
 - `.tdNumber` — отдельный CSS класс, НЕ использовать `.tdPosition` (иначе ширина 70px)
 - `colVisibility` в localStorage может быть без ключа `number` если сохранено до его добавления — нужно сбросить localStorage
+- **Даты**: НЕ использовать `toISOString()` для локальных дат — в UTC+9 даёт неверный день. Использовать `currentMondayLocal()`, `addDays()`, `weeksInMonth()` которые работают с локальным временем
+- **`key={token}`** на `ManagerTablePage` в `App.jsx` — гарантирует сброс state при повторном логине
+- `thDay`, `thName`, `thPosition`, `thDepartment`, `thNumber` — `top: 34px` (не 0!) т.к. над ними строка статусов недель

@@ -4,6 +4,66 @@
 
 ---
 
+## 2026-06-02
+
+### ManagerTablePage — режимы просмотра (月/週/期間)
+
+#### Топбар — новые контролы
+- Один `<select>` месяца заменён на два: **Year `[年▼]`** + **Month `[月▼]`**
+- Диапазон Year: ~3 года (±12 месяцев от текущего)
+- Добавлены табы режима: **`[月 | 週 | 期間]`**
+
+#### Режим 月 (месяц)
+- Работает как раньше, запрос `?month=YYYY-MM`
+
+#### Режим 週 (неделя)
+- Выпадающий список недель выбранного месяца (пн〜вс)
+- Запрос через `api.managerRange(weekStart, weekEnd)`
+- `selectedWeek` сохраняется в localStorage
+
+#### Режим 期間 (период)
+- Два `<input type="date">` — от/до
+- Валидация: минимум 7 дней, максимум 35 дней
+- Счётчик дней с цветовой индикацией (зелёный/красный)
+- При невалидном диапазоне — жёлтый баннер с подсказкой
+- Запрос через `api.managerRange(from, to)`
+- `managerRangeFrom`, `managerRangeTo` сохраняются в localStorage
+
+#### Backend — `ManagerMonthController.java`
+- Метод `getMonth` теперь принимает либо `?month=YYYY-MM` либо `?from=...&to=...`
+- При `from/to`: валидация 7–35 дней (`IllegalArgumentException` → HTTP 400)
+- Цикл по неделям до `rangeTo` (не до конца месяца) — корректно захватывает недели на стыке месяцев
+
+#### Frontend — `displayDates`
+- Центральный `useMemo` — массив строк `YYYY-MM-DD` для отображения столбцов
+- Все функции таблицы (`maxSlotsForStaff`, `countOffDays`, фильтры, Excel) работают через `displayDates`
+- Убраны `dayNums` и `dateStr(ym, d)` — заменены на прямые строки дат
+
+#### Исправление UTC+9 проблемы
+- `toISOString()` в Японии (UTC+9) давал неверную дату (сдвиг на день назад)
+- Добавлены хелперы: `currentMondayLocal()`, `addDays(date, n)`, `weeksInMonth(ymStr)` — все используют локальное время через `getFullYear/getMonth/getDate`
+- `weeksInMonth` исправлен: недели теперь начинаются с понедельника корректно
+
+#### Шапка таблицы — перестановка строк
+- Row 1: статусы недель (`thWeek`) — перенесён наверх
+- Row 2: заголовки дней (`thDay` и sticky колонки)
+- CSS: `thDay`, `thName`, `thPosition`, `thDepartment`, `thNumber` получили `top: 34px`
+- `thWeek` и `thNameSub` — `top: 0`
+
+#### Узкие недели (1–2 дня в видимом диапазоне)
+- `statusSelect` при `count <= 2`: `color: transparent`, `width: 28px` — виден только цветной фон со стрелкой
+- `thWeek`: добавлен `overflow: hidden` — диапазон не растягивает ячейку
+- Диапазон недели (`thWeekRange`) всегда отображается
+
+#### `api.js`
+- Добавлен `managerRange(from, to)` → `GET /api/manager/month?from=...&to=...`
+- `clearToken()` дополнен: `managerViewMode`, `managerSelectedWeek`, `managerRangeFrom`, `managerRangeTo`
+
+#### `App.jsx`
+- `<ManagerTablePage key={token} .../>` — гарантирует полный сброс state при повторном логине
+
+---
+
 ## 2026-05-31
 
 ### ManagerTablePage — столбец № и 公休数
@@ -20,6 +80,13 @@
 - Автоматически считает количество выходных дней через `countOffDays(userId)`
 - Добавлен в обоих строках `<thead>` (первая — заголовок, вторая — пустая `<th>`)
 - Добавлен в `<tbody>` с `rowSpan={maxSlots}` только при `subIdx === 0`
+
+#### ReportLoader — прелоадер генерации отчёта
+- Компонент `ReportLoader` — оверлей с анимированным спиннером
+- Показывается сразу при нажатии на любой пункт меню レポート▼
+- Блокирует случайные клики во время загрузки (`rgba(0,0,0,0.45)`)
+- Исчезает когда `fetchBlob` завершился (файл скачан или ошибка)
+- Исправлены early return в `handleReport` для dept-отчёта: добавлен `setReportLoading(false)` перед `return`
 
 #### Отчёты — 公休数 добавлен в Excel
 - `shift_dept.py` — колонка 公休数 в конце, заголовок merged строки 5-6

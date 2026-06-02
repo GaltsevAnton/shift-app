@@ -230,7 +230,7 @@ function BulkPopover({ onClose, onSave, workplaces }) {
       <div className={styles.popover} style={{ position: "relative", top: "auto", left: "auto" }}>
         <label className={styles.popRow}>
           <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck} />
-          <span className={styles.popRowLabel}>休日</span>
+          <span className={styles.popRowLabel}>公休</span>
         </label>
         {!off && (
           <>
@@ -435,7 +435,7 @@ function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
       style={{ position:"fixed", top:pos.top, left:pos.left, transform:"none" }}>
       <label className={styles.popRow}>
         <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck}/>
-        <span className={styles.popRowLabel}>休日</span>
+        <span className={styles.popRowLabel}>公休</span>
       </label>
       {!off && (
         <>
@@ -1497,7 +1497,53 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
-                {/* Row 1: column headers + day headers */}
+                {/* Row 1: week status bars */}
+                <tr>
+                  <th className={styles.thNameSub} style={!colVisibility.number     ? { display:"none" } : {}}></th>
+                  <th className={styles.thNameSub} style={!colVisibility.position   ? { display:"none" } : {}}></th>
+                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
+                    style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
+                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
+                    style={{ left: nameLeft() }}></th>
+                  
+                  {weekColSpans.map(({ week, count }) => {
+                    const wkData  = data[week.weekStart] || { status:"RECEIVING" };
+                    const sm      = STATUS_META[wkData.status] || STATUS_META.RECEIVING;
+                    const isLoad  = !!statusLoading[week.weekStart];
+                    const narrow  = count <= 4;
+                    return (
+                      <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
+                        <div className={styles.thWeekInner}>
+                          <span className={styles.thWeekRange}>
+                            {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
+                          </span>
+                          <select
+                            className={`${styles.statusSelect} ${styles[`s_${sm.cls}`]}`}
+                            value={wkData.status}
+                            disabled={isLoad}
+                            onChange={e => changeStatus(week.weekStart, e.target.value)}
+                            style={narrow ? {
+                              color: "transparent",
+                              padding: "3px 20px 3px 2px",
+                              minWidth: 0,
+                              width: "28px",
+                              flexShrink: 0,
+                            } : {}}
+                          >
+                            <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
+                            <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
+                            <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
+                          </select>
+                          {isLoad && <span className={styles.statusSpinner}>…</span>}
+                        </div>
+                      </th>
+                    );
+                  })}
+
+                  <th className={styles.thNameSub}></th>
+                </tr>
+
+                {/* Row 2: column headers + day headers */}
                 <tr>
                   <th className={styles.thNumber}   style={!colVisibility.number     ? { display:"none" } : {}}>№</th>
                   <th className={styles.thPosition} style={!colVisibility.position   ? { display:"none" } : {}}>職種・役職</th>
@@ -1522,44 +1568,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     <span className={styles.thNum}>公休</span>
                     <span className={styles.thWd}>数</span>
                   </th>
-                </tr>
-
-                {/* Row 2: week status bars */}
-                <tr>
-                  <th className={styles.thNameSub} style={!colVisibility.number     ? { display:"none" } : {}}></th>
-                  <th className={styles.thNameSub} style={!colVisibility.position   ? { display:"none" } : {}}></th>
-                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
-                    style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
-                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
-                    style={{ left: nameLeft() }}></th>
-
-                  {weekColSpans.map(({ week, count }) => {
-                    const wkData = data[week.weekStart] || { status:"RECEIVING" };
-                    const sm     = STATUS_META[wkData.status] || STATUS_META.RECEIVING;
-                    const isLoad = !!statusLoading[week.weekStart];
-                    return (
-                      <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
-                        <div className={styles.thWeekInner}>
-                          <span className={styles.thWeekRange}>
-                            {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
-                          </span>
-                          <select
-                            className={`${styles.statusSelect} ${styles[`s_${sm.cls}`]}`}
-                            value={wkData.status}
-                            disabled={isLoad}
-                            onChange={e => changeStatus(week.weekStart, e.target.value)}
-                          >
-                            <option value="RECEIVING">受付中</option>
-                            <option value="DRAFTING">作成中</option>
-                            <option value="CONFIRMED">確定</option>
-                          </select>
-                          {isLoad && <span className={styles.statusSpinner}>…</span>}
-                        </div>
-                      </th>
-                    );
-                  })}
-
-                  <th className={styles.thNameSub}></th>
                 </tr>
               </thead>
 
