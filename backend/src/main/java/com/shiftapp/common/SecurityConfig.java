@@ -1,6 +1,7 @@
 package com.shiftapp.common;
 
-import com.shiftapp.auth.JwtAuthFilter;
+import java.util.List;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,7 +13,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.List;
+import com.shiftapp.auth.JwtAuthFilter;
 
 @Configuration  //Говорит Spring: “в этом классе настройки и бины”.
 @EnableMethodSecurity
@@ -33,7 +34,9 @@ public class SecurityConfig {
         // Vite dev server
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:5173",
-                "http://192.168.1.19:5173",
+                "http://localhost:4173",
+                "http://192.168.1.19:5173",     //npm run dev -- --host
+                "http://192.168.1.19:4173",     //npm run preview -- --host
                 "https://hanno-shift.duckdns.org"
         ));
 
