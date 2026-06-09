@@ -11,10 +11,10 @@ export default defineConfig({
 
       manifest: {
         name: "HannoSHIFT",
-        short_name: "HannoSHIFT",
+        short_name: "Hanno\nSHIFT",
         description: "Shift Management System",
 
-        theme_color: "#1976d2",
+        theme_color: "#2F5496",
         background_color: "#ffffff",
 
         display: "standalone",
