@@ -6,6 +6,7 @@ import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
 import StaffMonthPage from "../pages/staff/StaffMonthPage";
 import EmployeesPage from "../pages/manager/EmployeesPage";
 import SettingsPage from "../pages/manager/SettingsPage";
+import AttendancePage from "../pages/manager/AttendancePage";
 
 /* ─── Определение платформы ─────────────────────────────── */
 function getInstallHint() {
@@ -287,7 +288,13 @@ export default function App() {
       <SettingsPage view={managerView} onNavigate={go} onLogout={onLogout} />
     </>
   );
-
+  if (managerView === "ATTENDANCE") return (
+    <>
+      <InstallBanner />
+      <AttendancePage view={managerView} onNavigate={go} onLogout={onLogout} />
+    </>
+  );
+  
   return (
     <>
       <InstallBanner />

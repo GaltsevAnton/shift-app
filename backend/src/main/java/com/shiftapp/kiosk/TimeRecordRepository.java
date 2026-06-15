@@ -15,6 +15,8 @@ public interface TimeRecordRepository extends JpaRepository<TimeRecord, Long> {
     // Все записи ресторана за диапазон дат (для менеджера)
     @Query("""
         SELECT t FROM TimeRecord t
+        JOIN FETCH t.user
+        LEFT JOIN FETCH t.editedBy
         WHERE t.restaurant.id = :restaurantId
           AND t.workDate BETWEEN :from AND :to
         ORDER BY t.workDate ASC, t.recordedAt ASC

@@ -83,6 +83,8 @@ public class SecurityConfig {
                         // если URL начинается на /api/staff/
                         // то роль может быть STAFF или MANAGER.
 
+                        .requestMatchers("/photos/**").permitAll()
+
                         .anyRequest().authenticated()
                         // Это правило на случай “всё, что не подошло выше”.
                 )

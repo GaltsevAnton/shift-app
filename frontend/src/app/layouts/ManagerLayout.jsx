@@ -2,6 +2,7 @@ import styles from "./AppShell.module.css";
 
 const MANAGER_MENU = [
   { key: "SHIFTS",    label: "シフト管理",  icon: "📅", sub: "月" },
+  { key: "ATTENDANCE", label: "勤怠管理",   icon: "🕐" },
   { key: "EMPLOYEES", label: "従業員管理",  icon: "👥" },
   { key: "SETTINGS",  label: "設定",        icon: "⚙️" },
 ];

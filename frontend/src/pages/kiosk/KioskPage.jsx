@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 const RESTAURANT_ID = 1;
-const AUTO_RETURN_SEC = 4; // секунд до возврата на главный экран
+const AUTO_RETURN_SEC = 3;
 
 /* ─── API ───────────────────────────────────────────────── */
 async function fetchStaff() {
@@ -10,14 +10,20 @@ async function fetchStaff() {
   if (!res.ok) throw new Error("Failed to load staff");
   return res.json();
 }
-
-async function fetchStatus(userId) {
-  const res = await fetch(`${API_BASE}/api/kiosk/status/${userId}`);
-  if (!res.ok) throw new Error("Failed to load status");
-  return res.json();
+async function fetchAllStatuses(staffList) {
+  const results = await Promise.all(
+    staffList.map(s =>
+      fetch(`${API_BASE}/api/kiosk/status/${s.id}`)
+        .then(r => r.json())
+        .then(status => ({ userId: s.id, status }))
+        .catch(() => ({ userId: s.id, status: { status: "NOT_STARTED" } }))
+    )
+  );
+  const map = {};
+  results.forEach(r => { map[r.userId] = r.status; });
+  return map;
 }
-
-async function punch(userId, recordType, photoBase64) {
+async function punchApi(userId, recordType, photoBase64) {
   const res = await fetch(`${API_BASE}/api/kiosk/punch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -34,28 +40,30 @@ async function punch(userId, recordType, photoBase64) {
 function formatTime(instant) {
   if (!instant) return "--:--";
   return new Date(instant).toLocaleTimeString("ja-JP", {
-    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Tokyo",
   });
 }
 
-function getActionLabel(recordType) {
-  switch (recordType) {
-    case "CLOCK_IN":    return "出勤";
-    case "CLOCK_OUT":   return "退勤";
-    case "BREAK_START": return "休憩開始";
-    case "BREAK_END":   return "休憩終了";
-    default:            return recordType;
-  }
-}
+const KANA_GROUPS = [
+  { key: "ア", chars: "アイウエオ" },
+  { key: "カ", chars: "カキクケコガギグゲゴ" },
+  { key: "サ", chars: "サシスセソザジズゼゾ" },
+  { key: "タ", chars: "タチツテトダヂヅデド" },
+  { key: "ナ", chars: "ナニヌネノ" },
+  { key: "ハ", chars: "ハヒフヘホバビブベボパピプペポ" },
+  { key: "マ", chars: "マミムメモ" },
+  { key: "ヤ", chars: "ヤユヨ" },
+  { key: "ラ", chars: "ラリルレロ" },
+  { key: "ワ", chars: "ワヲン" },
+];
 
-function getActionColor(recordType) {
-  switch (recordType) {
-    case "CLOCK_IN":    return "#16a34a";
-    case "CLOCK_OUT":   return "#dc2626";
-    case "BREAK_START": return "#d97706";
-    case "BREAK_END":   return "#2563eb";
-    default:            return "#475569";
+function getKanaGroup(name) {
+  if (!name) return null;
+  const first = name[0];
+  for (const g of KANA_GROUPS) {
+    if (g.chars.includes(first)) return g.key;
   }
+  return null;
 }
 
 function getAvailableActions(status) {
@@ -68,245 +76,107 @@ function getAvailableActions(status) {
   }
 }
 
-function getStatusLabel(status) {
-  switch (status) {
-    case "NOT_STARTED": return { label: "未出勤", color: "#94a3b8" };
-    case "WORKING":     return { label: "出勤中", color: "#16a34a" };
-    case "ON_BREAK":    return { label: "休憩中", color: "#d97706" };
-    case "FINISHED":    return { label: "退勤済", color: "#dc2626" };
-    default:            return { label: "",       color: "#94a3b8" };
+function getActionLabel(type) {
+  switch (type) {
+    case "CLOCK_IN":    return "出勤";
+    case "CLOCK_OUT":   return "退勤";
+    case "BREAK_START": return "休憩";
+    case "BREAK_END":   return "復帰";
+    default:            return type;
   }
 }
 
-/* ─── Clock ─────────────────────────────────────────────── */
-function Clock() {
+function getActionBg(type, available) {
+  if (!available.includes(type)) return "rgba(255,255,255,0.15)";
+  switch (type) {
+    case "CLOCK_IN":    return "#3b6fd4";
+    case "CLOCK_OUT":   return "#e53935";
+    case "BREAK_START": return "#f57c00";
+    case "BREAK_END":   return "#43a047";
+    default:            return "#3b6fd4";
+  }
+}
+
+/* ─── PopupClock ────────────────────────────────────────── */
+function PopupClock() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-
-  const date = now.toLocaleDateString("ja-JP", {
-    year: "numeric", month: "long", day: "numeric", weekday: "short",
-    timeZone: "Asia/Tokyo",
+  const dateStr = now.toLocaleDateString("en-US", {
+    month: "2-digit", day: "2-digit", weekday: "short", timeZone: "Asia/Tokyo",
   });
-  const time = now.toLocaleTimeString("ja-JP", {
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    timeZone: "Asia/Tokyo",
+  const timeStr = now.toLocaleTimeString("ja-JP", {
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
   });
-
+  const secStr = String(now.getSeconds()).padStart(2, "0");
   return (
-    <div style={{ textAlign: "center", color: "#fff" }}>
-      <div style={{ fontSize: 18, opacity: 0.8, marginBottom: 4 }}>{date}</div>
-      <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: 2, fontFamily: "monospace" }}>{time}</div>
-    </div>
+    <>
+      <div style={{ fontSize: 15, color: "rgba(255,255,255,0.8)", fontWeight: 600, marginBottom: 4 }}>
+        {dateStr}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 2 }}>
+        <span style={{ fontSize: 44, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>{timeStr}</span>
+        <span style={{ fontSize: 26, fontWeight: 700, color: "rgba(255,255,255,0.75)", fontFamily: "monospace" }}>:{secStr}</span>
+      </div>
+    </>
   );
 }
 
-/* ─── Screen 1: Staff list ──────────────────────────────── */
-function StaffListScreen({ onSelect }) {
-  const [staff, setStaff]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(null);
+/* ─── PunchPopup ────────────────────────────────────────── */
+function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
+  const videoRef  = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState(null);
+  const [success, setSuccess]         = useState(null);
+  const [countdown, setCountdown]     = useState(null);
 
-  useEffect(() => {
-    fetchStaff()
-      .then(setStaff)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const availableActions = getAvailableActions(statusInfo?.status || "NOT_STARTED");
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 32 }}>
-      <Clock />
-
-      <div style={{ fontSize: 20, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-        名前をタップしてください
-      </div>
-
-      {loading && (
-        <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>読み込み中...</div>
-      )}
-      {error && (
-        <div style={{ color: "#fca5a5", fontSize: 14 }}>エラー: {error}</div>
-      )}
-
-      <div style={{
-        display: "flex", flexWrap: "wrap", gap: 16,
-        justifyContent: "center", maxWidth: 800, width: "100%",
-      }}>
-        {staff.map(s => (
-          <button key={s.id} onClick={() => onSelect(s)}
-            style={{
-              width: 160, height: 80,
-              background: "rgba(255,255,255,0.12)",
-              border: "2px solid rgba(255,255,255,0.2)",
-              borderRadius: 16, color: "#fff",
-              fontSize: 18, fontWeight: 700,
-              cursor: "pointer",
-              transition: "all 0.15s",
-              backdropFilter: "blur(8px)",
-            }}
-            onTouchStart={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
-            onTouchEnd={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
-          >
-            {s.fullName}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Screen 2: Action select ───────────────────────────── */
-function ActionScreen({ staff, onAction, onBack }) {
-  const [status, setStatus]   = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
-
-  useEffect(() => {
-    fetchStatus(staff.id)
-      .then(setStatus)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [staff.id]);
-
-  const actions = status ? getAvailableActions(status.status) : [];
-  const sl      = status ? getStatusLabel(status.status) : null;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 32 }}>
-      <Clock />
-
-      {/* Имя сотрудника */}
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 32, fontWeight: 800, color: "#fff" }}>{staff.fullName}</div>
-        {sl && (
-          <div style={{
-            display: "inline-block", marginTop: 8,
-            padding: "4px 16px", borderRadius: 20,
-            background: sl.color + "33", border: `1px solid ${sl.color}`,
-            color: sl.color, fontSize: 14, fontWeight: 700,
-          }}>
-            {sl.label}
-          </div>
-        )}
-      </div>
-
-      {/* Время прихода/ухода */}
-      {status && (
-        <div style={{
-          display: "flex", gap: 24,
-          color: "rgba(255,255,255,0.6)", fontSize: 14,
-        }}>
-          {status.clockInAt  && <span>出勤 {formatTime(status.clockInAt)}</span>}
-          {status.breakStartAt && <span>休憩開始 {formatTime(status.breakStartAt)}</span>}
-          {status.breakEndAt && <span>休憩終了 {formatTime(status.breakEndAt)}</span>}
-          {status.clockOutAt && <span>退勤 {formatTime(status.clockOutAt)}</span>}
-        </div>
-      )}
-
-      {loading && <div style={{ color: "rgba(255,255,255,0.5)" }}>読み込み中...</div>}
-      {error   && <div style={{ color: "#fca5a5" }}>エラー: {error}</div>}
-
-      {/* Кнопки действий */}
-      {actions.length === 0 && status?.status === "FINISHED" && (
-        <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 18 }}>
-          本日の退勤打刻は完了しています
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
-        {actions.map(action => (
-          <button key={action} onClick={() => onAction(action)}
-            style={{
-              width: 180, height: 100,
-              background: getActionColor(action),
-              border: "none", borderRadius: 20,
-              color: "#fff", fontSize: 22, fontWeight: 800,
-              cursor: "pointer", boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-              transition: "transform 0.1s",
-            }}
-            onTouchStart={e => e.currentTarget.style.transform = "scale(0.96)"}
-            onTouchEnd={e => e.currentTarget.style.transform = "scale(1)"}
-          >
-            {getActionLabel(action)}
-          </button>
-        ))}
-      </div>
-
-      {/* Назад */}
-      <button onClick={onBack} style={{
-        marginTop: 8, background: "none",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: 10, color: "rgba(255,255,255,0.6)",
-        padding: "10px 28px", fontSize: 15, cursor: "pointer",
-      }}>
-        ← 戻る
-      </button>
-    </div>
-  );
-}
-
-/* ─── Screen 3: Camera & confirm ────────────────────────── */
-function CameraScreen({ staff, recordType, onDone, onBack }) {
-  const videoRef   = useRef(null);
-  const canvasRef  = useRef(null);
-  const streamRef  = useRef(null);
-  const [photo, setPhoto]       = useState(null);  // base64
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState(null);
-  const [success, setSuccess]   = useState(null);
-  const [countdown, setCountdown] = useState(null);
-
-  // Запуск камеры
   useEffect(() => {
     navigator.mediaDevices?.getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then(stream => {
         streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => setCameraReady(true);
+        }
       })
-      .catch(() => setError("カメラにアクセスできません"));
-
-    return () => {
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
+      .catch(() => setCameraError("カメラにアクセスできません"));
+    return () => streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  // Снять фото
-  function takePhoto() {
+  async function handleAction(recordType) {
+    if (loading) return;
+    setLoading(true); setError(null);
+
+    // Снимаем фото автоматически
+    let photoBase64 = null;
     const video  = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    if (video && canvas && cameraReady) {
+      canvas.width  = video.videoWidth  || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      photoBase64 = canvas.toDataURL("image/jpeg", 0.6);
+    }
 
-    canvas.width  = video.videoWidth  || 640;
-    canvas.height = video.videoHeight || 480;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-
-    // Сжатие до ~100KB
-    const base64 = canvas.toDataURL("image/jpeg", 0.6);
-    setPhoto(base64);
-  }
-
-  // Подтвердить и отправить
-  async function confirm() {
-    setLoading(true);
-    setError(null);
     try {
-      const result = await punch(staff.id, recordType, photo);
+      const result = await punchApi(staff.id, recordType, photoBase64);
       streamRef.current?.getTracks().forEach(t => t.stop());
-      setSuccess({
-        action: getActionLabel(recordType),
-        time:   formatTime(result.recordedAt),
-      });
+      setSuccess({ action: getActionLabel(recordType), time: formatTime(result.recordedAt) });
 
-      // Автовозврат через AUTO_RETURN_SEC секунд
       let sec = AUTO_RETURN_SEC;
       setCountdown(sec);
       const timer = setInterval(() => {
         sec--;
         setCountdown(sec);
-        if (sec <= 0) { clearInterval(timer); onDone(); }
+        if (sec <= 0) { clearInterval(timer); onSuccess(result); }
       }, 1000);
     } catch (e) {
       setError(e.message);
@@ -315,177 +185,436 @@ function CameraScreen({ staff, recordType, onDone, onBack }) {
     }
   }
 
-  // Экран успеха
-  if (success) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
-        <div style={{ fontSize: 80 }}>✅</div>
-        <div style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>{staff.fullName}</div>
-        <div style={{
-          fontSize: 36, fontWeight: 700,
-          color: getActionColor(recordType),
-        }}>
-          {success.action}
-        </div>
-        <div style={{ fontSize: 48, fontWeight: 700, color: "#fff", fontFamily: "monospace" }}>
-          {success.time}
-        </div>
-        <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>
-          {countdown}秒後に戻ります
-        </div>
-        <button onClick={onDone} style={{
-          marginTop: 8, background: "rgba(255,255,255,0.15)",
-          border: "none", borderRadius: 12,
-          color: "#fff", padding: "12px 32px",
-          fontSize: 16, cursor: "pointer",
-        }}>
-          今すぐ戻る
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
-      <div style={{ fontSize: 24, fontWeight: 700, color: "#fff" }}>
-        {staff.fullName} — {getActionLabel(recordType)}
-      </div>
+    <div
+      onClick={e => { if (e.target === e.currentTarget && !loading) onClose(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        backdropFilter: "blur(4px)",
+      }}
+    >
+      <div style={{
+        width: 780, height: 480,
+        background: "#1e3a5f",
+        borderRadius: 24,
+        overflow: "hidden",
+        display: "flex",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+      }}>
 
-      {/* Камера или фото */}
-      <div style={{ position: "relative", borderRadius: 20, overflow: "hidden",
-        width: 320, height: 240, background: "#000" }}>
-        {!photo ? (
-          <video ref={videoRef} autoPlay playsInline muted
-            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
-          <img src={photo} alt="preview"
-            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-        )}
-      </div>
-      <canvas ref={canvasRef} style={{ display: "none" }} />
-
-      {error && <div style={{ color: "#fca5a5", fontSize: 14 }}>{error}</div>}
-
-      {/* Кнопки */}
-      <div style={{ display: "flex", gap: 16 }}>
-        {!photo ? (
-          <button onClick={takePhoto} style={{
-            width: 160, height: 60,
-            background: "#2F5496", border: "none", borderRadius: 14,
-            color: "#fff", fontSize: 18, fontWeight: 700, cursor: "pointer",
+        {success ? (
+          /* ── Экран успеха ── */
+          <div style={{
+            flex: 1, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 16,
           }}>
-            📷 撮影
-          </button>
+            <div style={{ fontSize: 72 }}>✅</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>{staff.fullName}</div>
+            <div style={{
+              fontSize: 44, fontWeight: 700, color: "#fff",
+              background: "rgba(255,255,255,0.1)", borderRadius: 12,
+              padding: "8px 32px",
+            }}>
+              {success.action}
+            </div>
+            <div style={{ fontSize: 52, fontWeight: 700, color: "#fff", fontFamily: "monospace" }}>
+              {success.time}
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>
+              {countdown}秒後に閉じます
+            </div>
+          </div>
         ) : (
           <>
-            <button onClick={() => setPhoto(null)} style={{
-              width: 120, height: 60,
-              background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 14,
-              color: "#fff", fontSize: 16, cursor: "pointer",
+            {/* ── Левая часть: камера ── */}
+            <div style={{
+              width: 380, flexShrink: 0, position: "relative",
+              background: "#000",
             }}>
-              撮り直す
-            </button>
-            <button onClick={confirm} disabled={loading} style={{
-              width: 160, height: 60,
-              background: getActionColor(recordType),
-              border: "none", borderRadius: 14,
-              color: "#fff", fontSize: 18, fontWeight: 700, cursor: "pointer",
-              opacity: loading ? 0.6 : 1,
+              <video
+                ref={videoRef}
+                autoPlay playsInline muted
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+              <canvas ref={canvasRef} style={{ display: "none" }} />
+
+              {/* Овал для лица */}
+              {cameraReady && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  pointerEvents: "none",
+                }}>
+                  <div style={{
+                    width: "55%", height: "75%",
+                    border: "3px dashed rgba(255,255,255,0.5)",
+                    borderRadius: "50%",
+                  }} />
+                </div>
+              )}
+
+              {/* Ошибка камеры */}
+              {cameraError && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center",
+                  color: "rgba(255,255,255,0.7)", fontSize: 14, gap: 8,
+                }}>
+                  <div style={{ fontSize: 40 }}>📷</div>
+                  <div>{cameraError}</div>
+                </div>
+              )}
+
+              {/* Имя поверх камеры снизу */}
+              <div style={{
+                position: "absolute", bottom: 0, left: 0, right: 0,
+                background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
+                padding: "24px 16px 16px",
+                color: "#fff", fontSize: 18, fontWeight: 700, textAlign: "center",
+              }}>
+                {staff.fullName}
+                {statusInfo?.clockInAt && (
+                  <div style={{ fontSize: 13, opacity: 0.8, fontWeight: 400, marginTop: 2 }}>
+                    出勤 {formatTime(statusInfo.clockInAt)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Правая часть: время + фото + кнопки ── */}
+            <div style={{
+              flex: 1, display: "flex", flexDirection: "column",
+              background: "#1e3a5f",
             }}>
-              {loading ? "..." : "✓ 確定"}
-            </button>
+              {/* Дата и время */}
+              <div style={{ padding: "16px 16px 10px", textAlign: "center" }}>
+                <PopupClock />
+              </div>
+
+              {/* Фото + имя */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 14,
+                padding: "0 20px 12px",
+              }}>
+                <div style={{
+                  width: 64, height: 64, borderRadius: "50%",
+                  background: "#d0dff0", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <svg viewBox="0 0 100 100" width="48" height="48" opacity="0.4">
+                    <circle cx="50" cy="35" r="22" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
+                    <path d="M 20 85 Q 50 65 80 85" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <div>
+                  {statusInfo?.clockInAt && (
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", marginBottom: 2 }}>
+                      {formatTime(statusInfo.clockInAt)} 〜
+                    </div>
+                  )}
+                  <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>
+                    {staff.fullName}
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <div style={{
+                  margin: "0 12px 8px",
+                  background: "rgba(229,57,53,0.2)", border: "1px solid rgba(229,57,53,0.5)",
+                  borderRadius: 8, padding: "6px 12px",
+                  color: "#ffcdd2", fontSize: 12, textAlign: "center",
+                }}>
+                  {error}
+                </div>
+              )}
+
+              {/* 4 кнопки */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", flex: 1, gap: 1 }}>
+                {["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"].map(action => {
+                  const isAvail = availableActions.includes(action);
+                  return (
+                    <button
+                      key={action}
+                      onClick={() => isAvail && !loading && handleAction(action)}
+                      style={{
+                        background: getActionBg(action, availableActions),
+                        border: "none", color: "#fff",
+                        fontSize: 26, fontWeight: 800,
+                        cursor: isAvail && !loading ? "pointer" : "not-allowed",
+                        opacity: isAvail ? 1 : 0.3,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "transform 0.1s",
+                      }}
+                      onTouchStart={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
+                      onTouchEnd={e => e.currentTarget.style.transform = "scale(1)"}
+                      onMouseDown={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
+                      onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
+                    >
+                      {loading && isAvail ? "..." : getActionLabel(action)}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {statusInfo?.status === "FINISHED" && (
+                <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 12, textAlign: "center", padding: "6px 0" }}>
+                  本日の退勤打刻は完了しています
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* Пропустить фото */}
-      <button onClick={async () => {
-        setLoading(true);
-        try {
-          await punch(staff.id, recordType, null);
-          streamRef.current?.getTracks().forEach(t => t.stop());
-          onDone();
-        } catch (e) {
-          setError(e.message);
-        } finally {
-          setLoading(false);
-        }
-      }} style={{
-        background: "none", border: "none",
-        color: "rgba(255,255,255,0.4)", fontSize: 13,
-        cursor: "pointer", padding: 0,
-      }}>
-        写真なしで{getActionLabel(recordType)}
-      </button>
+/* ─── Staff Card ────────────────────────────────────────── */
+function StaffCard({ staff, statusInfo, onClick, isSelected }) {
+  const clockIn    = statusInfo?.clockInAt;
+  const isActive   = statusInfo?.status === "WORKING" || statusInfo?.status === "ON_BREAK";
+  const isFinished = statusInfo?.status === "FINISHED";
+  const isBreak    = statusInfo?.status === "ON_BREAK";
 
-      <button onClick={onBack} style={{
-        background: "none",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: 10, color: "rgba(255,255,255,0.6)",
-        padding: "10px 28px", fontSize: 15, cursor: "pointer",
+  return (
+    <div onClick={onClick} style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      cursor: "pointer", width: 130,
+      opacity: isFinished ? 0.55 : 1,
+    }}>
+      <div style={{
+        width: 110, height: 110, borderRadius: 10,
+        overflow: "hidden", position: "relative",
+        background: "#d0dff0",
+        border: isSelected ? "3px solid #fff" : "3px solid rgba(255,255,255,0.2)",
+        boxShadow: isSelected ? "0 0 0 3px #3b6fd4" : "none",
+        transition: "box-shadow 0.15s",
       }}>
-        ← 戻る
-      </button>
+        {/* Аватар — фото или заглушка */}
+        <div style={{
+          width: "100%", height: "100%",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: statusInfo?.lastPhotoPath && statusInfo?.status !== "NOT_STARTED" ? "#000" : "#d0dff0",
+        }}>
+          {statusInfo?.lastPhotoPath && statusInfo?.status !== "NOT_STARTED" && statusInfo?.status !== "FINISHED" ? (
+            <img
+              src={`${API_BASE}${statusInfo.lastPhotoPath}`}
+              alt={staff.fullName}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : (
+            <svg viewBox="0 0 100 100" width="72" height="72" opacity="0.4">
+              <circle cx="50" cy="35" r="22" fill="none" stroke="#1e3a5f" strokeWidth="3"/>
+              <path d="M 20 85 Q 50 65 80 85" fill="none" stroke="#1e3a5f" strokeWidth="3" strokeLinecap="round"/>
+              <ellipse cx="38" cy="38" rx="4" ry="5" fill="#1e3a5f" opacity="0.5"/>
+              <ellipse cx="62" cy="38" rx="4" ry="5" fill="#1e3a5f" opacity="0.5"/>
+            </svg>
+          )}
+        </div>
+
+        {/* Статус точка */}
+        {isActive && (
+          <div style={{
+            position: "absolute", top: 6, left: 6,
+            width: 10, height: 10, borderRadius: "50%",
+            background: isBreak ? "#f57c00" : "#43a047",
+            border: "2px solid #fff",
+            boxShadow: "0 0 4px rgba(0,0,0,0.3)",
+          }} />
+        )}
+
+        {/* Время прихода */}
+        {clockIn && (
+          <div style={{
+            position: "absolute", top: 5, left: 0, right: 0,
+            textAlign: "center", fontSize: 12, fontWeight: 700, color: "#fff",
+            textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+            background: "rgba(0,0,0,0.3)", padding: "2px 0",
+          }}>
+            {formatTime(clockIn)}
+          </div>
+        )}
+      </div>
+
+      {/* Имя */}
+      <div style={{
+        marginTop: 6, fontSize: 13, fontWeight: 600,
+        color: "#fff", textAlign: "center", lineHeight: 1.3,
+        textShadow: "0 1px 2px rgba(0,0,0,0.4)",
+        maxWidth: 120, overflow: "hidden",
+      }}>
+        {staff.fullName}
+      </div>
     </div>
   );
 }
 
 /* ─── KioskPage ─────────────────────────────────────────── */
 export default function KioskPage() {
-  const [screen, setScreen]         = useState("staff");   // staff | action | camera
+  const [staff, setStaff]           = useState([]);
+  const [statusMap, setStatusMap]   = useState({});
+  const [loading, setLoading]       = useState(true);
   const [selectedStaff, setSelectedStaff] = useState(null);
-  const [selectedAction, setSelectedAction] = useState(null);
+  const [activeGroup, setActiveGroup]     = useState("All");
+  const [now, setNow] = useState(new Date());
 
-  function handleSelectStaff(staff) {
-    setSelectedStaff(staff);
-    setScreen("action");
-  }
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
-  function handleSelectAction(action) {
-    setSelectedAction(action);
-    setScreen("camera");
-  }
+  const loadData = useCallback(async () => {
+    try {
+      const s  = await fetchStaff();
+      setStaff(s);
+      const sm = await fetchAllStatuses(s);
+      setStatusMap(sm);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
 
-  function handleDone() {
+  useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const t = setInterval(() => { if (!selectedStaff) loadData(); }, 30000);
+    return () => clearInterval(t);
+  }, [selectedStaff, loadData]);
+
+  const groups = [
+    { key: "All", count: staff.length },
+    ...KANA_GROUPS.map(g => ({
+      key: g.key,
+      count: staff.filter(s => getKanaGroup(s.fullName) === g.key).length,
+    })).filter(g => g.count > 0),
+  ];
+
+  const filteredStaff = activeGroup === "All"
+    ? staff
+    : staff.filter(s => getKanaGroup(s.fullName) === activeGroup);
+
+  const workingCount = Object.values(statusMap)
+    .filter(s => s.status === "WORKING" || s.status === "ON_BREAK").length;
+
+  async function handlePunchSuccess(result) {
+    if (selectedStaff) {
+      try {
+        const res       = await fetch(`${API_BASE}/api/kiosk/status/${selectedStaff.id}`);
+        const newStatus = await res.json();
+        setStatusMap(prev => ({ ...prev, [selectedStaff.id]: newStatus }));
+      } catch {}
+    }
     setSelectedStaff(null);
-    setSelectedAction(null);
-    setScreen("staff");
   }
+
+  const dateStr = now.toLocaleDateString("en-US", {
+    month: "2-digit", day: "2-digit", weekday: "short", timeZone: "Asia/Tokyo",
+  });
+  const timeStr = now.toLocaleTimeString("ja-JP", {
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
+  });
+  const secStr = String(now.getSeconds()).padStart(2, "0");
 
   return (
     <div style={{
-      minHeight: "100dvh",
-      background: "linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)",
+      width: "100vw", height: "100dvh",
       display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      padding: 24,
+      background: "#2F5496",
       fontFamily: "'Noto Sans JP', -apple-system, sans-serif",
+      userSelect: "none", overflow: "hidden",
     }}>
-      {/* Лого */}
+
+      {/* ── Header ── */}
       <div style={{
-        position: "fixed", top: 20, left: 24,
-        color: "rgba(255,255,255,0.4)", fontSize: 14, fontWeight: 700,
-        letterSpacing: 1,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 20px", background: "#1e3a5f", flexShrink: 0,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
       }}>
-        HannoSHIFT
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={{ fontSize: 14, color: "rgba(255,255,255,0.8)", fontWeight: 600 }}>{dateStr}</span>
+          <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>{timeStr}</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: "rgba(255,255,255,0.75)", fontFamily: "monospace" }}>:{secStr}</span>
+        </div>
+
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
+          HannoSHIFT
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={loadData} style={{
+            background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+            color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px",
+          }}>↻</button>
+          <div style={{
+            background: "rgba(255,255,255,0.15)", borderRadius: 20,
+            padding: "6px 18px", color: "#fff", fontSize: 14, fontWeight: 700,
+            border: "1px solid rgba(255,255,255,0.2)",
+          }}>
+            出勤中 {workingCount}人
+          </div>
+        </div>
       </div>
 
-      {screen === "staff" && (
-        <StaffListScreen onSelect={handleSelectStaff} />
-      )}
-      {screen === "action" && selectedStaff && (
-        <ActionScreen
+      {/* ── Body ── */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+
+        {/* Left: kana filter */}
+        <div style={{
+          width: 68, flexShrink: 0, background: "#1e3a5f",
+          display: "flex", flexDirection: "column", overflowY: "auto",
+          boxShadow: "2px 0 8px rgba(0,0,0,0.2)",
+        }}>
+          {groups.map(g => (
+            <button key={g.key} onClick={() => setActiveGroup(g.key)} style={{
+              display: "flex", flexDirection: "column", alignItems: "center",
+              padding: "11px 4px",
+              background: activeGroup === g.key ? "#2F5496" : "transparent",
+              border: "none", cursor: "pointer",
+              borderLeft: activeGroup === g.key ? "3px solid #fff" : "3px solid transparent",
+              transition: "background 0.15s",
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{g.key}</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>({g.count}人)</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Center: staff grid */}
+        <div style={{
+          flex: 1, overflowY: "auto", padding: "16px 16px",
+          display: "flex", flexWrap: "wrap",
+          alignContent: "flex-start", gap: 14,
+        }}>
+          {loading ? (
+            <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 16, padding: 40 }}>読み込み中...</div>
+          ) : filteredStaff.length === 0 ? (
+            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 15, padding: 40 }}>
+              該当するスタッフがいません
+            </div>
+          ) : (
+            filteredStaff.map(s => (
+              <StaffCard
+                key={s.id}
+                staff={s}
+                statusInfo={statusMap[s.id]}
+                isSelected={selectedStaff?.id === s.id}
+                onClick={() => setSelectedStaff(s)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Popup ── */}
+      {selectedStaff && (
+        <PunchPopup
           staff={selectedStaff}
-          onAction={handleSelectAction}
-          onBack={handleDone}
-        />
-      )}
-      {screen === "camera" && selectedStaff && selectedAction && (
-        <CameraScreen
-          staff={selectedStaff}
-          recordType={selectedAction}
-          onDone={handleDone}
-          onBack={() => setScreen("action")}
+          statusInfo={statusMap[selectedStaff.id]}
+          onClose={() => setSelectedStaff(null)}
+          onSuccess={handlePunchSuccess}
         />
       )}
     </div>

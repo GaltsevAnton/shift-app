@@ -231,4 +231,10 @@ export const api = {
       body: JSON.stringify(userIds),
     }),
 
+  // ===== ATTENDANCE =====
+  attendanceRecords: (from, to) =>
+    request(`/api/manager/attendance?from=${from}&to=${to}`),
+
+  attendanceEdit: (id, payload) =>
+    request(`/api/manager/attendance/${id}`, { method: "PUT", body: payload }),
 };

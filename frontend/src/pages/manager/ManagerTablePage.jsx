@@ -760,6 +760,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [visibleWorkplaces, setVisibleWorkplaces]   = useState(() => loadFilterSet("mgrFilterWp")   || new Set());
   const [visiblePositions, setVisiblePositions]     = useState(() => loadFilterSet("mgrFilterPos")  || new Set());
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("mgrFilterDept") || new Set());
+  const [attendanceMap, setAttendanceMap] = useState({}); // "userId_date" → status
 
   /* ── persist view mode state ── */
   useEffect(() => { localStorage.setItem("managerViewMode",    viewMode);     }, [viewMode]);
@@ -815,12 +816,42 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         weeksPromise = api.managerMonth(ymVal);
       }
 
-      const [weeks, employees, wps, depts] = await Promise.all([
+      // вычисляем from/to для attendance
+      let attFrom, attTo;
+      if (mode === "week") {
+        attFrom = wk;
+        attTo   = addDays(wk, 6);
+      } else if (mode === "period" && pFrom && pTo) {
+        attFrom = pFrom;
+        attTo   = pTo;
+      } else {
+        const total = daysInMonth(ymVal);
+        attFrom = `${ymVal}-01`;
+        attTo   = `${ymVal}-${String(total).padStart(2,"0")}`;
+      }
+
+      const [weeks, employees, wps, depts, attRecs] = await Promise.all([
         weeksPromise,
         api.managerEmployeesList(),
         api.settingsWorkplacesList(),
         api.settingsDepartmentsList(),
+        api.attendanceRecords(attFrom, attTo).catch(() => []),
       ]);
+
+      // Строим attendanceMap: "userId_date" → "finished"|"working"|"break"
+      const attMap = {};
+      for (const r of (attRecs || [])) {
+        const key = `${r.userId}_${r.workDate}`;
+        if (!attMap[key]) attMap[key] = [];
+        attMap[key].push(r.recordType);
+      }
+      const resolvedAttMap = {};
+      for (const [key, types] of Object.entries(attMap)) {
+        if (types.includes("CLOCK_OUT"))   resolvedAttMap[key] = "finished";
+        else if (types.includes("BREAK_START") && !types.includes("BREAK_END")) resolvedAttMap[key] = "break";
+        else if (types.includes("CLOCK_IN")) resolvedAttMap[key] = "working";
+      }
+      setAttendanceMap(resolvedAttMap);
 
       const posMap = {}, deptsMap = {};
       employees.forEach(e => {
@@ -1614,6 +1645,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           const isSelected  = selectedCells.some(c => c.userId === staff.userId && c.date === date);
                           const isSaving    = savingCell === `${staff.userId}_${date}`;
                           const isOpen      = openCell?.userId === staff.userId && openCell?.date === date;
+                          const attStatus = attendanceMap[`${staff.userId}_${date}`];
 
                           const cellCls = [
                             styles.cell,
@@ -1635,6 +1667,19 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                   ref={el => { anchorRef.current = el; }}
                                   onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
                                   onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
+
+                                  {/* Индикатор посещаемости */}
+                                  {attStatus && (
+                                    <div style={{
+                                      position: "absolute", top: 3, right: 3,
+                                      width: 6, height: 6, borderRadius: "50%",
+                                      background: attStatus === "finished" ? "#16a34a"
+                                                : attStatus === "working"  ? "#2563eb"
+                                                : "#d97706",
+                                      zIndex: 1,
+                                    }} />
+                                  )}
+                                                                    
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
                                   ) : day.off || slots.length === 0 ? (

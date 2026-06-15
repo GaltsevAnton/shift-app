@@ -11,6 +11,7 @@ public class StaffStatusResponse {
     private Instant clockOutAt;
     private Instant breakStartAt;
     private Instant breakEndAt;
+    private String lastPhotoPath;
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
@@ -26,4 +27,7 @@ public class StaffStatusResponse {
 
     public Instant getBreakEndAt() { return breakEndAt; }
     public void setBreakEndAt(Instant breakEndAt) { this.breakEndAt = breakEndAt; }
+
+    public String getLastPhotoPath() { return lastPhotoPath; }
+    public void setLastPhotoPath(String lastPhotoPath) { this.lastPhotoPath = lastPhotoPath; }
 }
