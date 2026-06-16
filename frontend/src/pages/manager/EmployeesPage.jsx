@@ -17,7 +17,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   const [createForm, setCreateForm] = useState(emptyCreate);
   const [editId, setEditId]         = useState(null);
   const [editForm, setEditForm]     = useState({
-    login: "", fullName: "", position: "", departmentIds: [], role: "STAFF", active: true, password: "",
+    login: "", fullName: "", fullNameKana: "", position: "", departmentIds: [], role: "STAFF", active: true, password: "",
   });
 
   async function load() {
@@ -61,6 +61,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     setEditForm({
       login:         emp.login      || "",
       fullName:      emp.fullName   || "",
+      fullNameKana:  emp.fullNameKana || "",
       position:      emp.position   || "",
       departmentIds: (emp.departments || []).map(d => d.id),
       role:          emp.role       || "STAFF",
@@ -80,6 +81,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       await api.managerEmployeesUpdate(editId, {
         login:         editForm.login.trim(),
         fullName:      editForm.fullName.trim(),
+        fullNameKana:  editForm.fullNameKana || null,
         position:      editForm.position   || null,
         departmentIds: editForm.departmentIds,
         role:          editForm.role,
@@ -161,6 +163,10 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
             <Field label="フルネーム *">
               <input value={createForm.fullName} onChange={e => setCreateForm({ ...createForm, fullName: e.target.value })} style={inputStyle} placeholder="山田 太郎" />
             </Field>
+            <Field label="フリガナ（カタカナ）">
+              <input
+                value={createForm.fullNameKana || ""} onChange={e => setCreateForm({ ...createForm, fullNameKana: e.target.value })} style={inputStyle} placeholder="ヤマダ タロウ"/>
+            </Field>
             <Field label="職種・役職">
               <PositionSelect value={createForm.position} onChange={v => setCreateForm({ ...createForm, position: v })} />
             </Field>
@@ -168,6 +174,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
               <select value={createForm.role} onChange={e => setCreateForm({ ...createForm, role: e.target.value })} style={inputStyle}>
                 <option value="STAFF">STAFF</option>
                 <option value="MANAGER">MANAGER</option>
+                <option value="KIOSK">KIOSK</option>
               </select>
             </Field>
             <Field label="パスワード *">
@@ -220,6 +227,9 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                         <Field label="フルネーム">
                           <input value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })} style={inputStyle} />
                         </Field>
+                        <Field label="フリガナ（カタカナ）">
+                          <input value={editForm.fullNameKana} onChange={e => setEditForm({ ...editForm, fullNameKana: e.target.value })} style={inputStyle} />
+                        </Field>
                         <Field label="職種・役職">
                           <PositionSelect value={editForm.position} onChange={v => setEditForm({ ...editForm, position: v })} />
                         </Field>
@@ -227,6 +237,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                           <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} style={inputStyle}>
                             <option value="STAFF">STAFF</option>
                             <option value="MANAGER">MANAGER</option>
+                            <option value="KIOSK">KIOSK</option>
                           </select>
                         </Field>
                         <Field label="新しいパスワード">

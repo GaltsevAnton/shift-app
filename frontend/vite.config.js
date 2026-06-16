@@ -3,12 +3,28 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  server: {
+    proxy: {
+      '/api': 'http://192.168.1.19:8080',
+      '/photos': 'http://192.168.1.19:8080',
+    },
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main:  "index.html",
+        kiosk: "kiosk.html",
+      },
+    },
+  },
   plugins: [
     react(),
 
     VitePWA({
       registerType: "autoUpdate",
-
+      workbox: {
+        navigateFallbackDenylist: [/^\/photos\//, /^\/api\//],
+      },
       manifest: {
         name: "HannoSHIFT",
         short_name: "Hanno\nSHIFT",

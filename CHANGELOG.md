@@ -1,7 +1,74 @@
 # HannoSHIFT — CHANGELOG
 
 Лог изменений по дням разработки.
-
+ 
+---
+ 
+## 2026-06-16
+ 
+### 勤怠管理 (打刻システム) — полная реализация
+ 
+#### Backend — новый пакет `com.shiftapp.kiosk`
+- **`TimeRecord.java`** — entity таблицы `time_records`
+- **`TimeRecordType.java`** — enum: CLOCK_IN / CLOCK_OUT / BREAK_START / BREAK_END
+- **`TimeRecordRepository.java`** — `findByUser_IdAndWorkDateOrderByRecordedAtAsc`, `findByRestaurantAndDateRange` (с JOIN FETCH t.user)
+- **`KioskService.java`** — логика статуса, punch, сохранение фото
+  - `kiosk.photo-dir` из `application.yml`
+  - `lastPhotoPath` — последнее фото сотрудника за день
+- **`KioskController.java`** — без JWT:
+  - `GET /api/kiosk/staff?restaurantId=1`
+  - `GET /api/kiosk/status/{userId}`
+  - `POST /api/kiosk/punch`
+- **`StaffStatusResponse.java`** — status, clockInAt, breakStartAt, breakEndAt, clockOutAt, lastPhotoPath
+#### Backend — новый пакет `com.shiftapp.attendance`
+- `GET /api/manager/attendance?from=&to=`
+- `PUT /api/manager/attendance/{id}` — ручная правка
+#### SecurityConfig.java
+- permitAll: `/api/kiosk/**`, `/photos/**`
+#### application.yml
+- `kiosk.photo-dir` (dev: `C:/shift-app/photos/`, prod: `/var/www/shift-app/photos/`)
+- `spring.web.resources.static-locations` — отдача фото через Spring Boot
+#### SQL
+- `V6__add_time_records.sql` — таблица `time_records` + индексы
+- `V7__add_fullname_kana.sql` — `ALTER TABLE users ADD COLUMN full_name_kana VARCHAR(200)`
+#### Frontend — `KioskPage.jsx` (`/kiosk`)
+- Роутинг в `main.jsx`: `window.location.pathname.startsWith('/kiosk')`
+- Дизайн под iPad 10 landscape, синяя тема (#2F5496 / #1e3a5f)
+- Header: дата/время с секундами, счётчик 出勤中, кнопка обновления
+- Левая панель: катакана фильтр (ア/カ/サ...) — группировка по `fullNameKana`
+- Сетка карточек: фото из lastPhotoPath (WORKING/ON_BREAK), заглушка (NOT_STARTED/FINISHED)
+- Попап (780×480px): камера слева (автозапуск) + время/кнопки справа
+  - 4 кнопки: 出勤(синий)/退勤(красный)/休憩(оранжевый)/復帰(зелёный)
+  - Автоснимок при нажатии кнопки, экран успеха 3 сек
+  - Закрытие тапом на фон (キャンセル убран)
+- Автообновление каждые 30 сек, `RESTAURANT_ID = 1`
+#### Frontend — `AttendancePage.jsx`
+- Sidebar: 🕐 勤怠管理 (между SHIFTS и EMPLOYEES)
+- Таблица: сотрудники × дни, точка + время прихода/ухода
+- Попап: детали записей + фото + ручная правка менеджером
+- `fmtTime` показывает секунды: `09:23:47`
+#### Frontend — `ManagerTablePage.jsx`
+- `attendanceMap` — цветная точка в ячейке (зелёный/синий/оранжевый)
+#### Users — フリガナ
+- `User.java`, `UserResponse.java`, `UserCreateRequest/UpdateRequest.java` — поле `fullNameKana`
+- `EmployeesPage.jsx` — поле フリガナ（カタカナ）
+- `KioskPage.jsx` — `getKanaGroup(staff)` использует `fullNameKana`
+#### api.js
+- `attendanceRecords(from, to)`, `attendanceEdit(id, payload)`
+#### nginx (прод)
+- `location /photos/ { alias /var/www/shift-app/photos/; }`
+---
+ 
+## 2026-06-09
+ 
+### PWA
+- Иконки, manifest.webmanifest, vite-plugin-pwa
+- theme_color: "#2F5496"
+- InstallBanner (ja/en) в App.jsx
+- nginx: location /manifest.webmanifest
+### LoginPage
+- Кнопка показа пароля (SVG)
+- Safari password save: `window.location.href = "/"`
 ---
 
 ## 2026-06-02

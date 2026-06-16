@@ -8,11 +8,11 @@ public class UserResponse {
     public Long id;
     public String login;
     public String fullName;
+    public String fullNameKana;
     public String position;
     public List<DeptItem> departments;
     public UserRole role;
     public boolean active;
-
     public static class DeptItem {
         public Long id;
         public String name;
@@ -24,6 +24,7 @@ public class UserResponse {
         r.id          = u.getId();
         r.login       = u.getLogin();
         r.fullName    = u.getFullName();
+        r.fullNameKana = u.getFullNameKana();
         r.position    = u.getPosition();
         r.role        = u.getRole();
         r.active      = u.isActive();

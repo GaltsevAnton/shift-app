@@ -74,7 +74,9 @@ public class AuthController {       //Это имя класса. Обычно �
         // LoginRequest — это DTO (данные, которые ввёл пользователь).
         // User — это Entity/модель из базы, не DTO
 
-        String token = jwtService.generateAccessToken(new CustomUserDetails(user));  
+        String token = user.getRole() == com.shiftapp.users.UserRole.KIOSK
+            ? jwtService.generateKioskToken(new CustomUserDetails(user))
+            : jwtService.generateAccessToken(new CustomUserDetails(user));  
         //CustomUserDetails(user) — это “обёртка” над User, чтобы привести его к формату, 
         // который удобно использовать в security / JWT.
         return new LoginResponse(token);

@@ -70,7 +70,7 @@ public class SecurityConfig {
                         // /api/auth/anything
                         // всё разрешено без токена, иначе ты не сможешь залогиниться.
 
-                        .requestMatchers("/api/kiosk/**").permitAll()
+                        .requestMatchers("/api/kiosk/punch", "/api/kiosk/status/**", "/api/kiosk/staff").hasRole("KIOSK")
                         .requestMatchers("/photos/**").permitAll()
 
                         .requestMatchers("/api/manager/**").hasRole("MANAGER")

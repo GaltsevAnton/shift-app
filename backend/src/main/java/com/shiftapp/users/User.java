@@ -49,6 +49,9 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(name = "full_name_kana")
+    private String fullNameKana;
+
     public User() {}
 
     public Long getId() { return id; }
@@ -69,4 +72,6 @@ public class User {
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getFullNameKana() { return fullNameKana; }
+    public void setFullNameKana(String fullNameKana) { this.fullNameKana = fullNameKana; }
 }

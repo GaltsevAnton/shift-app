@@ -57,7 +57,8 @@ const KANA_GROUPS = [
   { key: "ワ", chars: "ワヲン" },
 ];
 
-function getKanaGroup(name) {
+function getKanaGroup(staff) {
+  const name = staff.fullNameKana || staff.fullName;
   if (!name) return null;
   const first = name[0];
   for (const g of KANA_GROUPS) {
@@ -104,16 +105,18 @@ function PopupClock() {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  const dateStr = now.toLocaleDateString("en-US", {
-    month: "2-digit", day: "2-digit", weekday: "short", timeZone: "Asia/Tokyo",
-  });
+  const WD = ["日","月","火","水","木","金","土"];
+  const t  = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const m  = String(t.getMonth() + 1).padStart(2, "0");
+  const d  = String(t.getDate()).padStart(2, "0");
+  const dateStr = `${m}月${d}日（${WD[t.getDay()]}）`;
   const timeStr = now.toLocaleTimeString("ja-JP", {
     hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
   });
   const secStr = String(now.getSeconds()).padStart(2, "0");
   return (
     <>
-      <div style={{ fontSize: 15, color: "rgba(255,255,255,0.8)", fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ fontSize: 22, color: "rgba(255,255,255,0.8)", fontWeight: 600, marginBottom: 4 }}>
         {dateStr}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 2 }}>
@@ -304,9 +307,11 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                   background: "#d0dff0", flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <svg viewBox="0 0 100 100" width="48" height="48" opacity="0.4">
-                    <circle cx="50" cy="35" r="22" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
-                    <path d="M 20 85 Q 50 65 80 85" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
+                  <svg viewBox="0 0 100 100" width="48" height="48" opacity="0.5">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
+                    <path d="M 30 60 Q 50 78 70 60" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
+                    <path d="M 33 38 Q 38 32 43 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
+                    <path d="M 57 38 Q 62 32 67 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
                   </svg>
                 </div>
                 <div>
@@ -383,14 +388,14 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
   return (
     <div onClick={onClick} style={{
       display: "flex", flexDirection: "column", alignItems: "center",
-      cursor: "pointer", width: 130,
+      cursor: "pointer", width: 160,
       opacity: isFinished ? 0.55 : 1,
     }}>
       <div style={{
-        width: 110, height: 110, borderRadius: 10,
+        width: 140, height: 140, borderRadius: 6,
         overflow: "hidden", position: "relative",
         background: "#d0dff0",
-        border: isSelected ? "3px solid #fff" : "3px solid rgba(255,255,255,0.2)",
+        border: isSelected ? "3px solid #2F5496" : "3px solid rgba(0,0,0,0.1)",
         boxShadow: isSelected ? "0 0 0 3px #3b6fd4" : "none",
         transition: "box-shadow 0.15s",
       }}>
@@ -402,16 +407,16 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
         }}>
           {statusInfo?.lastPhotoPath && statusInfo?.status !== "NOT_STARTED" && statusInfo?.status !== "FINISHED" ? (
             <img
-              src={`${API_BASE}${statusInfo.lastPhotoPath}`}
+              src={statusInfo.lastPhotoPath}
               alt={staff.fullName}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
-            <svg viewBox="0 0 100 100" width="72" height="72" opacity="0.4">
-              <circle cx="50" cy="35" r="22" fill="none" stroke="#1e3a5f" strokeWidth="3"/>
-              <path d="M 20 85 Q 50 65 80 85" fill="none" stroke="#1e3a5f" strokeWidth="3" strokeLinecap="round"/>
-              <ellipse cx="38" cy="38" rx="4" ry="5" fill="#1e3a5f" opacity="0.5"/>
-              <ellipse cx="62" cy="38" rx="4" ry="5" fill="#1e3a5f" opacity="0.5"/>
+            <svg viewBox="0 0 100 100" width="72" height="72" opacity="0.5">
+              <circle cx="50" cy="50" r="45" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
+              <path d="M 30 60 Q 50 78 70 60" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
+              <path d="M 33 38 Q 38 32 43 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
+              <path d="M 57 38 Q 62 32 67 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
             </svg>
           )}
         </div>
@@ -442,10 +447,9 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
 
       {/* Имя */}
       <div style={{
-        marginTop: 6, fontSize: 13, fontWeight: 600,
-        color: "#fff", textAlign: "center", lineHeight: 1.3,
-        textShadow: "0 1px 2px rgba(0,0,0,0.4)",
-        maxWidth: 120, overflow: "hidden",
+        marginTop: 6, fontSize: 15, fontWeight: 600,
+        color: "#1e293b", textAlign: "center", lineHeight: 1.3,
+        maxWidth: 150, overflow: "hidden",
       }}>
         {staff.fullName}
       </div>
@@ -488,13 +492,13 @@ export default function KioskPage() {
     { key: "All", count: staff.length },
     ...KANA_GROUPS.map(g => ({
       key: g.key,
-      count: staff.filter(s => getKanaGroup(s.fullName) === g.key).length,
+      count: staff.filter(s => getKanaGroup(s) === g.key).length,
     })).filter(g => g.count > 0),
   ];
 
   const filteredStaff = activeGroup === "All"
     ? staff
-    : staff.filter(s => getKanaGroup(s.fullName) === activeGroup);
+    : staff.filter(s => getKanaGroup(s) === activeGroup);
 
   const workingCount = Object.values(statusMap)
     .filter(s => s.status === "WORKING" || s.status === "ON_BREAK").length;
@@ -522,7 +526,7 @@ export default function KioskPage() {
     <div style={{
       width: "100vw", height: "100dvh",
       display: "flex", flexDirection: "column",
-      background: "#2F5496",
+      background: "#f0f4f8",
       fontFamily: "'Noto Sans JP', -apple-system, sans-serif",
       userSelect: "none", overflow: "hidden",
     }}>
@@ -533,10 +537,19 @@ export default function KioskPage() {
         padding: "10px 20px", background: "#1e3a5f", flexShrink: 0,
         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
       }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <span style={{ fontSize: 14, color: "rgba(255,255,255,0.8)", fontWeight: 600 }}>{dateStr}</span>
-          <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>{timeStr}</span>
-          <span style={{ fontSize: 22, fontWeight: 700, color: "rgba(255,255,255,0.75)", fontFamily: "monospace" }}>:{secStr}</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 22, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+            {(() => {
+              const WD = ["日","月","火","水","木","金","土"];
+              const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+              const m  = String(t.getMonth() + 1).padStart(2, "0");
+              const d  = String(t.getDate()).padStart(2, "0");
+              return `${m}月${d}日（${WD[t.getDay()]}）`;
+            })()}
+          </span>
+          <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>
+            {timeStr}:{secStr}
+          </span>
         </div>
 
         <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>

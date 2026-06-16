@@ -49,6 +49,22 @@ public class JwtService {
                 .signWith(key)
                 .compact();
     }
+    
+    public String generateKioskToken(CustomUserDetails user) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(3650, ChronoUnit.DAYS);
+    
+        return Jwts.builder()
+                .subject(user.getUsername())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .claim("uid", user.getUserId())
+                .claim("rid", user.getRestaurantId())
+                .claim("role", user.getRole().name())
+                .claim("fullName", user.getFullName())
+                .signWith(key)
+                .compact();
+    }
 
     public String extractUsername(String token) {
         return Jwts.parser()

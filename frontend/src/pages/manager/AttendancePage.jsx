@@ -320,7 +320,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {/* Фото */}
                     {r.photoPath && (
-                        <a href={`${API_BASE}${r.photoPath}`} target="_blank" rel="noreferrer" style={{ fontSize: 20, textDecoration: "none" }}>📷</a>
+                        <a href={r.photoPath} target="_blank" rel="noreferrer" style={{ fontSize: 20, textDecoration: "none" }}>📷</a>
                     )}
                     {/* Редактировать */}
                     <button

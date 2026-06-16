@@ -50,6 +50,7 @@ public class UserService {
         u.setRestaurant(em.getReference(Restaurant.class, restaurantId));
         u.setLogin(req.login);
         u.setFullName(req.fullName);
+        u.setFullNameKana(req.fullNameKana);
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
@@ -69,6 +70,7 @@ public class UserService {
         }
         u.setLogin(req.login);
         u.setFullName(req.fullName);
+        u.setFullNameKana(req.fullNameKana);
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
