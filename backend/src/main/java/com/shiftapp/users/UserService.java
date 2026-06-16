@@ -49,13 +49,30 @@ public class UserService {
         User u = new User();
         u.setRestaurant(em.getReference(Restaurant.class, restaurantId));
         u.setLogin(req.login);
-        u.setFullName(req.fullName);
-        u.setFullNameKana(req.fullNameKana);
+
+        u.setLastName(req.lastName);
+        u.setFirstName(req.firstName);
+        u.setLastNameKana(req.lastNameKana);
+        u.setFirstNameKana(req.firstNameKana);
+        u.setFullName(req.lastName + " " + req.firstName);
+        u.setFullNameKana(req.lastNameKana + " " + req.firstNameKana);
+
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
         u.setActive(true);
         u.setPasswordHash(passwordEncoder.encode(req.password));
+
+        u.setEmail(req.email);
+        u.setPhone(req.phone);
+        u.setPostalCode(req.postalCode);
+        u.setRegion(req.region);
+        u.setMunicipality(req.municipality);
+        u.setBlockNumber(req.blockNumber);
+        u.setBuilding(req.building);
+        u.setBirthDate(req.birthDate);
+        u.setGender(req.gender);
+
         repo.save(u);
         return UserResponse.from(u);
     }
@@ -69,8 +86,14 @@ public class UserService {
             throw new RuntimeException("Login already exists");
         }
         u.setLogin(req.login);
-        u.setFullName(req.fullName);
-        u.setFullNameKana(req.fullNameKana);
+
+        u.setLastName(req.lastName);
+        u.setFirstName(req.firstName);
+        u.setLastNameKana(req.lastNameKana);
+        u.setFirstNameKana(req.firstNameKana);
+        u.setFullName(req.lastName + " " + req.firstName);
+        u.setFullNameKana(req.lastNameKana + " " + req.firstNameKana);
+
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
@@ -79,6 +102,17 @@ public class UserService {
         if (req.password != null && !req.password.isBlank()) {
             u.setPasswordHash(passwordEncoder.encode(req.password));
         }
+
+        u.setEmail(req.email);
+        u.setPhone(req.phone);
+        u.setPostalCode(req.postalCode);
+        u.setRegion(req.region);
+        u.setMunicipality(req.municipality);
+        u.setBlockNumber(req.blockNumber);
+        u.setBuilding(req.building);
+        u.setBirthDate(req.birthDate);
+        u.setGender(req.gender);
+
         return UserResponse.from(u);
     }
 
@@ -93,7 +127,6 @@ public class UserService {
     private Set<Department> resolveDepartments(Long restaurantId, List<Long> ids) {
         if (ids == null || ids.isEmpty()) return new HashSet<>();
         var deps = departmentRepo.findAllById(ids);
-        // проверяем что все отделы принадлежат этому ресторану
         deps.forEach(d -> {
             if (!d.getRestaurant().getId().equals(restaurantId)) {
                 throw new RuntimeException("Department does not belong to this restaurant");

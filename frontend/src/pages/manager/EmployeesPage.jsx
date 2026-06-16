@@ -3,22 +3,39 @@ import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
 import shellStyles from "../../app/layouts/AppShell.module.css";
 
-const emptyCreate = { login: "", fullName: "", position: "", departmentIds: [], role: "STAFF", password: "" };
+const REGIONS = [
+  "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+  "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+  "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+  "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+  "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+  "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+  "熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+];
+
+const emptyForm = {
+  login: "", password: "",
+  lastName: "", firstName: "", lastNameKana: "", firstNameKana: "",
+  email: "", phone: "",
+  postalCode: "", region: "", municipality: "", blockNumber: "", building: "",
+  birthDate: "", gender: "MALE",
+  position: "", departmentIds: [], role: "STAFF", active: true,
+};
 
 export default function EmployeesPage({ view, onNavigate, onLogout }) {
   const name = localStorage.getItem("staffName") || "manager";
 
-  const [items, setItems]           = useState([]);
-  const [positions, setPositions]   = useState([]);
+  const [items, setItems]             = useState([]);
+  const [positions, setPositions]     = useState([]);
   const [departments, setDepartments] = useState([]);
-  const [loading, setLoading]       = useState(false);
-  const [err, setErr]               = useState("");
+  const [loading, setLoading]         = useState(false);
+  const [err, setErr]                 = useState("");
 
-  const [createForm, setCreateForm] = useState(emptyCreate);
-  const [editId, setEditId]         = useState(null);
-  const [editForm, setEditForm]     = useState({
-    login: "", fullName: "", fullNameKana: "", position: "", departmentIds: [], role: "STAFF", active: true, password: "",
-  });
+  const [modalOpen, setModalOpen]     = useState(false);
+  const [editId, setEditId]           = useState(null); // null = создание
+  const [form, setForm]               = useState(emptyForm);
+  const [formErr, setFormErr]         = useState("");
+  const [saving, setSaving]           = useState(false);
 
   async function load() {
     setErr(""); setLoading(true);
@@ -40,57 +57,96 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
 
   useEffect(() => { load(); }, []);
 
-  async function onCreate(e) {
-    e.preventDefault(); setErr("");
-    try {
-      await api.managerEmployeesCreate({
-        login:         createForm.login.trim(),
-        fullName:      createForm.fullName.trim(),
-        position:      createForm.position || null,
-        departmentIds: createForm.departmentIds,
-        role:          createForm.role,
-        password:      createForm.password,
-      });
-      setCreateForm(emptyCreate);
-      await load();
-    } catch (e2) { setErr(e2.message || "Create error"); }
-  }
-
-  function startEdit(emp) {
-    setEditId(emp.id);
-    setEditForm({
-      login:         emp.login      || "",
-      fullName:      emp.fullName   || "",
-      fullNameKana:  emp.fullNameKana || "",
-      position:      emp.position   || "",
-      departmentIds: (emp.departments || []).map(d => d.id),
-      role:          emp.role       || "STAFF",
-      active:        !!emp.active,
-      password:      "",
-    });
-  }
-
-  function cancelEdit() {
+  function openCreate() {
     setEditId(null);
-    setEditForm({ login: "", fullName: "", position: "", departmentIds: [], role: "STAFF", active: true, password: "" });
+    setForm(emptyForm);
+    setFormErr("");
+    setModalOpen(true);
   }
 
-  async function onUpdate(e) {
-    e.preventDefault(); setErr("");
+  function openEdit(emp) {
+    setEditId(emp.id);
+    setForm({
+      login: emp.login || "",
+      password: "",
+      lastName: emp.lastName || "",
+      firstName: emp.firstName || "",
+      lastNameKana: emp.lastNameKana || "",
+      firstNameKana: emp.firstNameKana || "",
+      email: emp.email || "",
+      phone: emp.phone || "",
+      postalCode: emp.postalCode || "",
+      region: emp.region || "",
+      municipality: emp.municipality || "",
+      blockNumber: emp.blockNumber || "",
+      building: emp.building || "",
+      birthDate: emp.birthDate || "",
+      gender: emp.gender || "MALE",
+      position: emp.position || "",
+      departmentIds: (emp.departments || []).map(d => d.id),
+      role: emp.role || "STAFF",
+      active: !!emp.active,
+    });
+    setFormErr("");
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setEditId(null);
+    setForm(emptyForm);
+    setFormErr("");
+  }
+
+  function validate() {
+    if (!form.login.trim())          return "ログインIDを入力してください";
+    if (!editId && !form.password)   return "パスワードを入力してください";
+    if (!form.lastName.trim())       return "姓を入力してください";
+    if (!form.firstName.trim())      return "名を入力してください";
+    if (!form.lastNameKana.trim())   return "姓（フリガナ）を入力してください";
+    if (!form.firstNameKana.trim())  return "名（フリガナ）を入力してください";
+    return null;
+  }
+
+  async function handleSave() {
+    const v = validate();
+    if (v) { setFormErr(v); return; }
+    setSaving(true); setFormErr("");
+
+    const payload = {
+      login: form.login.trim(),
+      lastName: form.lastName.trim(),
+      firstName: form.firstName.trim(),
+      lastNameKana: form.lastNameKana.trim(),
+      firstNameKana: form.firstNameKana.trim(),
+      email: form.email || null,
+      phone: form.phone || null,
+      postalCode: form.postalCode || null,
+      region: form.region || null,
+      municipality: form.municipality || null,
+      blockNumber: form.blockNumber || null,
+      building: form.building || null,
+      birthDate: form.birthDate,
+      gender: form.gender,
+      position: form.position || null,
+      departmentIds: form.departmentIds,
+      role: form.role,
+      password: form.password,
+    };
+
     try {
-      await api.managerEmployeesUpdate(editId, {
-        login:         editForm.login.trim(),
-        fullName:      editForm.fullName.trim(),
-        fullNameKana:  editForm.fullNameKana || null,
-        position:      editForm.position   || null,
-        departmentIds: editForm.departmentIds,
-        role:          editForm.role,
-        active:        !!editForm.active,
-        password:      editForm.password,
-      });
-      cancelEdit();
+      if (editId) {
+        await api.managerEmployeesUpdate(editId, { ...payload, active: !!form.active });
+      } else {
+        await api.managerEmployeesCreate(payload);
+      }
+      closeModal();
       await load();
-    } catch (e2) { setErr(e2.message || "Update error"); }
+    } catch (e) {
+      setFormErr(e.message || "保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function onDelete(id) {
@@ -98,16 +154,6 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     setErr("");
     try { await api.managerEmployeesDelete(id); await load(); }
     catch (e2) { setErr(e2.message || "Delete error"); }
-  }
-
-  /* ── PositionSelect ── */
-  function PositionSelect({ value, onChange }) {
-    return (
-      <select value={value} onChange={e => onChange(e.target.value)} style={inputStyle}>
-        <option value="">— 未選択 —</option>
-        {positions.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-      </select>
-    );
   }
 
   /* ── DepartmentCheckboxes ── */
@@ -141,10 +187,15 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   return (
     <ManagerLayout name={name} view={view} onNavigate={onNavigate} onLogout={onLogout}>
       <div className={shellStyles.centeredContent}>
-      <div style={{ maxWidth: 960, width: "100%" }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 26, fontWeight: 800, color: "#1a1d2e" }}>👥 従業員管理</div>
-          <div style={{ fontSize: 14, color: "#888", marginTop: 4 }}>アカウントの作成・編集・削除</div>
+      <div style={{ maxWidth: 1100, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "#1a1d2e" }}>👥 従業員管理</div>
+            <div style={{ fontSize: 14, color: "#888", marginTop: 4 }}>アカウントの作成・編集・削除</div>
+          </div>
+          <button onClick={openCreate} style={btnPrimaryStyle} type="button">
+            ＋ 新規作成
+          </button>
         </div>
 
         {err && (
@@ -152,51 +203,6 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
             {err}
           </div>
         )}
-
-        {/* ── Create form ── */}
-        <div style={cardStyle}>
-          <div style={cardTitleStyle}>新規作成</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Field label="Login *">
-              <input value={createForm.login} onChange={e => setCreateForm({ ...createForm, login: e.target.value })} style={inputStyle} placeholder="login" />
-            </Field>
-            <Field label="フルネーム *">
-              <input value={createForm.fullName} onChange={e => setCreateForm({ ...createForm, fullName: e.target.value })} style={inputStyle} placeholder="山田 太郎" />
-            </Field>
-            <Field label="フリガナ（カタカナ）">
-              <input
-                value={createForm.fullNameKana || ""} onChange={e => setCreateForm({ ...createForm, fullNameKana: e.target.value })} style={inputStyle} placeholder="ヤマダ タロウ"/>
-            </Field>
-            <Field label="職種・役職">
-              <PositionSelect value={createForm.position} onChange={v => setCreateForm({ ...createForm, position: v })} />
-            </Field>
-            <Field label="ロール">
-              <select value={createForm.role} onChange={e => setCreateForm({ ...createForm, role: e.target.value })} style={inputStyle}>
-                <option value="STAFF">STAFF</option>
-                <option value="MANAGER">MANAGER</option>
-                <option value="KIOSK">KIOSK</option>
-              </select>
-            </Field>
-            <Field label="パスワード *">
-              <input type="password" value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })} style={inputStyle} placeholder="••••••••" />
-            </Field>
-          </div>
-          {/* 部署 — отдельная строка на всю ширину */}
-          <div style={{ marginTop: 12 }}>
-            <Field label="部署">
-              <DepartmentCheckboxes
-                selectedIds={createForm.departmentIds}
-                onChange={ids => setCreateForm({ ...createForm, departmentIds: ids })}
-              />
-            </Field>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <button onClick={onCreate} style={btnPrimaryStyle} type="button"
-              disabled={!createForm.login || !createForm.fullName || !createForm.password}>
-              ＋ 作成
-            </button>
-          </div>
-        </div>
 
         {/* ── List ── */}
         <div style={cardStyle}>
@@ -210,109 +216,67 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
-                {["ID", "フルネーム", "Login", "職種・役職", "部署", "ロール", "状態", ""].map(h => (
+                {["ID", "氏名", "Login", "職種・役職", "部署", "ロール", "状態", ""].map(h => (
                   <th key={h} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {items.map(emp => (
-                editId === emp.id ? (
-                  <tr key={emp.id} style={{ background: "#f8f8ff" }}>
-                    <td style={tdStyle} colSpan={8}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, padding: "10px 0" }}>
-                        <Field label="Login">
-                          <input value={editForm.login} onChange={e => setEditForm({ ...editForm, login: e.target.value })} style={inputStyle} />
-                        </Field>
-                        <Field label="フルネーム">
-                          <input value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })} style={inputStyle} />
-                        </Field>
-                        <Field label="フリガナ（カタカナ）">
-                          <input value={editForm.fullNameKana} onChange={e => setEditForm({ ...editForm, fullNameKana: e.target.value })} style={inputStyle} />
-                        </Field>
-                        <Field label="職種・役職">
-                          <PositionSelect value={editForm.position} onChange={v => setEditForm({ ...editForm, position: v })} />
-                        </Field>
-                        <Field label="ロール">
-                          <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} style={inputStyle}>
-                            <option value="STAFF">STAFF</option>
-                            <option value="MANAGER">MANAGER</option>
-                            <option value="KIOSK">KIOSK</option>
-                          </select>
-                        </Field>
-                        <Field label="新しいパスワード">
-                          <input type="password" value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })} placeholder="変更なし" style={inputStyle} />
-                        </Field>
-                      </div>
-                      <div style={{ marginBottom: 12 }}>
-                        <Field label="部署">
-                          <DepartmentCheckboxes
-                            selectedIds={editForm.departmentIds}
-                            onChange={ids => setEditForm({ ...editForm, departmentIds: ids })}
-                          />
-                        </Field>
-                      </div>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 12, cursor: "pointer" }}>
-                        <input type="checkbox" checked={editForm.active} onChange={e => setEditForm({ ...editForm, active: e.target.checked })} />
-                        アクティブ
-                      </label>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={onUpdate} style={btnPrimaryStyle} type="button">保存</button>
-                        <button onClick={cancelEdit} style={btnSecondaryStyle} type="button">キャンセル</button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={emp.id} style={{ borderBottom: "1px solid #f0f1f6" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
-                    onMouseLeave={e => e.currentTarget.style.background = ""}>
-                    <td style={tdStyle}><span style={{ color: "#aaa", fontSize: 12 }}>#{emp.id}</span></td>
-                    <td style={tdStyle}><b>{emp.fullName}</b></td>
-                    <td style={tdStyle}><span style={{ color: "#666" }}>{emp.login}</span></td>
-                    <td style={tdStyle}>
-                      {emp.position
-                        ? <span style={{ fontSize: 12, color: "#475569", background: "#f1f5f9", padding: "2px 8px", borderRadius: 20 }}>{emp.position}</span>
-                        : <span style={{ color: "#ccc", fontSize: 12 }}>—</span>
-                      }
-                    </td>
-                    <td style={tdStyle}>
-                      {emp.departments && emp.departments.length > 0
-                        ? <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                            {emp.departments.map(d => (
-                              <span key={d.id} style={{ fontSize: 12, color: "#6366f1", background: "#ede9fe", padding: "2px 8px", borderRadius: 20 }}>
-                                {d.name}
-                              </span>
-                            ))}
-                          </div>
-                        : <span style={{ color: "#ccc", fontSize: 12 }}>—</span>
-                      }
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{
-                        display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                        background: emp.role === "MANAGER" ? "#ede9fe" : "#e0f2fe",
-                        color: emp.role === "MANAGER" ? "#7c3aed" : "#0369a1",
-                      }}>
-                        {emp.role}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{
-                        display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                        background: emp.active ? "#dcfce7" : "#fee2e2",
-                        color: emp.active ? "#166534" : "#991b1b",
-                      }}>
-                        {emp.active ? "ON" : "OFF"}
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <button onClick={() => startEdit(emp)} style={btnSecondaryStyle} type="button">編集</button>
-                        <button onClick={() => onDelete(emp.id)} style={btnDangerStyle} type="button">削除</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
+                <tr key={emp.id} style={{ borderBottom: "1px solid #f0f1f6" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
+                  onMouseLeave={e => e.currentTarget.style.background = ""}>
+                  <td style={tdStyle}><span style={{ color: "#aaa", fontSize: 12 }}>#{emp.id}</span></td>
+                  <td style={tdStyle}>
+                    <b>{emp.lastName} {emp.firstName}</b>
+                    {emp.lastNameKana && (
+                      <div style={{ fontSize: 11, color: "#aaa" }}>{emp.lastNameKana} {emp.firstNameKana}</div>
+                    )}
+                  </td>
+                  <td style={tdStyle}><span style={{ color: "#666" }}>{emp.login}</span></td>
+                  <td style={tdStyle}>
+                    {emp.position
+                      ? <span style={{ fontSize: 12, color: "#475569", background: "#f1f5f9", padding: "2px 8px", borderRadius: 20 }}>{emp.position}</span>
+                      : <span style={{ color: "#ccc", fontSize: 12 }}>—</span>
+                    }
+                  </td>
+                  <td style={tdStyle}>
+                    {emp.departments && emp.departments.length > 0
+                      ? <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {emp.departments.map(d => (
+                            <span key={d.id} style={{ fontSize: 12, color: "#6366f1", background: "#ede9fe", padding: "2px 8px", borderRadius: 20 }}>
+                              {d.name}
+                            </span>
+                          ))}
+                        </div>
+                      : <span style={{ color: "#ccc", fontSize: 12 }}>—</span>
+                    }
+                  </td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                      background: emp.role === "MANAGER" ? "#ede9fe" : emp.role === "KIOSK" ? "#fef3c7" : "#e0f2fe",
+                      color: emp.role === "MANAGER" ? "#7c3aed" : emp.role === "KIOSK" ? "#92400e" : "#0369a1",
+                    }}>
+                      {emp.role}
+                    </span>
+                  </td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                      background: emp.active ? "#dcfce7" : "#fee2e2",
+                      color: emp.active ? "#166534" : "#991b1b",
+                    }}>
+                      {emp.active ? "ON" : "OFF"}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "right" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button onClick={() => openEdit(emp)} style={btnSecondaryStyle} type="button">編集</button>
+                      <button onClick={() => onDelete(emp.id)} style={btnDangerStyle} type="button">削除</button>
+                    </div>
+                  </td>
+                </tr>
               ))}
               {items.length === 0 && !loading && (
                 <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>スタッフがいません</td></tr>
@@ -322,16 +286,207 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
         </div>
       </div>
       </div>
+
+      {/* ── Modal ── */}
+      {modalOpen && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 2000,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div style={{
+            background: "#fff", borderRadius: 18, padding: 28,
+            width: 720, maxHeight: "90vh", overflowY: "auto",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
+          }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d2e", marginBottom: 4 }}>
+              {editId ? "従業員を編集" : "従業員を新規作成"}
+            </div>
+            <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>
+              必須項目には <RequiredBadge /> が付いています
+            </div>
+
+            {formErr && (
+              <div style={{ background: "#ffe5e5", color: "#c0392b", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+                {formErr}
+              </div>
+            )}
+
+            {/* ── 名前 ── */}
+            <SectionTitle>名前</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <Field label="姓" required>
+                <input value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} style={inputStyle} placeholder="山田" />
+              </Field>
+              <Field label="名" required>
+                <input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} style={inputStyle} placeholder="太郎" />
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <Field label="姓（フリガナ）" required>
+                <input value={form.lastNameKana} onChange={e => setForm({ ...form, lastNameKana: e.target.value })} style={inputStyle} placeholder="ヤマダ" />
+              </Field>
+              <Field label="名（フリガナ）" required>
+                <input value={form.firstNameKana} onChange={e => setForm({ ...form, firstNameKana: e.target.value })} style={inputStyle} placeholder="タロウ" />
+              </Field>
+            </div>
+
+            {/* ── 連絡先 ── */}
+            <SectionTitle optional>連絡先</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <Field label="メールアドレス">
+                <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={inputStyle} placeholder="mail@example.com" />
+              </Field>
+              <Field label="電話番号">
+                <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} placeholder="090-1234-5678" />
+              </Field>
+            </div>
+
+            {/* ── 住所 ── */}
+            <SectionTitle optional>住所</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <Field label="郵便番号">
+                <input value={form.postalCode} onChange={e => setForm({ ...form, postalCode: e.target.value })} style={inputStyle} placeholder="123-4567" />
+              </Field>
+              <Field label="都道府県">
+                <select value={form.region} onChange={e => setForm({ ...form, region: e.target.value })} style={inputStyle}>
+                  <option value="">— 未選択 —</option>
+                  {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Field label="市区町村">
+                <input value={form.municipality} onChange={e => setForm({ ...form, municipality: e.target.value })} style={inputStyle} placeholder="飯能市〇〇1-2-3" />
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <Field label="番地">
+                <input value={form.blockNumber} onChange={e => setForm({ ...form, blockNumber: e.target.value })} style={inputStyle} />
+              </Field>
+              <Field label="建物名">
+                <input value={form.building} onChange={e => setForm({ ...form, building: e.target.value })} style={inputStyle} placeholder="〇〇マンション101" />
+              </Field>
+            </div>
+
+            {/* ── 基本情報 ── */}
+            <SectionTitle optional>基本情報</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <Field label="生年月日">
+                <input type="date" value={form.birthDate} onChange={e => setForm({ ...form, birthDate: e.target.value })} style={inputStyle} />
+              </Field>
+              <Field label="性別">
+                <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, cursor: "pointer" }}>
+                    <input type="radio" name="gender" checked={form.gender === "MALE"} onChange={() => setForm({ ...form, gender: "MALE" })} />
+                    男性
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, cursor: "pointer" }}>
+                    <input type="radio" name="gender" checked={form.gender === "FEMALE"} onChange={() => setForm({ ...form, gender: "FEMALE" })} />
+                    女性
+                  </label>
+                </div>
+              </Field>
+            </div>
+
+            {/* ── アカウント ── */}
+            <SectionTitle>アカウント</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <Field label="ログインID" required>
+                <input value={form.login} onChange={e => setForm({ ...form, login: e.target.value })} style={inputStyle} placeholder="login" />
+              </Field>
+              <Field label={editId ? "新しいパスワード" : "パスワード"} required={!editId}>
+                <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} style={inputStyle} placeholder={editId ? "変更なし" : "••••••••"} />
+              </Field>
+            </div>
+
+            {/* ── 業務情報 ── */}
+            <SectionTitle>業務情報</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <Field label="職種・役職">
+                <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} style={inputStyle}>
+                  <option value="">— 未選択 —</option>
+                  {positions.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                </select>
+              </Field>
+              <Field label="ロール" required>
+                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={inputStyle}>
+                  <option value="STAFF">STAFF</option>
+                  <option value="MANAGER">MANAGER</option>
+                  <option value="KIOSK">KIOSK</option>
+                </select>
+              </Field>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Field label="部署">
+                <DepartmentCheckboxes
+                  selectedIds={form.departmentIds}
+                  onChange={ids => setForm({ ...form, departmentIds: ids })}
+                />
+              </Field>
+            </div>
+
+            {editId && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 20, cursor: "pointer" }}>
+                <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
+                アクティブ
+              </label>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+              <button onClick={closeModal} style={btnSecondaryStyle} type="button">キャンセル</button>
+              <button onClick={handleSave} disabled={saving} style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }} type="button">
+                {saving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ManagerLayout>
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, required, children }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, fontWeight: 600, color: "#555" }}>
-      {label}
+      <span>{label} {required && <RequiredBadge />}</span>
       {children}
     </label>
+  );
+}
+
+function RequiredBadge() {
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 10, fontWeight: 700, color: "#fff",
+      background: "#ef4444", borderRadius: 4, padding: "1px 6px", marginLeft: 2,
+      verticalAlign: "middle",
+    }}>
+      必須
+    </span>
+  );
+}
+
+function SectionTitle({ children, optional }) {
+  return (
+    <div style={{
+      fontSize: 13, fontWeight: 700, color: "#64748b",
+      borderBottom: "1px solid #f0f1f6", paddingBottom: 6, marginBottom: 12,
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
+      {children}
+      {optional && (
+        <span style={{
+          fontSize: 10, fontWeight: 700, color: "#64748b",
+          background: "#f1f5f9", borderRadius: 4, padding: "1px 6px",
+        }}>
+          任意
+        </span>
+      )}
+    </div>
   );
 }
 

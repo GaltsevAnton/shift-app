@@ -4,6 +4,7 @@ import com.shiftapp.restaurants.Restaurant;
 import com.shiftapp.settings.department.Department;
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -52,6 +53,48 @@ public class User {
     @Column(name = "full_name_kana")
     private String fullNameKana;
 
+    // ── Новые поля профиля ──
+
+    @Column(name = "last_name", length = 100)
+    private String lastName;
+
+    @Column(name = "first_name", length = 100)
+    private String firstName;
+
+    @Column(name = "last_name_kana", length = 100)
+    private String lastNameKana;
+
+    @Column(name = "first_name_kana", length = 100)
+    private String firstNameKana;
+
+    @Column(length = 200)
+    private String email;
+
+    @Column(length = 20)
+    private String phone;
+
+    @Column(name = "postal_code", length = 10)
+    private String postalCode;
+
+    @Column(length = 50)
+    private String region;
+
+    @Column(length = 200)
+    private String municipality;
+
+    @Column(name = "block_number", length = 100)
+    private String blockNumber;
+
+    @Column(length = 100)
+    private String building;
+
+    @Column(name = "birth_date")
+    private LocalDate birthDate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private Gender gender;
+
     public User() {}
 
     public Long getId() { return id; }
@@ -74,4 +117,31 @@ public class User {
     public Instant getCreatedAt() { return createdAt; }
     public String getFullNameKana() { return fullNameKana; }
     public void setFullNameKana(String fullNameKana) { this.fullNameKana = fullNameKana; }
+
+    public String getLastName() { return lastName; }
+    public void setLastName(String lastName) { this.lastName = lastName; }
+    public String getFirstName() { return firstName; }
+    public void setFirstName(String firstName) { this.firstName = firstName; }
+    public String getLastNameKana() { return lastNameKana; }
+    public void setLastNameKana(String lastNameKana) { this.lastNameKana = lastNameKana; }
+    public String getFirstNameKana() { return firstNameKana; }
+    public void setFirstNameKana(String firstNameKana) { this.firstNameKana = firstNameKana; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+    public String getPostalCode() { return postalCode; }
+    public void setPostalCode(String postalCode) { this.postalCode = postalCode; }
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+    public String getMunicipality() { return municipality; }
+    public void setMunicipality(String municipality) { this.municipality = municipality; }
+    public String getBlockNumber() { return blockNumber; }
+    public void setBlockNumber(String blockNumber) { this.blockNumber = blockNumber; }
+    public String getBuilding() { return building; }
+    public void setBuilding(String building) { this.building = building; }
+    public LocalDate getBirthDate() { return birthDate; }
+    public void setBirthDate(LocalDate birthDate) { this.birthDate = birthDate; }
+    public Gender getGender() { return gender; }
+    public void setGender(Gender gender) { this.gender = gender; }
 }
