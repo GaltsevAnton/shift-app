@@ -1,6 +1,7 @@
 package com.shiftapp.kiosk.dto;
 
 import java.time.Instant;
+import java.util.List;
 
 public class StaffStatusResponse {
 
@@ -30,4 +31,18 @@ public class StaffStatusResponse {
 
     public String getLastPhotoPath() { return lastPhotoPath; }
     public void setLastPhotoPath(String lastPhotoPath) { this.lastPhotoPath = lastPhotoPath; }
+
+    private List<TimeRecordEntry> records;
+
+    public List<TimeRecordEntry> getRecords() { return records; }
+    public void setRecords(List<TimeRecordEntry> records) { this.records = records; }
+
+    public static class TimeRecordEntry {
+        public String type;
+        public Instant time;
+        public TimeRecordEntry(String type, Instant time) {
+            this.type = type;
+            this.time = time;
+        }
+    }
 }

@@ -3,18 +3,54 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_BASE = import.meta.env.VITE_API_BASE;
 const RESTAURANT_ID = 1;
 const AUTO_RETURN_SEC = 3;
+const TOKEN_KEY = "kioskToken";
+
+/* ─── Token helpers ─────────────────────────────────────── */
+function getKioskToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+function setKioskToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+function clearKioskToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
 /* ─── API ───────────────────────────────────────────────── */
+async function loginKiosk(login, password) {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || "ログインに失敗しました");
+  }
+  return res.json(); // { accessToken }
+}
+
+function authHeaders() {
+  const token = getKioskToken();
+  return token ? { "Authorization": `Bearer ${token}` } : {};
+}
+
 async function fetchStaff() {
-  const res = await fetch(`${API_BASE}/api/kiosk/staff?restaurantId=${RESTAURANT_ID}`);
+  const res = await fetch(`${API_BASE}/api/kiosk/staff?restaurantId=${RESTAURANT_ID}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 401 || res.status === 403) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load staff");
   return res.json();
 }
 async function fetchAllStatuses(staffList) {
   const results = await Promise.all(
     staffList.map(s =>
-      fetch(`${API_BASE}/api/kiosk/status/${s.id}`)
-        .then(r => r.json())
+      fetch(`${API_BASE}/api/kiosk/status/${s.id}`, { headers: authHeaders() })
+        .then(r => {
+          if (r.status === 401 || r.status === 403) throw new Error("UNAUTHORIZED");
+          return r.json();
+        })
         .then(status => ({ userId: s.id, status }))
         .catch(() => ({ userId: s.id, status: { status: "NOT_STARTED" } }))
     )
@@ -26,9 +62,10 @@ async function fetchAllStatuses(staffList) {
 async function punchApi(userId, recordType, photoBase64) {
   const res = await fetch(`${API_BASE}/api/kiosk/punch`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ userId, recordType, photoBase64 }),
   });
+  if (res.status === 401 || res.status === 403) throw new Error("UNAUTHORIZED");
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || "Failed to punch");
@@ -57,9 +94,14 @@ const KANA_GROUPS = [
   { key: "ワ", chars: "ワヲン" },
 ];
 
+function toKatakana(str) {
+  return (str || "").replace(/[\u3041-\u3096]/g, ch =>
+    String.fromCharCode(ch.charCodeAt(0) + 0x60)
+  );
+}
+
 function getKanaGroup(staff) {
-  const name = staff.fullNameKana || staff.fullName;
-  if (!name) return null;
+  const name = toKatakana(staff.fullNameKana || staff.fullName || "");
   const first = name[0];
   for (const g of KANA_GROUPS) {
     if (g.chars.includes(first)) return g.key;
@@ -98,6 +140,98 @@ function getActionBg(type, available) {
   }
 }
 
+/* ─── KioskLogin ────────────────────────────────────────── */
+function KioskLogin({ onLoggedIn }) {
+  const [login, setLogin]       = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError]       = useState(null);
+  const [loading, setLoading]   = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const res = await loginKiosk(login, password);
+      setKioskToken(res.accessToken);
+      onLoggedIn();
+    } catch (e2) {
+      setError(e2.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      width: "100vw", height: "100dvh",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "#1e3a5f",
+      fontFamily: "'Noto Sans JP', -apple-system, sans-serif",
+    }}>
+      <form onSubmit={handleSubmit} style={{
+        background: "#fff", borderRadius: 20, padding: 40,
+        width: 360, display: "flex", flexDirection: "column", gap: 16,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#1e3a5f" }}>HannoSHIFT</div>
+          <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>勤怠端末ログイン</div>
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+          ログインID
+          <input
+            value={login}
+            onChange={e => setLogin(e.target.value)}
+            style={{
+              display: "block", width: "100%", marginTop: 6,
+              padding: "10px 12px", borderRadius: 10,
+              border: "1.5px solid #e2e8f0", fontSize: 15,
+              boxSizing: "border-box", outline: "none",
+            }}
+            autoComplete="username"
+          />
+        </label>
+
+        <label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+          パスワード
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            style={{
+              display: "block", width: "100%", marginTop: 6,
+              padding: "10px 12px", borderRadius: 10,
+              border: "1.5px solid #e2e8f0", fontSize: 15,
+              boxSizing: "border-box", outline: "none",
+            }}
+            autoComplete="current-password"
+          />
+        </label>
+
+        {error && (
+          <div style={{
+            background: "#fef2f2", color: "#dc2626",
+            padding: "8px 12px", borderRadius: 8, fontSize: 13,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button type="submit" disabled={loading} style={{
+          marginTop: 8, padding: "12px",
+          background: "#2F5496", color: "#fff",
+          border: "none", borderRadius: 10,
+          fontSize: 16, fontWeight: 700, cursor: "pointer",
+          opacity: loading ? 0.6 : 1,
+        }}>
+          {loading ? "..." : "ログイン"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 /* ─── PopupClock ────────────────────────────────────────── */
 function PopupClock() {
   const [now, setNow] = useState(new Date());
@@ -128,7 +262,7 @@ function PopupClock() {
 }
 
 /* ─── PunchPopup ────────────────────────────────────────── */
-function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
+function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
   const videoRef  = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -158,15 +292,27 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
     if (loading) return;
     setLoading(true); setError(null);
 
-    // Снимаем фото автоматически
     let photoBase64 = null;
     const video  = videoRef.current;
     const canvas = canvasRef.current;
     if (video && canvas && cameraReady) {
-      canvas.width  = video.videoWidth  || 640;
-      canvas.height = video.videoHeight || 480;
-      canvas.getContext("2d").drawImage(video, 0, 0);
-      photoBase64 = canvas.toDataURL("image/jpeg", 0.6);
+      const vw = video.videoWidth  || 640;
+      const vh = video.videoHeight || 480;
+    
+      const scale = 1.5; // тот же что в CSS transform
+      const cropW = vw / scale;
+      const cropH = vh / scale;
+      const cropX = (vw - cropW) / 2;
+      const cropY = (vh - cropH) / 2;
+    
+      canvas.width  = cropW;
+      canvas.height = cropH;
+      canvas.getContext("2d").drawImage(
+        video,
+        cropX, cropY, cropW, cropH,
+        0, 0, cropW, cropH
+      );
+      photoBase64 = canvas.toDataURL("image/jpeg", 0.7);
     }
 
     try {
@@ -182,6 +328,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
         if (sec <= 0) { clearInterval(timer); onSuccess(result); }
       }, 1000);
     } catch (e) {
+      if (e.message === "UNAUTHORIZED") { onUnauthorized(); return; }
       setError(e.message);
     } finally {
       setLoading(false);
@@ -199,7 +346,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
       }}
     >
       <div style={{
-        width: 780, height: 480,
+        width: 900, height: 610,
         background: "#1e3a5f",
         borderRadius: 24,
         overflow: "hidden",
@@ -208,7 +355,6 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
       }}>
 
         {success ? (
-          /* ── Экран успеха ── */
           <div style={{
             flex: 1, display: "flex", flexDirection: "column",
             alignItems: "center", justifyContent: "center", gap: 16,
@@ -231,19 +377,22 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
           </div>
         ) : (
           <>
-            {/* ── Левая часть: камера ── */}
             <div style={{
-              width: 380, flexShrink: 0, position: "relative",
+              width: 560, flexShrink: 0, position: "relative",
               background: "#000",
+              overflow: "hidden",
             }}>
               <video
                 ref={videoRef}
                 autoPlay playsInline muted
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                style={{
+                  width: "100%", height: "100%", objectFit: "cover",
+                  transform: "scaleX(-1) scale(1.5)", // приближение — подбери значение
+                  transformOrigin: "center center",
+                }}
               />
               <canvas ref={canvasRef} style={{ display: "none" }} />
 
-              {/* Овал для лица */}
               {cameraReady && (
                 <div style={{
                   position: "absolute", inset: 0,
@@ -258,7 +407,6 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                 </div>
               )}
 
-              {/* Ошибка камеры */}
               {cameraError && (
                 <div style={{
                   position: "absolute", inset: 0,
@@ -271,7 +419,6 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                 </div>
               )}
 
-              {/* Имя поверх камеры снизу */}
               <div style={{
                 position: "absolute", bottom: 0, left: 0, right: 0,
                 background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
@@ -279,25 +426,17 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                 color: "#fff", fontSize: 18, fontWeight: 700, textAlign: "center",
               }}>
                 {staff.fullName}
-                {statusInfo?.clockInAt && (
-                  <div style={{ fontSize: 13, opacity: 0.8, fontWeight: 400, marginTop: 2 }}>
-                    出勤 {formatTime(statusInfo.clockInAt)}
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* ── Правая часть: время + фото + кнопки ── */}
             <div style={{
               flex: 1, display: "flex", flexDirection: "column",
               background: "#1e3a5f",
             }}>
-              {/* Дата и время */}
               <div style={{ padding: "16px 16px 10px", textAlign: "center" }}>
                 <PopupClock />
               </div>
 
-              {/* Фото + имя */}
               <div style={{
                 display: "flex", alignItems: "center", gap: 14,
                 padding: "0 20px 12px",
@@ -315,16 +454,29 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                   </svg>
                 </div>
                 <div>
-                  {statusInfo?.clockInAt && (
-                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", marginBottom: 2 }}>
-                      {formatTime(statusInfo.clockInAt)} 〜
-                    </div>
-                  )}
                   <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>
                     {staff.fullName}
                   </div>
                 </div>
               </div>
+
+              {/* История за сегодня */}
+              {statusInfo?.records && statusInfo.records.length > 0 && (
+                <div style={{
+                  padding: "0 20px 8px",
+                  display: "flex", flexDirection: "column", gap: 4,
+                  maxHeight: 140, overflowY: "auto",
+                }}>
+                  {statusInfo.records.map((r, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                      <span style={{ color: "rgba(255,255,255,0.6)" }}>{getActionLabel(r.type)}</span>
+                      <span style={{ color: "#fff", fontFamily: "monospace", fontWeight: 600 }}>
+                        {formatTime(r.time)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {error && (
                 <div style={{
@@ -337,8 +489,8 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess }) {
                 </div>
               )}
 
-              {/* 4 кнопки */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", flex: 1, gap: 1 }}>
+              <div style={{ flex: 1 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: 260, flexShrink: 0, gap: 1 }}>
                 {["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"].map(action => {
                   const isAvail = availableActions.includes(action);
                   return (
@@ -399,7 +551,6 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
         boxShadow: isSelected ? "0 0 0 3px #3b6fd4" : "none",
         transition: "box-shadow 0.15s",
       }}>
-        {/* Аватар — фото или заглушка */}
         <div style={{
           width: "100%", height: "100%",
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -421,7 +572,6 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
           )}
         </div>
 
-        {/* Статус точка */}
         {isActive && (
           <div style={{
             position: "absolute", top: 6, left: 6,
@@ -432,7 +582,6 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
           }} />
         )}
 
-        {/* Время прихода */}
         {clockIn && (
           <div style={{
             position: "absolute", top: 5, left: 0, right: 0,
@@ -445,7 +594,6 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
         )}
       </div>
 
-      {/* Имя */}
       <div style={{
         marginTop: 6, fontSize: 15, fontWeight: 600,
         color: "#1e293b", textAlign: "center", lineHeight: 1.3,
@@ -457,13 +605,14 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
   );
 }
 
-/* ─── KioskPage ─────────────────────────────────────────── */
-export default function KioskPage() {
+/* ─── KioskApp (после логина) ───────────────────────────── */
+function KioskApp({ onLogout }) {
   const [staff, setStaff]           = useState([]);
   const [statusMap, setStatusMap]   = useState({});
   const [loading, setLoading]       = useState(true);
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [activeGroup, setActiveGroup]     = useState("All");
+  const [menuOpen, setMenuOpen]     = useState(false);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -477,9 +626,13 @@ export default function KioskPage() {
       setStaff(s);
       const sm = await fetchAllStatuses(s);
       setStatusMap(sm);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }, []);
+    } catch (e) {
+      if (e.message === "UNAUTHORIZED") { onLogout(); return; }
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [onLogout]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -506,7 +659,9 @@ export default function KioskPage() {
   async function handlePunchSuccess(result) {
     if (selectedStaff) {
       try {
-        const res       = await fetch(`${API_BASE}/api/kiosk/status/${selectedStaff.id}`);
+        const res = await fetch(`${API_BASE}/api/kiosk/status/${selectedStaff.id}`, {
+          headers: authHeaders(),
+        });
         const newStatus = await res.json();
         setStatusMap(prev => ({ ...prev, [selectedStaff.id]: newStatus }));
       } catch {}
@@ -514,9 +669,6 @@ export default function KioskPage() {
     setSelectedStaff(null);
   }
 
-  const dateStr = now.toLocaleDateString("en-US", {
-    month: "2-digit", day: "2-digit", weekday: "short", timeZone: "Asia/Tokyo",
-  });
   const timeStr = now.toLocaleTimeString("ja-JP", {
     hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
   });
@@ -535,21 +687,52 @@ export default function KioskPage() {
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 20px", background: "#1e3a5f", flexShrink: 0,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative",
       }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 22, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
-            {(() => {
-              const WD = ["日","月","火","水","木","金","土"];
-              const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-              const m  = String(t.getMonth() + 1).padStart(2, "0");
-              const d  = String(t.getDate()).padStart(2, "0");
-              return `${m}月${d}日（${WD[t.getDay()]}）`;
-            })()}
-          </span>
-          <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>
-            {timeStr}:{secStr}
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Меню */}
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setMenuOpen(v => !v)} style={{
+              background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+              color: "#fff", fontSize: 20, cursor: "pointer", padding: "6px 12px",
+            }}>☰</button>
+            {menuOpen && (
+              <>
+                <div onClick={() => setMenuOpen(false)} style={{
+                  position: "fixed", inset: 0, zIndex: 998,
+                }} />
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", left: 0,
+                  background: "#fff", borderRadius: 10, overflow: "hidden",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)", zIndex: 999,
+                  minWidth: 160,
+                }}>
+                  <button onClick={() => { setMenuOpen(false); onLogout(); }} style={{
+                    display: "block", width: "100%", padding: "12px 18px",
+                    textAlign: "left", border: "none", background: "none",
+                    color: "#dc2626", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                  }}>
+                    🚪 ログアウト
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 22, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+              {(() => {
+                const WD = ["日","月","火","水","木","金","土"];
+                const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+                const m  = String(t.getMonth() + 1).padStart(2, "0");
+                const d  = String(t.getDate()).padStart(2, "0");
+                return `${m}月${d}日（${WD[t.getDay()]}）`;
+              })()}
+            </span>
+            <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>
+              {timeStr}:{secStr}
+            </span>
+          </div>
         </div>
 
         <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
@@ -574,7 +757,6 @@ export default function KioskPage() {
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-        {/* Left: kana filter */}
         <div style={{
           width: 68, flexShrink: 0, background: "#1e3a5f",
           display: "flex", flexDirection: "column", overflowY: "auto",
@@ -595,16 +777,15 @@ export default function KioskPage() {
           ))}
         </div>
 
-        {/* Center: staff grid */}
         <div style={{
           flex: 1, overflowY: "auto", padding: "16px 16px",
           display: "flex", flexWrap: "wrap",
           alignContent: "flex-start", gap: 14,
         }}>
           {loading ? (
-            <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 16, padding: 40 }}>読み込み中...</div>
+            <div style={{ color: "rgba(0,0,0,0.5)", fontSize: 16, padding: 40 }}>読み込み中...</div>
           ) : filteredStaff.length === 0 ? (
-            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 15, padding: 40 }}>
+            <div style={{ color: "rgba(0,0,0,0.4)", fontSize: 15, padding: 40 }}>
               該当するスタッフがいません
             </div>
           ) : (
@@ -621,15 +802,31 @@ export default function KioskPage() {
         </div>
       </div>
 
-      {/* ── Popup ── */}
       {selectedStaff && (
         <PunchPopup
           staff={selectedStaff}
           statusInfo={statusMap[selectedStaff.id]}
           onClose={() => setSelectedStaff(null)}
           onSuccess={handlePunchSuccess}
+          onUnauthorized={() => { setSelectedStaff(null); onLogout(); }}
         />
       )}
     </div>
   );
+}
+
+/* ─── KioskPage (root) ──────────────────────────────────── */
+export default function KioskPage() {
+  const [isLoggedIn, setIsLoggedIn] = useState(!!getKioskToken());
+
+  function handleLogout() {
+    clearKioskToken();
+    setIsLoggedIn(false);
+  }
+
+  if (!isLoggedIn) {
+    return <KioskLogin onLoggedIn={() => setIsLoggedIn(true)} />;
+  }
+
+  return <KioskApp onLogout={handleLogout} />;
 }

@@ -55,6 +55,13 @@ public class KioskService {
                 case CLOCK_OUT   -> { res.setStatus("FINISHED"); res.setClockOutAt(r.getRecordedAt()); }
             }
         }
+
+        res.setRecords(
+            records.stream()
+                .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
+                .toList()
+        );
+        
         // Последнее фото (не из CLOCK_IN — из любой записи)
         records.stream()
         .filter(r -> r.getPhotoPath() != null)
