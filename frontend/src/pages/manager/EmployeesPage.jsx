@@ -149,11 +149,19 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     }
   }
 
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？")) return;
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+  async function handleDeleteConfirmed() {
+    if (!deleteConfirm) return;
     setErr("");
-    try { await api.managerEmployeesDelete(id); await load(); }
-    catch (e2) { setErr(e2.message || "Delete error"); }
+    try {
+      await api.managerEmployeesDelete(deleteConfirm);
+      setDeleteConfirm(null);
+      await load();
+    } catch (e2) {
+      setErr(e2.message || "Delete error");
+      setDeleteConfirm(null);
+    }
   }
 
   /* ── DepartmentCheckboxes ── */
@@ -273,7 +281,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                   <td style={{ ...tdStyle, textAlign: "right" }}>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                       <button onClick={() => openEdit(emp)} style={btnSecondaryStyle} type="button">編集</button>
-                      <button onClick={() => onDelete(emp.id)} style={btnDangerStyle} type="button">削除</button>
+                      <button onClick={() => setDeleteConfirm(emp.id)} style={btnDangerStyle} type="button">削除</button>
                     </div>
                   </td>
                 </tr>
@@ -440,6 +448,57 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
               <button onClick={closeModal} style={btnSecondaryStyle} type="button">キャンセル</button>
               <button onClick={handleSave} disabled={saving} style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }} type="button">
                 {saving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 3000,
+          background: "rgba(15,23,42,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 16, padding: 32,
+            maxWidth: 420, width: "90%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
+            textAlign: "center",
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1d2e", marginBottom: 12 }}>
+              本当に削除しますか？
+            </div>
+            <div style={{
+              fontSize: 13, color: "#64748b", lineHeight: 1.7,
+              marginBottom: 24, background: "#fef2f2",
+              border: "1px solid #fca5a5", borderRadius: 10,
+              padding: "12px 16px",
+            }}>
+              このスタッフを削除すると、<br />
+              <strong style={{ color: "#dc2626" }}>すべてのシフトデータと打刻記録</strong>も<br />
+              完全に削除されます。<br />
+              この操作は取り消せません。
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                style={{ ...btnSecondaryStyle, padding: "10px 24px", fontSize: 14 }}
+                type="button"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleDeleteConfirmed}
+                style={{
+                  padding: "10px 24px", fontSize: 14, fontWeight: 700,
+                  background: "#dc2626", color: "#fff",
+                  border: "none", borderRadius: 8, cursor: "pointer",
+                }}
+                type="button"
+              >
+                完全に削除する
               </button>
             </div>
           </div>

@@ -42,6 +42,7 @@ public class ManagerStaffWeekSaveRequest {
         private java.time.LocalTime endTime;
         private boolean last;
         private String workplace;
+        private boolean nextDay;
 
         public java.time.LocalTime getStartTime() { return startTime; }
         public void setStartTime(java.time.LocalTime startTime) { this.startTime = startTime; }
@@ -54,5 +55,8 @@ public class ManagerStaffWeekSaveRequest {
 
         public String getWorkplace() { return workplace; }
         public void setWorkplace(String workplace) { this.workplace = workplace; }
+
+        public boolean isNextDay() { return nextDay; }
+        public void setNextDay(boolean nextDay) { this.nextDay = nextDay; }
     }
 }

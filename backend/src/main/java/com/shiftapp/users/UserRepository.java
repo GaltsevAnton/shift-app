@@ -21,4 +21,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // Для шифта — без departments (не нужны)
     List<User> findByRestaurant_IdAndRoleOrderByFullNameAsc(Long restaurantId, UserRole role);
+
+    List<User> findByRestaurant_IdAndRoleInOrderByFullNameAsc(Long restaurantId, List<UserRole> roles);
 }

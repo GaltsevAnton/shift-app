@@ -15,10 +15,15 @@ const STATUS_META = {
   CONFIRMED: { label:"確定",   cls:"confirmed" },
 };
 
-const TIME_OPTS = [];
+const START_TIME_OPTS = [];
 for (let h = 6; h < 24; h++)
   for (let m of [0, 30])
-    TIME_OPTS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
+    START_TIME_OPTS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
+
+const END_TIME_OPTS = [];
+for (let h = 0; h < 24; h++)
+  for (let m of [0, 30])
+    END_TIME_OPTS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
 const SORT_FIELDS = [
   { value: "name",       label: "氏名" },
@@ -45,10 +50,7 @@ function dateStr(ym, day) {
   return `${ym}-${String(day).padStart(2,"0")}`;
 }
 function getName() {
-  try {
-    const t = localStorage.getItem("accessToken");
-    return t ? JSON.parse(atob(t.split(".")[1])).fullName || "" : "";
-  } catch { return ""; }
+  return localStorage.getItem("staffName") || "";
 }
 function findWeekForDate(weeks, date) {
   return weeks.find(w => {
@@ -68,6 +70,10 @@ function emptySlot() {
 function periodDays(from, to) {
   if (!from || !to) return 0;
   return Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+}
+function isNextDay(startTime, endTime) {
+  if (!startTime || !endTime) return false;
+  return endTime < startTime;
 }
 // Вернуть список недель (monday) для данного месяца ym
 function weeksInMonth(ymStr) {
@@ -192,7 +198,6 @@ function BulkPopover({ onClose, onSave, workplaces }) {
     setSlots(prev => {
       const next = [...prev];
       next[i] = { ...next[i], [field]: value };
-      if (field === "last" && value) next[i].endTime = "";
       return next;
     });
   }
@@ -207,7 +212,7 @@ function BulkPopover({ onClose, onSave, workplaces }) {
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
     const validSlots = slots
-      .filter(s => s.startTime)
+      .filter(s => s.startTime && s.endTime)
       .map(s => ({
         startTime: s.startTime,
         endTime:   s.last ? null : (s.endTime || null),
@@ -253,19 +258,15 @@ function BulkPopover({ onClose, onSave, workplaces }) {
                   <span className={styles.popLabel}>開始</span>
                   <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i, "startTime", e.target.value)}>
                     <option value="">--</option>
-                    {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                      {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div className={styles.popRow}>
                   <span className={styles.popLabel}>終了</span>
-                  {slot.last ? (
-                    <span className={styles.popLastBadge}>L</span>
-                  ) : (
                     <select className={styles.popSelect} value={slot.endTime} onChange={e => updateSlot(i, "endTime", e.target.value)}>
                       <option value="">--</option>
-                      {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                        {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
-                  )}
                 </div>
                 <label className={styles.popRow}>
                   <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i, "last", e.target.checked)} className={styles.popCheck} />
@@ -284,7 +285,7 @@ function BulkPopover({ onClose, onSave, workplaces }) {
         )}
         <div className={styles.popActions}>
           <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
-          <button className={styles.popSave} onClick={handleSave}>保存</button>
+          <button className={styles.popSave} onClick={handleSave} disabled={!off && slots.some(s => !s.startTime || !s.endTime)}>保存</button>
         </div>
       </div>
     </div>
@@ -355,7 +356,8 @@ function ReportLoader() {
 }
 
 /* ─── CellPopover ───────────────────────────────────────── */
-function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
+function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
+                       anchorRef, onClose, onSave, workplaces }) {
   const isOff = day.off && (!day.slots || day.slots.length === 0);
   const [off, setOff]     = useState(isOff);
   const [slots, setSlots] = useState(() => {
@@ -403,7 +405,6 @@ function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
     setSlots(prev => {
       const next = [...prev];
       next[i] = { ...next[i], [field]: value };
-      if (field === "last" && value) next[i].endTime = "";
       return next;
     });
   }
@@ -417,79 +418,166 @@ function CellPopover({ day, anchorRef, onClose, onSave, workplaces }) {
   }
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
+  
+    const incomplete = slots.some(s => s.startTime && !s.endTime);
+    if (incomplete) {
+      alert("終了時間を入力してください");
+      return;
+    }
+  
     const validSlots = slots
       .filter(s => s.startTime)
       .map(s => ({
         startTime: s.startTime,
-        endTime:   s.last ? null : (s.endTime || null),
+        endTime:   s.endTime,
         last:      s.last,
         workplace: s.workplace || null,
+        nextDay:   isNextDay(s.startTime, s.endTime),
       }));
+  
     onSave(validSlots.length === 0
       ? { off: true, slots: [] }
       : { off: false, slots: validSlots });
   }
 
+  // シフト番号 например "2026/06/22 №1"
+  function shiftLabel(idx) {
+    if (!currentDate) return `#${idx + 1}`;
+    return `${currentDate.replace(/-/g, "/")} №${idx + 1}`;
+  }
+
+  const saveDisabled = !off && slots.some(s => !s.startTime || !s.endTime);
+
   return (
     <div ref={popRef} className={styles.popover}
       style={{ position:"fixed", top:pos.top, left:pos.left, transform:"none" }}>
+
+      {/* ── 前日からの引き続き ── */}
+      {prevDaySlots && prevDaySlots.length > 0 && (
+        <div
+          onClick={onGoToPrevDay}
+          style={{
+            margin: "0 0 10px 0", padding: "8px 10px",
+            background: "#EBF3FF", border: "1px solid #BFDBFE",
+            borderRadius: 6, cursor: "pointer",
+            transition: "background 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "#DBEAFE"}
+          onMouseLeave={e => e.currentTarget.style.background = "#EBF3FF"}
+        >
+          <div style={{ fontSize: 11, color: "#1e40af", fontWeight: "bold", marginBottom: 5 }}>
+            ← 前日からの引き続き（クリックで前日を編集）
+          </div>
+          {prevDaySlots.map((s, i) => (
+            <div key={i} style={{
+              fontSize: 12, color: "#374151",
+              display: "flex", gap: 5, alignItems: "center",
+            }}>
+              <span style={{
+                fontSize: 10, background: "#DBEAFE",
+                padding: "1px 5px", borderRadius: 3, color: "#1e40af",
+              }}>前日</span>
+              {formatTime(s.startTime)}
+              <span style={{ color: "#9CA3AF" }}>→</span>
+              <span style={{
+                fontSize: 10, background: "#DBEAFE",
+                padding: "1px 5px", borderRadius: 3, color: "#1e40af",
+              }}>当日</span>
+              {formatTime(s.endTime)}
+              {s.workplace && (
+                <span style={{ color: "#6B7280", marginLeft: 2 }}>{s.workplace}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <label className={styles.popRow}>
         <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck}/>
         <span className={styles.popRowLabel}>公休</span>
       </label>
+
       {!off && (
         <>
-          {slots.map((slot, i) => (
-            <div key={i} className={styles.slotBlock}>
-              <div className={styles.slotHeader}>
-                <span className={styles.slotNum}>#{i+1}</span>
-                {slots.length > 1 && (
-                  <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
-                )}
-              </div>
-              <div className={styles.popRow}>
-                <span className={styles.popLabel}>場所</span>
-                <select className={styles.popSelect} value={slot.workplace} onChange={e => updateSlot(i,"workplace",e.target.value)}>
-                  <option value="">— 未選択 —</option>
-                  {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                </select>
-              </div>
-              <div className={styles.popRow}>
-                <span className={styles.popLabel}>開始</span>
-                <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i,"startTime",e.target.value)}>
-                  <option value="">--</option>
-                  {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div className={styles.popRow}>
-                <span className={styles.popLabel}>終了</span>
-                {slot.last ? (
-                  <span className={styles.popLastBadge}>L</span>
-                ) : (
-                  <select className={styles.popSelect} value={slot.endTime} onChange={e => updateSlot(i,"endTime",e.target.value)}>
-                    <option value="">--</option>
-                    {TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+          {slots.map((slot, i) => {
+            const nd = isNextDay(slot.startTime, slot.endTime);
+            return (
+              <div key={i} className={styles.slotBlock}>
+                <div className={styles.slotHeader}>
+                  <span className={styles.slotNum} style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {shiftLabel(i)}
+                  </span>
+                  {slots.length > 1 && (
+                    <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
+                  )}
+                </div>
+
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>場所</span>
+                  <select className={styles.popSelect} value={slot.workplace}
+                    onChange={e => updateSlot(i,"workplace",e.target.value)}>
+                    <option value="">— 未選択 —</option>
+                    {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
                   </select>
-                )}
+                </div>
+
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>
+                    <span style={{ fontSize: 10, color: "#6B7280", display: "block", marginBottom: 1 }}>当日</span>
+                    開始
+                  </span>
+                  <select className={styles.popSelect} value={slot.startTime}
+                    onChange={e => updateSlot(i,"startTime",e.target.value)}>
+                    <option value="">--</option>
+                    {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+
+                <div className={styles.popRow}>
+                  <span className={styles.popLabel}>
+                    <span style={{
+                      fontSize: 10, display: "block", marginBottom: 1,
+                      color:      nd ? "#dc2626" : "#6B7280",
+                      fontWeight: nd ? "bold"    : "normal",
+                    }}>
+                      {nd ? "翌日" : "当日"}
+                    </span>
+                    終了
+                  </span>
+                    <select className={styles.popSelect} value={slot.endTime}
+                      onChange={e => updateSlot(i,"endTime",e.target.value)}>
+                      <option value="">--</option>
+                      {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                </div>
+
+                <label className={styles.popRow}>
+                  <input type="checkbox" checked={slot.last}
+                    onChange={e => updateSlot(i,"last",e.target.checked)} className={styles.popCheck}/>
+                  <span className={styles.popRowLabel}>
+                    <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
+                  </span>
+                </label>
               </div>
-              <label className={styles.popRow}>
-                <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i,"last",e.target.checked)} className={styles.popCheck}/>
-                <span className={styles.popRowLabel}>
-                  <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
-                </span>
-              </label>
-            </div>
-          ))}
+            );
+          })}
           {slots.length < MAX_SLOTS && (
             <button type="button" className={styles.slotAddBtn} onClick={addSlot}>
-              ＋ 勤務場所を追加
+              ＋ シフトを追加
             </button>
           )}
         </>
       )}
       <div className={styles.popActions}>
         <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
-        <button className={styles.popSave} onClick={handleSave}>保存</button>
+        <button
+          className={styles.popSave}
+          onClick={handleSave}
+          disabled={saveDisabled}
+          style={{ opacity: saveDisabled ? 0.4 : 1, cursor: saveDisabled ? "not-allowed" : "pointer" }}
+        >
+          保存
+        </button>
       </div>
     </div>
   );
@@ -1090,7 +1178,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         : {
             date: ds, off: existing.off,
             slots: (existing.slots || []).map(s => ({
-              startTime: s.startTime, endTime: s.endTime, last: s.last, workplace: s.workplace,
+              startTime: s.startTime, endTime: s.endTime,
+              last: s.last, workplace: s.workplace,
+              nextDay: s.nextDay || false,
             })),
           });
     }
@@ -1205,7 +1295,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             days.push({
               date: ds, off: existing.off,
               slots: (existing.slots || []).map(s => ({
-                startTime: s.startTime, endTime: s.endTime, last: s.last, workplace: s.workplace,
+                startTime: s.startTime, endTime: s.endTime,
+                last: s.last, workplace: s.workplace,
+                nextDay: s.nextDay || false,
               })),
             });
           }
@@ -1663,23 +1755,40 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                             return (
                               <td key={date} className={cellCls} rowSpan={maxSlots}
                                 style={{ padding:0, verticalAlign:"top", position:"relative" }}>
+                            
+                                {/* Фиолетовая полоска — ночная смена с предыдущего дня */}
+                                {(() => {
+                                  const prevDate = addDays(date, -1);
+                                  const prevDay  = getDayData(staff.userId, prevDate);
+                                  const hasOvernight = (prevDay?.slots || []).some(s =>
+                                    s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime))
+                                  );
+                                  return hasOvernight ? (
+                                    <div style={{
+                                      position: "absolute", top: 0, left: 0, right: 0,
+                                      height: 3, background: "#7c3aed",
+                                      borderRadius: "2px 2px 0 0", zIndex: 1,
+                                      pointerEvents: "none",
+                                    }} />
+                                  ) : null;
+                                })()}
+                            
                                 <div className={styles.cellAnchor}
                                   ref={el => { anchorRef.current = el; }}
                                   onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
                                   onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
-
+                            
                                   {/* Индикатор посещаемости */}
                                   {attStatus && (
                                     <div style={{
                                       position: "absolute", top: 3, right: 3,
                                       width: 6, height: 6, borderRadius: "50%",
                                       background: attStatus === "finished" ? "#16a34a"
-                                                : attStatus === "working"  ? "#2563eb"
-                                                : "#d97706",
+                                                : attStatus === "working"  ? "#2563eb" : "#d97706",
                                       zIndex: 1,
                                     }} />
                                   )}
-                                                                    
+                            
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
                                   ) : day.off || slots.length === 0 ? (
@@ -1691,24 +1800,44 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                       .filter(s => s.workplace
                                         ? visibleWorkplaces.has(s.workplace)
                                         : visibleWorkplaces.has("__none__"))
-                                      .map((s, si) => (
-                                        <div key={si} className={styles.slotRow}>
-                                          {s.last
-                                            ? <span className={styles.cellTime}>{formatTime(s.startTime)}<br/><span className={styles.cellLast}>L</span></span>
-                                            : <span className={styles.cellTime}>{formatTime(s.startTime)}<br/>{formatTime(s.endTime)}</span>
-                                          }
-                                          {s.workplace && <span className={styles.cellWorkplace}>{s.workplace}</span>}
-                                        </div>
-                                      ))
+                                      .map((s, si) => {
+                                        const nd = s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime));
+                                        return (
+                                          <div key={si} className={styles.slotRow}>
+                                            <span className={styles.cellTime}>
+                                              {formatTime(s.startTime)}<br/>
+                                              {nd
+                                                ? <span style={{ color: "#7c3aed" }}>{formatTime(s.endTime)}</span>
+                                                : formatTime(s.endTime)
+                                              }
+                                              {s.last && <span className={styles.cellLast}> L</span>}
+                                            </span>
+                                            {s.workplace && <span className={styles.cellWorkplace}>{s.workplace}</span>}
+                                          </div>
+                                        );
+                                      })
                                   )}
                                 </div>
-                                {isOpen && (
-                                  <CellPopover
-                                    day={day} anchorRef={anchorRef} workplaces={workplaces}
-                                    onClose={() => setOpenCell(null)}
-                                    onSave={patch => { setOpenCell(null); saveCell(staff.userId, date, patch); }}
-                                  />
-                                )}
+                            
+                                {isOpen && (() => {
+                                  const prevDate = addDays(date, -1);
+                                  const prevDay  = getDayData(staff.userId, prevDate);
+                                  const prevDayOvernightSlots = (prevDay?.slots || []).filter(s =>
+                                    s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime))
+                                  );
+                                  return (
+                                    <CellPopover
+                                      day={day}
+                                      currentDate={date}
+                                      prevDaySlots={prevDayOvernightSlots}
+                                      onGoToPrevDay={() => setOpenCell({ userId: staff.userId, date: prevDate })}
+                                      anchorRef={anchorRef}
+                                      workplaces={workplaces}
+                                      onClose={() => setOpenCell(null)}
+                                      onSave={patch => { setOpenCell(null); saveCell(staff.userId, date, patch); }}
+                                    />
+                                  );
+                                })()}
                               </td>
                             );
                           }

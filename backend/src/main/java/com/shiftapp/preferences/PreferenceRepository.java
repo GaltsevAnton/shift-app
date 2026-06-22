@@ -14,6 +14,7 @@ public interface PreferenceRepository extends JpaRepository<Preference, Long> {
 
     // Без слотов (для простых проверок)
     List<Preference> findByUser_IdAndWorkDateBetween(Long userId, LocalDate from, LocalDate to);
+    List<Preference> findByUser_Id(Long userId);
 
     // С подгрузкой слотов (используем JOIN FETCH чтобы избежать N+1)
     @Query("SELECT DISTINCT p FROM Preference p " +

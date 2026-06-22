@@ -30,6 +30,9 @@ public class ShiftSlot {
     @Column(name = "workplace", length = 100)
     private String workplace;
 
+    @Column(name = "next_day", nullable = false)
+    private boolean nextDay = false;
+
     public ShiftSlot() {}
 
     public Long getId() { return id; }
@@ -51,4 +54,7 @@ public class ShiftSlot {
 
     public String getWorkplace() { return workplace; }
     public void setWorkplace(String workplace) { this.workplace = workplace; }
+
+    public boolean isNextDay() { return nextDay; }
+    public void setNextDay(boolean nextDay) { this.nextDay = nextDay; }
 }

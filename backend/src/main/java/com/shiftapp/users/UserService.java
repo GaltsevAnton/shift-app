@@ -11,6 +11,9 @@ import jakarta.persistence.PersistenceContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.shiftapp.preferences.PreferenceRepository;
+import com.shiftapp.preferences.ShiftSlotRepository;
+import com.shiftapp.kiosk.TimeRecordRepository;
 
 import java.util.HashSet;
 import java.util.List;
@@ -22,16 +25,25 @@ public class UserService {
     private final UserRepository repo;
     private final DepartmentRepository departmentRepo;
     private final PasswordEncoder passwordEncoder;
+    private final PreferenceRepository preferenceRepo;
+    private final ShiftSlotRepository  slotRepo;
+    private final TimeRecordRepository timeRecordRepo;
 
     @PersistenceContext
     private EntityManager em;
 
     public UserService(UserRepository repo,
-                       DepartmentRepository departmentRepo,
-                       PasswordEncoder passwordEncoder) {
-        this.repo           = repo;
-        this.departmentRepo = departmentRepo;
-        this.passwordEncoder = passwordEncoder;
+            DepartmentRepository departmentRepo,
+            PasswordEncoder passwordEncoder,
+            PreferenceRepository preferenceRepo,
+            ShiftSlotRepository slotRepo,
+            TimeRecordRepository timeRecordRepo) {
+    this.repo           = repo;
+    this.departmentRepo = departmentRepo;
+    this.passwordEncoder = passwordEncoder;
+    this.preferenceRepo = preferenceRepo;
+    this.slotRepo       = slotRepo;
+    this.timeRecordRepo = timeRecordRepo;
     }
 
     public List<UserResponse> list(Long restaurantId) {
@@ -120,6 +132,16 @@ public class UserService {
     public void delete(Long restaurantId, Long id) {
         User u = repo.findByIdAndRestaurant_Id(id, restaurantId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+    
+        List<Long> prefIds = preferenceRepo.findByUser_Id(id)
+                .stream().map(p -> p.getId()).toList();
+        if (!prefIds.isEmpty()) {
+            slotRepo.deleteByPreferenceIdIn(prefIds);
+            preferenceRepo.deleteAllById(prefIds);
+        }
+    
+        timeRecordRepo.deleteByUserId(id);
+    
         repo.delete(u);
     }
 

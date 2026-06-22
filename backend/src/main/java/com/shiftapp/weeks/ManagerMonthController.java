@@ -53,7 +53,8 @@ public class ManagerMonthController {
         LocalDate rangeEnd   = rangeTo.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY));
 
         var staffList = userRepository
-                .findByRestaurant_IdAndRoleOrderByFullNameAsc(restaurantId, UserRole.STAFF);
+                .findByRestaurant_IdAndRoleInOrderByFullNameAsc(
+                    restaurantId, List.of(UserRole.STAFF, UserRole.MANAGER));
 
         List<Preference> allPrefs = preferenceRepository
                 .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, rangeStart, rangeEnd);
@@ -129,9 +130,10 @@ public class ManagerMonthController {
         for (ShiftSlot s : p.getSlots()) {
             slotDtos.add(new SlotDto(
                     s.getStartTime(),
-                    s.isLast() ? null : s.getEndTime(),
+                    s.getEndTime(),
                     s.isLast(),
-                    s.getWorkplace()
+                    s.getWorkplace(),
+                    s.isNextDay()
             ));
         }
         day.setSlots(slotDtos);

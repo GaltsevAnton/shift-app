@@ -30,7 +30,7 @@ public class KioskController {
         return userRepository
             .findAllByRestaurant_IdOrderByIdDesc(restaurantId)
             .stream()
-            .filter(u -> u.isActive() && u.getRole() == UserRole.STAFF)
+            .filter(u -> u.isActive() && (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER))
             .map(UserResponse::from)
             .toList();
     }

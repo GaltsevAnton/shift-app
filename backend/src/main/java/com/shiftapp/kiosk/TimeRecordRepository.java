@@ -31,4 +31,8 @@ public interface TimeRecordRepository extends JpaRepository<TimeRecord, Long> {
     List<TimeRecord> findByUser_IdAndWorkDateBetweenOrderByWorkDateAscRecordedAtAsc(
         Long userId, LocalDate from, LocalDate to
     );
+
+    List<TimeRecord> findByUser_IdOrderByRecordedAtAsc(Long userId);
+    
+    void deleteByUserId(Long userId);
 }

@@ -113,10 +113,11 @@ public class WeekService {
         List<SlotDto> slotDtos = new ArrayList<>();
         for (ShiftSlot s : p.getSlots()) {
             slotDtos.add(new SlotDto(
-                    s.getStartTime(),
-                    s.isLast() ? null : s.getEndTime(),
-                    s.isLast(),
-                    s.getWorkplace()
+                s.getStartTime(),
+                s.getEndTime(),
+                s.isLast(),
+                s.getWorkplace(),
+                s.isNextDay()
             ));
         }
         day.setSlots(slotDtos);
@@ -346,8 +347,8 @@ public class WeekService {
 
         WeekStatusType status = getStatusOrDefault(restaurantId, ws);
 
-        var staffList = userRepository.findByRestaurant_IdAndRoleOrderByFullNameAsc(
-                restaurantId, com.shiftapp.users.UserRole.STAFF);
+        var staffList = userRepository.findByRestaurant_IdAndRoleInOrderByFullNameAsc(
+            restaurantId, List.of(com.shiftapp.users.UserRole.STAFF, com.shiftapp.users.UserRole.MANAGER));
 
         List<Preference> allPrefs =
                 preferenceRepository.findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, ws, we);
@@ -422,8 +423,9 @@ public class WeekService {
                     slot.setSlotOrder(order++);
                     slot.setStartTime(si.getStartTime());
                     slot.setLast(si.isLast());
-                    slot.setEndTime(si.isLast() ? null : si.getEndTime());
+                    slot.setEndTime(si.getEndTime());
                     slot.setWorkplace(si.getWorkplace());
+                    slot.setNextDay(si.isLast() ? false : si.isNextDay());
                     p.getSlots().add(slot);
                 }
             }

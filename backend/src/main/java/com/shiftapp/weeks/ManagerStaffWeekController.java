@@ -1,16 +1,31 @@
 package com.shiftapp.weeks;
 
+import java.time.LocalDate;
+import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.shiftapp.common.CurrentUser;
 import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
 import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.users.UserRepository;
-import com.shiftapp.weeks.dto.*;
-import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDate;
-import java.time.temporal.TemporalAdjusters;
-import java.util.*;
+import com.shiftapp.weeks.dto.ManagerStaffWeekSaveRequest;
+import com.shiftapp.weeks.dto.SlotDto;
+import com.shiftapp.weeks.dto.StaffWeekDay;
+import com.shiftapp.weeks.dto.StaffWeekResponse;
 
 @RestController
 @RequestMapping("/api/manager")
@@ -79,9 +94,10 @@ public class ManagerStaffWeekController {
                 for (ShiftSlot s : p.getSlots()) {
                     slotDtos.add(new SlotDto(
                             s.getStartTime(),
-                            s.isLast() ? null : s.getEndTime(),
+                            s.getEndTime(),
                             s.isLast(),
-                            s.getWorkplace()
+                            s.getWorkplace(),
+                            s.isNextDay()
                     ));
                 }
                 day.setSlots(slotDtos);

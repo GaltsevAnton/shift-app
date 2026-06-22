@@ -40,14 +40,50 @@ public class KioskService {
     // ── Текущий статус сотрудника за сегодня ──
     @Transactional(readOnly = true)
     public StaffStatusResponse getStatus(Long userId) {
-        LocalDate today = LocalDate.now(ZONE);
-        List<TimeRecord> records = timeRecordRepository
-            .findByUser_IdAndWorkDateOrderByRecordedAtAsc(userId, today);
+        // Ищем ВСЕ записи сотрудника, сортируем по времени
+        List<TimeRecord> allRecords = timeRecordRepository
+            .findByUser_IdOrderByRecordedAtAsc(userId);
 
         StaffStatusResponse res = new StaffStatusResponse();
         res.setStatus("NOT_STARTED");
 
-        for (TimeRecord r : records) {
+        // Находим последний CLOCK_IN без последующего CLOCK_OUT
+        TimeRecord lastClockIn  = null;
+        TimeRecord lastClockOut = null;
+
+        for (TimeRecord r : allRecords) {
+            if (r.getRecordType() == TimeRecordType.CLOCK_IN)  lastClockIn  = r;
+            if (r.getRecordType() == TimeRecordType.CLOCK_OUT) lastClockOut = r;
+        }
+
+        // Смена открыта если есть CLOCK_IN и нет CLOCK_OUT после него
+        boolean shiftOpen = lastClockIn != null &&
+            (lastClockOut == null || lastClockOut.getRecordedAt().isBefore(lastClockIn.getRecordedAt()));
+
+        if (!shiftOpen) {
+            // Смена закрыта или не начата — показываем записи за сегодня
+            LocalDate today = LocalDate.now(ZONE);
+            List<TimeRecord> todayRecords = allRecords.stream()
+                .filter(r -> r.getWorkDate().equals(today))
+                .toList();
+            res.setStatus("NOT_STARTED");
+            res.setRecords(todayRecords.stream()
+                .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
+                .toList());
+            todayRecords.stream()
+                .filter(r -> r.getPhotoPath() != null)
+                .reduce((a, b) -> b)
+                .ifPresent(r -> res.setLastPhotoPath(r.getPhotoPath()));
+            return res;
+        }
+
+        // Смена открыта — берём записи начиная с последнего CLOCK_IN
+        final TimeRecord openClockIn = lastClockIn;
+        List<TimeRecord> shiftRecords = allRecords.stream()
+            .filter(r -> !r.getRecordedAt().isBefore(openClockIn.getRecordedAt()))
+            .toList();
+
+        for (TimeRecord r : shiftRecords) {
             switch (r.getRecordType()) {
                 case CLOCK_IN    -> { res.setStatus("WORKING");  res.setClockInAt(r.getRecordedAt()); }
                 case BREAK_START -> { res.setStatus("ON_BREAK"); res.setBreakStartAt(r.getRecordedAt()); }
@@ -56,17 +92,15 @@ public class KioskService {
             }
         }
 
-        res.setRecords(
-            records.stream()
-                .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
-                .toList()
-        );
-        
-        // Последнее фото (не из CLOCK_IN — из любой записи)
-        records.stream()
-        .filter(r -> r.getPhotoPath() != null)
-        .reduce((first, second) -> second) // последняя запись с фото
-        .ifPresent(r -> res.setLastPhotoPath(r.getPhotoPath()));
+        res.setRecords(shiftRecords.stream()
+            .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
+            .toList());
+
+        shiftRecords.stream()
+            .filter(r -> r.getPhotoPath() != null)
+            .reduce((a, b) -> b)
+            .ifPresent(r -> res.setLastPhotoPath(r.getPhotoPath()));
+
         return res;
     }
 
@@ -118,7 +152,7 @@ public class KioskService {
     // ── Валидация допустимых действий ──
     private void validatePunch(String currentStatus, TimeRecordType type) {
         switch (currentStatus) {
-            case "NOT_STARTED" -> {
+            case "NOT_STARTED", "FINISHED" -> {  // ← добавили FINISHED
                 if (type != TimeRecordType.CLOCK_IN)
                     throw new IllegalArgumentException("出勤打刻が必要です");
             }
@@ -130,7 +164,6 @@ public class KioskService {
                 if (type != TimeRecordType.BREAK_END)
                     throw new IllegalArgumentException("休憩終了打刻が必要です");
             }
-            case "FINISHED" -> throw new IllegalArgumentException("本日の退勤打刻は完了しています");
         }
     }
 
