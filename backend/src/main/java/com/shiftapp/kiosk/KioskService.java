@@ -134,7 +134,7 @@ public class KioskService {
         }
     }
 
-    // ── Сохранение фото на диск ──
+    // ── Save photo to disk ──
     private String savePhoto(Long userId, TimeRecordType type,
                              LocalDate date, Instant now, String base64) {
         try {
@@ -145,7 +145,7 @@ public class KioskService {
             Files.createDirectories(dir);
             Path file = dir.resolve(fileName);
 
-            // Убираем data:image/jpeg;base64, префикс если есть
+            // Reamove data:image/jpeg;base64
             String data = base64.contains(",") ? base64.split(",")[1] : base64;
             byte[] bytes = Base64.getDecoder().decode(data);
             Files.write(file, bytes);

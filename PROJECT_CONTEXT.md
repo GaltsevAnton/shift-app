@@ -7,10 +7,13 @@
 ## 1) Главные решения проекта
 
 - Репозиторий: **monorepo** (backend + frontend + report-service)
-- **Единая сущность пользователя** (`com.shiftapp.users`) — и менеджеры, и персонал.
-  Роли: `STAFF`, `MANAGER`, `ADMIN`
+- **Единая сущность пользователя** (`com.shiftapp.users`) — и менеджеры, и персонал, и киоск.
+  Роли: `STAFF`, `MANAGER`, `ADMIN`, `KIOSK`
 - JWT-аутентификация: единый логин `/api/auth/login`
-- Доступы: `/api/manager/**` → MANAGER, `/api/staff/**` → STAFF или MANAGER, `/api/kiosk/**` → без JWT
+  - Обычные роли — токен на `access-token-minutes` (120 мин)
+  - Роль `KIOSK` — отдельный долгоживущий токен (~10 лет) через `generateKioskToken()`
+- Доступы: `/api/manager/**` → MANAGER, `/api/staff/**` → STAFF или MANAGER,
+  `/api/kiosk/punch|status|staff` → требуют роль KIOSK (авторизация через `kioskToken` в localStorage)
 - Frontend: токен в `localStorage.accessToken`, роль в `localStorage.appRole`
 - Навигация менеджера: `localStorage.managerView` — SHIFTS / PREFS / EMPLOYEES / SETTINGS / ATTENDANCE
 - Все ключи очищаются в `clearToken()` при логауте
@@ -36,9 +39,16 @@
   - permitAll: `/api/auth/**`, `/api/kiosk/**`, `/photos/**`, `/api/health`
 
 ### 3.2 Users
-- `User.java` — id, restaurant, login, passwordHash, role, fullName, **fullNameKana**, position, departments, active
-- `UserResponse.java` — включает fullNameKana, position, departments
-- `UserCreateRequest/UpdateRequest.java` — включает fullNameKana, departmentIds
+- `User.java` — id, restaurant, login, passwordHash, role, fullName, fullNameKana,
+  position, departments, active, **+ полный профиль (V9)**:
+  - `lastName`, `firstName`, `lastNameKana`, `firstNameKana` (раздельно)
+  - `email`, `phone` (опционально)
+  - `postalCode`, `region`, `municipality`, `blockNumber`, `building` (адрес, опц.)
+  - `birthDate`, `gender` (опционально, `Gender` enum: MALE/FEMALE)
+  - `fullName`/`fullNameKana` собираются автоматически в `UserService` из lastName+firstName
+- `Gender.java` — enum MALE/FEMALE
+- `UserResponse.java`, `UserCreateRequest/UpdateRequest.java` — все новые поля профиля
+- `UserRole.java` — STAFF, MANAGER, ADMIN, **KIOSK**
 
 ### 3.3 Preferences и ShiftSlots
 - `Preference.java` — workDate, off, slots (OneToMany), version (@Version)
@@ -87,6 +97,8 @@ V4__add_departments.sql     — departments, user_departments
 V5__add_optimistic_lock.sql — version на preferences
 V6__add_time_records.sql    — time_records + индексы
 V7__add_fullname_kana.sql   — full_name_kana в users
+V8__add_kiosk_role.sql      — CHECK constraint users_role_check + KIOSK (план, на деве сделано вручную)
+V9__add_user_profile_fields.sql — lastName/firstName/kana, email, phone, адрес, birthDate, gender
 ```
 
 ---
@@ -196,8 +208,12 @@ Sidebar: SHIFTS 📅 / **ATTENDANCE 🕐** / EMPLOYEES 👥 / SETTINGS ⚙️
   - Без кнопки キャンセル — закрытие тапом на затемнённый фон
 - Дата всегда в формате `MM月DD日（曜日）`, время всегда с секундами
 - RESTAURANT_ID = 1 (захардкожен)
-- **Безопасность**: пока без авторизации (`/api/kiosk/**` permitAll) —
-  планируется роль KIOSK + логин на планшете (отложено)
+- **Авторизация (реализовано)**: роль KIOSK, токен в `localStorage.kioskToken`
+  (отдельно от `accessToken` основного приложения), без авто-логаута по таймауту —
+  выход только явный через ☰ → 🚪 ログアウト. При 401/403 — автовозврат на экран логина.
+- **PunchPopup финальный дизайн**: 900×610px, камера 560px слева (зеркалится через
+  CSS scaleX(-1), сохранённое фото — не зеркальное), кнопки 260px прижаты к низу,
+  история всех событий за день (множественные перерывы) вместо последних 4 полей
 
 ### EmployeesPage.jsx
 - Поле フリガナ（カタカナ）для fullNameKana
@@ -278,6 +294,25 @@ location ~* \.(png|jpg|ico|webmanifest|js|css|svg)$ { try_files $uri =404; }
 
 ---
 
+## 9.5) EmployeesPage.jsx — модальная форма сотрудника
+
+Список — компактная таблица (氏名 = 姓+名, フリガナ под ним мелким шрифтом).
+Кнопка ＋新規作成 открывает модалку (720px) по центру, закрывается **только**
+через キャンセル/保存 (НЕ по клику на фон — критично для iPad, чтобы переключение
+между приложениями не сбрасывало форму).
+
+Секции модалки (в этом порядке):
+1. **名前** — 姓/名 + フリガナ×2 раздельно (обязательно)
+2. **連絡先** (任意) — email, телефон
+3. **住所** (任意) — 郵便番号, 都道府県 (select, все 47 префектур), 市区町村, 番地, 建物名
+4. **基本情報** (任意) — 生年月日, 性別 (radio 男性/女性)
+5. **アカウント** — login, パスワード (обязательно при создании)
+6. **業務情報** — 職種・役職, ロール (STAFF/MANAGER/KIOSK), 部署 (чекбоксы)
+
+Обязательные поля помечены красным бейджем 必須, опциональные секции — серым 任意.
+
+---
+
 ## 10) Ловушки
 
 - PostgreSQL: таблицы созданы от `postgres`, юзер `shiftuser` не владелец —
@@ -288,8 +323,16 @@ location ~* \.(png|jpg|ico|webmanifest|js|css|svg)$ { try_files $uri =404; }
 - Safari игнорирует путь при "Добавить на экран" — нужна отдельная точка входа
   (`kiosk.html` + свой manifest) для каждого раздела с собственным `start_url`
 - IP allow/deny на `/kiosk` в nginx конфликтовало с доступом и фото — **откачено**,
-  решение безопасности кiosk перенесено на авторизацию (роль KIOSK, не реализовано)
+  безопасность решена авторизацией (роль KIOSK) вместо сетевых ограничений
 - На деве фото нужен `server.proxy` в vite.config.js для `/photos` → Spring Boot
+- Добавление enum-значения (KIOSK в UserRole) требует обновления CHECK constraint
+  `users_role_check` в БД вручную — Hibernate `ddl-auto:update` не трогает constraints
+- Hibernate `ddl-auto: update` иногда не подхватывает новые поля Entity сразу —
+  если ошибка "column does not exist" после добавления полей, выполнить ALTER TABLE
+  вручную на деве (для прода — через Flyway миграцию, там это всегда надёжно)
+- Модалки/попапы на iPad: НЕ закрывать по клику на затемнённый фон — переключение
+  между приложениями (alt-tab эквивалент) может триггерить случайный клик и сбрасывать
+  заполненную форму. Закрытие только через явные кнопки.
 
 
 - `ManagerWeekResponse.rows` — не `staff`

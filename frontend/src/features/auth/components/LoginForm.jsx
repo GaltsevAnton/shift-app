@@ -77,6 +77,9 @@ export default function LoginForm() {
           onChange={(e) => setLoginState(e.target.value)}
           className={styles.input}
           autoComplete="username"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck="false"
         />
       </label>
 

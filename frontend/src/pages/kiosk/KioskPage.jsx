@@ -190,6 +190,9 @@ function KioskLogin({ onLoggedIn }) {
               boxSizing: "border-box", outline: "none",
             }}
             autoComplete="username"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck="false"
           />
         </label>
 
