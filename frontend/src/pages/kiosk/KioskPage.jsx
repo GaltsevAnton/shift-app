@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 const RESTAURANT_ID = 1;
-const AUTO_RETURN_SEC = 3;
 const TOKEN_KEY = "kioskToken";
 
 /* ─── Token helpers ─────────────────────────────────────── */
@@ -27,7 +26,7 @@ async function loginKiosk(login, password) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || "ログインに失敗しました");
   }
-  return res.json(); // { accessToken }
+  return res.json();
 }
 
 function authHeaders() {
@@ -43,6 +42,7 @@ async function fetchStaff() {
   if (!res.ok) throw new Error("Failed to load staff");
   return res.json();
 }
+
 async function fetchAllStatuses(staffList) {
   const results = await Promise.all(
     staffList.map(s =>
@@ -59,6 +59,7 @@ async function fetchAllStatuses(staffList) {
   results.forEach(r => { map[r.userId] = r.status; });
   return map;
 }
+
 async function punchApi(userId, recordType, photoBase64) {
   const res = await fetch(`${API_BASE}/api/kiosk/punch`, {
     method: "POST",
@@ -114,7 +115,7 @@ function getAvailableActions(status) {
     case "NOT_STARTED": return ["CLOCK_IN"];
     case "WORKING":     return ["BREAK_START", "CLOCK_OUT"];
     case "ON_BREAK":    return ["BREAK_END"];
-    case "FINISHED":    return [];
+    case "FINISHED":    return ["CLOCK_IN"];
     default:            return [];
   }
 }
@@ -177,7 +178,6 @@ function KioskLogin({ onLoggedIn }) {
           <div style={{ fontSize: 22, fontWeight: 800, color: "#1e3a5f" }}>HannoSHIFT</div>
           <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>勤怠端末ログイン</div>
         </div>
-
         <label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
           ログインID
           <input
@@ -195,7 +195,6 @@ function KioskLogin({ onLoggedIn }) {
             spellCheck="false"
           />
         </label>
-
         <label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
           パスワード
           <input
@@ -211,7 +210,6 @@ function KioskLogin({ onLoggedIn }) {
             autoComplete="current-password"
           />
         </label>
-
         {error && (
           <div style={{
             background: "#fef2f2", color: "#dc2626",
@@ -220,7 +218,6 @@ function KioskLogin({ onLoggedIn }) {
             {error}
           </div>
         )}
-
         <button type="submit" disabled={loading} style={{
           marginTop: 8, padding: "12px",
           background: "#2F5496", color: "#fff",
@@ -273,8 +270,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
   const [cameraError, setCameraError] = useState(null);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
-  const [success, setSuccess]         = useState(null);
-  const [countdown, setCountdown]     = useState(null);
+  const [confirming, setConfirming]   = useState(null); // { recordType, photoBase64 }
 
   const availableActions = getAvailableActions(statusInfo?.status || "NOT_STARTED");
 
@@ -293,46 +289,43 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
 
   async function handleAction(recordType) {
     if (loading) return;
-    setLoading(true); setError(null);
 
+    // Снимаем фото (камера продолжает работать)
     let photoBase64 = null;
     const video  = videoRef.current;
     const canvas = canvasRef.current;
     if (video && canvas && cameraReady) {
       const vw = video.videoWidth  || 640;
       const vh = video.videoHeight || 480;
-    
-      const scale = 1.5; // тот же что в CSS transform
+      const scale = 1.5;
       const cropW = vw / scale;
       const cropH = vh / scale;
       const cropX = (vw - cropW) / 2;
       const cropY = (vh - cropH) / 2;
-    
       canvas.width  = cropW;
       canvas.height = cropH;
       canvas.getContext("2d").drawImage(
-        video,
-        cropX, cropY, cropW, cropH,
-        0, 0, cropW, cropH
+        video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH
       );
       photoBase64 = canvas.toDataURL("image/jpeg", 0.7);
     }
 
-    try {
-      const result = await punchApi(staff.id, recordType, photoBase64);
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      setSuccess({ action: getActionLabel(recordType), time: formatTime(result.recordedAt) });
+    // Показываем экран подтверждения (камера НЕ останавливается)
+    setConfirming({ recordType, photoBase64 });
+  }
 
-      let sec = AUTO_RETURN_SEC;
-      setCountdown(sec);
-      const timer = setInterval(() => {
-        sec--;
-        setCountdown(sec);
-        if (sec <= 0) { clearInterval(timer); onSuccess(result); }
-      }, 1000);
+  async function handleConfirm() {
+    if (!confirming || loading) return;
+    setLoading(true); setError(null);
+    try {
+      const result = await punchApi(staff.id, confirming.recordType, confirming.photoBase64);
+      streamRef.current?.getTracks().forEach(t => t.stop()); // останавливаем только при успехе
+      setConfirming(null);
+      onSuccess(result);
     } catch (e) {
       if (e.message === "UNAUTHORIZED") { onUnauthorized(); return; }
       setError(e.message);
+      setConfirming(null); // возврат на экран кнопок
     } finally {
       setLoading(false);
     }
@@ -340,7 +333,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
 
   return (
     <div
-      onClick={e => { if (e.target === e.currentTarget && !loading) onClose(); }}
+      onClick={e => { if (e.target === e.currentTarget && !loading && !confirming) onClose(); }}
       style={{
         position: "fixed", inset: 0, zIndex: 1000,
         background: "rgba(0,0,0,0.6)",
@@ -354,180 +347,237 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
         borderRadius: 24,
         overflow: "hidden",
         display: "flex",
+        position: "relative",
         boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
       }}>
 
-        {success ? (
+        {/* ── Экран подтверждения (поверх, абсолютный) ── */}
+        {confirming && (
           <div style={{
-            flex: 1, display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center", gap: 16,
+            position: "absolute", inset: 0, zIndex: 10,
+            background: "#1e3a5f",
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 20,
+            padding: 32,
           }}>
-            <div style={{ fontSize: 72 }}>✅</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>{staff.fullName}</div>
-            <div style={{
-              fontSize: 44, fontWeight: 700, color: "#fff",
-              background: "rgba(255,255,255,0.1)", borderRadius: 12,
-              padding: "8px 32px",
-            }}>
-              {success.action}
-            </div>
-            <div style={{ fontSize: 52, fontWeight: 700, color: "#fff", fontFamily: "monospace" }}>
-              {success.time}
-            </div>
-            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>
-              {countdown}秒後に閉じます
-            </div>
-          </div>
-        ) : (
-          <>
-            <div style={{
-              width: 560, flexShrink: 0, position: "relative",
-              background: "#000",
-              overflow: "hidden",
-            }}>
-              <video
-                ref={videoRef}
-                autoPlay playsInline muted
+            {confirming.photoBase64 ? (
+              <img
+                src={confirming.photoBase64}
+                alt="photo"
                 style={{
-                  width: "100%", height: "100%", objectFit: "cover",
-                  transform: "scaleX(-1) scale(1.5)", // приближение — подбери значение
-                  transformOrigin: "center center",
+                  width: 320, height: 320, objectFit: "cover",
+                  borderRadius: 16,
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
                 }}
               />
-              <canvas ref={canvasRef} style={{ display: "none" }} />
-
-              {cameraReady && (
-                <div style={{
-                  position: "absolute", inset: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  pointerEvents: "none",
-                }}>
-                  <div style={{
-                    width: "55%", height: "75%",
-                    border: "3px dashed rgba(255,255,255,0.5)",
-                    borderRadius: "50%",
-                  }} />
-                </div>
-              )}
-
-              {cameraError && (
-                <div style={{
-                  position: "absolute", inset: 0,
-                  display: "flex", flexDirection: "column",
-                  alignItems: "center", justifyContent: "center",
-                  color: "rgba(255,255,255,0.7)", fontSize: 14, gap: 8,
-                }}>
-                  <div style={{ fontSize: 40 }}>📷</div>
-                  <div>{cameraError}</div>
-                </div>
-              )}
-
+            ) : (
               <div style={{
-                position: "absolute", bottom: 0, left: 0, right: 0,
-                background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
-                padding: "24px 16px 16px",
-                color: "#fff", fontSize: 18, fontWeight: 700, textAlign: "center",
+                width: 320, height: 320, borderRadius: 16,
+                background: "rgba(255,255,255,0.1)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 64,
+              }}>📷</div>
+            )}
+
+            <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>
+              {staff.fullName}
+            </div>
+
+            <PopupClock />
+            <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>
+              {getActionLabel(confirming.recordType)}
+            </div>
+
+            {error && (
+              <div style={{
+                background: "rgba(229,57,53,0.2)", border: "1px solid rgba(229,57,53,0.5)",
+                borderRadius: 8, padding: "8px 16px",
+                color: "#ffcdd2", fontSize: 13, textAlign: "center",
               }}>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 16, width: "100%", maxWidth: 440 }}>
+              <button
+                onClick={() => { setConfirming(null); setError(null); }}
+                disabled={loading}
+                style={{
+                  flex: 1, padding: "18px 0",
+                  background: "rgba(255,255,255,0.15)",
+                  border: "2px solid rgba(255,255,255,0.3)",
+                  borderRadius: 14, color: "#fff",
+                  fontSize: 22, fontWeight: 700, cursor: "pointer",
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={loading}
+                style={{
+                  flex: 1, padding: "18px 0",
+                  background: getActionBg(confirming.recordType, [confirming.recordType]),
+                  border: "none", borderRadius: 14, color: "#fff",
+                  fontSize: 22, fontWeight: 700, cursor: "pointer",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                {loading ? "..." : getActionLabel(confirming.recordType)}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Камера (всегда в DOM, скрыта при подтверждении) ── */}
+        <div style={{
+          width: 560, flexShrink: 0, position: "relative",
+          background: "#000", overflow: "hidden",
+          visibility: confirming ? "hidden" : "visible",
+        }}>
+          <video
+            ref={videoRef}
+            autoPlay playsInline muted
+            style={{
+              width: "100%", height: "100%", objectFit: "cover",
+              transform: "scaleX(-1) scale(1.5)",
+              transformOrigin: "center center",
+            }}
+          />
+          <canvas ref={canvasRef} style={{ display: "none" }} />
+
+          {cameraReady && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              pointerEvents: "none",
+            }}>
+              <div style={{
+                width: "55%", height: "75%",
+                border: "3px dashed rgba(255,255,255,0.5)",
+                borderRadius: "50%",
+              }} />
+            </div>
+          )}
+
+          {cameraError && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              color: "rgba(255,255,255,0.7)", fontSize: 14, gap: 8,
+            }}>
+              <div style={{ fontSize: 40 }}>📷</div>
+              <div>{cameraError}</div>
+            </div>
+          )}
+
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
+            padding: "24px 16px 16px",
+            color: "#fff", fontSize: 18, fontWeight: 700, textAlign: "center",
+          }}>
+            {staff.fullName}
+          </div>
+        </div>
+
+        {/* ── Панель кнопок (всегда в DOM, скрыта при подтверждении) ── */}
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          background: "#1e3a5f",
+          visibility: confirming ? "hidden" : "visible",
+        }}>
+          <div style={{ padding: "16px 16px 10px", textAlign: "center" }}>
+            <PopupClock />
+          </div>
+
+          <div style={{
+            display: "flex", alignItems: "center", gap: 14,
+            padding: "0 20px 12px",
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: "50%",
+              background: "#d0dff0", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <svg viewBox="0 0 100 100" width="48" height="48" opacity="0.5">
+                <circle cx="50" cy="50" r="45" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
+                <path d="M 30 60 Q 50 78 70 60" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
+                <path d="M 33 38 Q 38 32 43 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
+                <path d="M 57 38 Q 62 32 67 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>
                 {staff.fullName}
               </div>
             </div>
+          </div>
 
+          {statusInfo?.records && statusInfo.records.length > 0 && (
             <div style={{
-              flex: 1, display: "flex", flexDirection: "column",
-              background: "#1e3a5f",
+              padding: "0 20px 8px",
+              display: "flex", flexDirection: "column", gap: 4,
+              maxHeight: 140, overflowY: "auto",
             }}>
-              <div style={{ padding: "16px 16px 10px", textAlign: "center" }}>
-                <PopupClock />
-              </div>
-
-              <div style={{
-                display: "flex", alignItems: "center", gap: 14,
-                padding: "0 20px 12px",
-              }}>
-                <div style={{
-                  width: 64, height: 64, borderRadius: "50%",
-                  background: "#d0dff0", flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <svg viewBox="0 0 100 100" width="48" height="48" opacity="0.5">
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
-                    <path d="M 30 60 Q 50 78 70 60" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
-                    <path d="M 33 38 Q 38 32 43 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
-                    <path d="M 57 38 Q 62 32 67 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
-                  </svg>
+              {statusInfo.records.map((r, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                  <span style={{ color: "rgba(255,255,255,0.6)" }}>{getActionLabel(r.type)}</span>
+                  <span style={{ color: "#fff", fontFamily: "monospace", fontWeight: 600 }}>
+                    {formatTime(r.time)}
+                  </span>
                 </div>
-                <div>
-                  <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>
-                    {staff.fullName}
-                  </div>
-                </div>
-              </div>
-
-              {/* История за сегодня */}
-              {statusInfo?.records && statusInfo.records.length > 0 && (
-                <div style={{
-                  padding: "0 20px 8px",
-                  display: "flex", flexDirection: "column", gap: 4,
-                  maxHeight: 140, overflowY: "auto",
-                }}>
-                  {statusInfo.records.map((r, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                      <span style={{ color: "rgba(255,255,255,0.6)" }}>{getActionLabel(r.type)}</span>
-                      <span style={{ color: "#fff", fontFamily: "monospace", fontWeight: 600 }}>
-                        {formatTime(r.time)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {error && (
-                <div style={{
-                  margin: "0 12px 8px",
-                  background: "rgba(229,57,53,0.2)", border: "1px solid rgba(229,57,53,0.5)",
-                  borderRadius: 8, padding: "6px 12px",
-                  color: "#ffcdd2", fontSize: 12, textAlign: "center",
-                }}>
-                  {error}
-                </div>
-              )}
-
-              <div style={{ flex: 1 }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: 260, flexShrink: 0, gap: 1 }}>
-                {["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"].map(action => {
-                  const isAvail = availableActions.includes(action);
-                  return (
-                    <button
-                      key={action}
-                      onClick={() => isAvail && !loading && handleAction(action)}
-                      style={{
-                        background: getActionBg(action, availableActions),
-                        border: "none", color: "#fff",
-                        fontSize: 26, fontWeight: 800,
-                        cursor: isAvail && !loading ? "pointer" : "not-allowed",
-                        opacity: isAvail ? 1 : 0.3,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        transition: "transform 0.1s",
-                      }}
-                      onTouchStart={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
-                      onTouchEnd={e => e.currentTarget.style.transform = "scale(1)"}
-                      onMouseDown={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
-                      onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
-                    >
-                      {loading && isAvail ? "..." : getActionLabel(action)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {statusInfo?.status === "FINISHED" && (
-                <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 12, textAlign: "center", padding: "6px 0" }}>
-                  本日の退勤打刻は完了しています
-                </div>
-              )}
+              ))}
             </div>
-          </>
-        )}
+          )}
+
+          {error && !confirming && (
+            <div style={{
+              margin: "0 12px 8px",
+              background: "rgba(229,57,53,0.2)", border: "1px solid rgba(229,57,53,0.5)",
+              borderRadius: 8, padding: "6px 12px",
+              color: "#ffcdd2", fontSize: 12, textAlign: "center",
+            }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ flex: 1 }} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: 260, flexShrink: 0, gap: 1 }}>
+            {["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"].map(action => {
+              const isAvail = availableActions.includes(action);
+              return (
+                <button
+                  key={action}
+                  onClick={() => isAvail && !loading && handleAction(action)}
+                  style={{
+                    background: getActionBg(action, availableActions),
+                    border: "none", color: "#fff",
+                    fontSize: 26, fontWeight: 800,
+                    cursor: isAvail && !loading ? "pointer" : "not-allowed",
+                    opacity: isAvail ? 1 : 0.3,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "transform 0.1s",
+                  }}
+                  onTouchStart={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
+                  onTouchEnd={e => e.currentTarget.style.transform = "scale(1)"}
+                  onMouseDown={e => isAvail && (e.currentTarget.style.transform = "scale(0.97)")}
+                  onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
+                >
+                  {loading && isAvail ? "..." : getActionLabel(action)}
+                </button>
+              );
+            })}
+          </div>
+
+          {statusInfo?.status === "FINISHED" && (
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 12, textAlign: "center", padding: "6px 0" }}>
+              本日の退勤打刻は完了しています
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -608,15 +658,15 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
   );
 }
 
-/* ─── KioskApp (после логина) ───────────────────────────── */
+/* ─── KioskApp ──────────────────────────────────────────── */
 function KioskApp({ onLogout }) {
-  const [staff, setStaff]           = useState([]);
-  const [statusMap, setStatusMap]   = useState({});
-  const [loading, setLoading]       = useState(true);
+  const [staff, setStaff]                 = useState([]);
+  const [statusMap, setStatusMap]         = useState({});
+  const [loading, setLoading]             = useState(true);
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [activeGroup, setActiveGroup]     = useState("All");
-  const [menuOpen, setMenuOpen]     = useState(false);
-  const [now, setNow] = useState(new Date());
+  const [menuOpen, setMenuOpen]           = useState(false);
+  const [now, setNow]                     = useState(new Date());
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -693,7 +743,6 @@ function KioskApp({ onLogout }) {
         boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {/* Меню */}
           <div style={{ position: "relative" }}>
             <button onClick={() => setMenuOpen(v => !v)} style={{
               background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
@@ -759,7 +808,6 @@ function KioskApp({ onLogout }) {
 
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-
         <div style={{
           width: 68, flexShrink: 0, background: "#1e3a5f",
           display: "flex", flexDirection: "column", overflowY: "auto",

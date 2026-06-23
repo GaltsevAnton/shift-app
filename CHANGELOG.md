@@ -3,8 +3,55 @@
 Лог изменений по дням разработки.
 
 
-
+---
  
+## 2026-06-22
+ 
+### ナイトシフト（日またぎ勤務）対応
+ 
+#### Backend
+- **`V10__add_next_day_flag.sql`** — `shift_slots`に`next_day BOOLEAN`カラム追加
+- **`ShiftSlot.java`** — `nextDay`フィールド追加
+- **`SlotDto.java`** — `nextDay`フィールド追加（コンストラクタ更新）
+- **`ManagerStaffWeekSaveRequest.SlotInput`** — `nextDay`フィールド追加
+- **`WeekService.java`** — `buildDayForManager`と`managerSaveStaffWeek`で`nextDay`を処理
+- **`ManagerMonthController.java`** — `findByRestaurant_IdAndRoleInOrderByFullNameAsc`使用（STAFF+MANAGER両方表示）
+- **`UserRepository.java`** — `findByRestaurant_IdAndRoleInOrderByFullNameAsc`追加
+- **`KioskController.java`** — STAFF+MANAGERをキオスクに表示
+- **`KioskService.getStatus()`** — 日付に関係なく未退勤の勤務を継続表示（翌日以降も退勤可能）
+- **`KioskService.validatePunch()`** — FINISHED状態でも新たに出勤可能
+- **`TimeRecordRepository`** — `findByUser_IdOrderByRecordedAtAsc`、`deleteByUserId`追加
+- **`UserService.delete()`** — カスケード削除実装（preferences→shift_slots→time_records→users）
+#### Frontend — `ManagerTablePage.jsx`
+- **シフト番号** — スロットヘッダーに`2026/06/22 №1`形式で表示
+- **当日/翌日ヒント** — 開始の上に`当日`、終了の上に`当日`/`翌日`を動的表示
+- **前日からの引き続きブロック** — D+1のポップアップに前日ナイトシフト情報を表示、クリックで前日に遷移
+- **紫ストライプ** — ナイトシフトが引き継ぐ日のセル上部に紫ライン表示
+- **終了時間の色** — `nextDay=true`のスロットは終了時間を紫で表示
+- **L（ラスト）動作変更** — Lチェックボックスは目印のみ。終了時間は常に必須
+- **保存ボタン無効化** — 開始・終了両方未入力の場合は保存不可
+- **＋シフトを追加** — ボタン名を`勤務場所を追加`から変更
+- **START_TIME_OPTS/END_TIME_OPTS** — 開始は06:00〜23:30、終了は00:00〜23:30に分離
+- **MANAGERロール表示** — シフト管理テーブルにMANAGERも表示
+- **getName()修正** — UTF-8日本語文字のデコード修正→`localStorage.staffName`から取得
+#### Frontend — `AttendancePage.jsx`
+- **完全リデザイン** — `ManagerTablePage`と同一の TopBar/SortBar を実装
+  - 月/週/期間 表示モード
+  - 表示列▼（№/職種・役職/部署）
+  - 職種・役職▼フィルター
+  - 部署▼フィルター（カスケード）
+  - 表示フィルター▼（出勤中/休憩中/退勤済み/未出勤）
+  - リセットボタン
+  - 並び替え（氏名/職種・役職/部署）
+- **週区切り表示** — 週ごとの境界線（`cellWeekStart`）を追加
+- **写真ポップアップ** — 📷クリックでモーダル内に写真を拡大表示
+- **MANAGERロール表示** — 勤怠管理テーブルにMANAGERも表示
+- **フィルター設定保存** — `attFilterPos`/`attFilterDept`/`attFilterStatus`/`attColVisibility` をlocalStorageに保存
+#### Frontend — `EmployeesPage.jsx`
+- **削除確認ポップアップ** — `window.confirm`→専用モーダルに変更
+  - 「すべてのシフトデータと打刻記録も完全に削除されます」警告表示
+  - キャンセル / 完全に削除する の2ボタン
+
 ---
  
 ## 2026-06-16
