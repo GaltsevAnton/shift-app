@@ -809,7 +809,7 @@ function KioskApp({ onLogout }) {
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div style={{
-          width: 68, flexShrink: 0, background: "#1e3a5f",
+          width: 68, flexShrink: 0, background: "#1a2f45",
           display: "flex", flexDirection: "column", overflowY: "auto",
           boxShadow: "2px 0 8px rgba(0,0,0,0.2)",
         }}>
