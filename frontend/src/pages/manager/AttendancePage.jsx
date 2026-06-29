@@ -25,6 +25,14 @@ const STATUS_FILTER_ITEMS = [
   { value: "none",     label: "未出勤" },
 ];
 
+const COLOR_FILTER_ITEMS = [
+  { value: "green",   label: "🟢 時間通り" },
+  { value: "red",     label: "🔴 遅刻（出勤）" },
+  { value: "yellow",  label: "🟡 早退（退勤）" },
+  { value: "blue",    label: "🔵 シフト予定あり" },
+  { value: "gray",    label: "⚪ シフトなし・出勤あり" },
+];
+
 /* ─── helpers ───────────────────────────────────────────── */
 function currentYM() {
   const n = new Date();
@@ -264,6 +272,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [visiblePositions,   setVisiblePositions]   = useState(() => loadFilterSet("attFilterPos")    || new Set());
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("attFilterDept")   || new Set());
   const [visibleStatuses,    setVisibleStatuses]    = useState(() => loadFilterSet("attFilterStatus") || new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
+  const [visibleColors, setVisibleColors] = useState(() => loadFilterSet("attFilterColor") || new Set(COLOR_FILTER_ITEMS.map(i => i.value)));
   const [sortConfig, setSortConfig] = useState({ field: "name", dir: "asc" });
   const [showInactive, setShowInactive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -285,6 +294,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   useEffect(() => { saveFilterSet("attFilterPos",    visiblePositions);  }, [visiblePositions]);
   useEffect(() => { saveFilterSet("attFilterDept",   visibleDepartments);}, [visibleDepartments]);
   useEffect(() => { saveFilterSet("attFilterStatus", visibleStatuses);   }, [visibleStatuses]);
+  useEffect(() => { saveFilterSet("attFilterColor", visibleColors); }, [visibleColors]);
   useEffect(() => {
     try { localStorage.setItem("attColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
   }, [colVisibility]);
@@ -454,14 +464,29 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         return true;
       })
       .filter(s => {
-        return displayDates.some(date => {
+        // фильтр по статусу (出勤中 etc)
+        const statusMatch = displayDates.some(date => {
           const dayRecs = getRecordsForDay(s.id, date);
           const status  = getCellStatus(dayRecs);
           if (!status) return visibleStatuses.has("none");
           return visibleStatuses.has(status);
+        });
+        if (!statusMatch) return false;
+  
+        // фильтр по цвету
+        const allColors = new Set(COLOR_FILTER_ITEMS.map(i => i.value));
+        const isAllColors = allColors.size === visibleColors.size && [...allColors].every(c => visibleColors.has(c));
+        if (isAllColors) return true;
+  
+        return displayDates.some(date => {
+          const colorStatus = getRowColorStatus(s.id, date);
+          if (!colorStatus) return visibleColors.has("blue") &&
+            !!shiftMap[`${s.id}_${date}`] &&
+            !getRecordsForDay(s.id, date).find(r => r.recordType === "CLOCK_IN");
+          return visibleColors.has(colorStatus);
+        });
       });
-    });
-  }, [filteredStaff, displayDates, visibleStatuses, getRecordsForDay, getCellStatus, showInactive, searchQuery]);
+  }, [filteredStaff, displayDates, visibleStatuses, visibleColors, getRecordsForDay, getCellStatus, showInactive, searchQuery, shiftMap]);
 
   /* ── filter handlers ── */
   function recalcDepts(newVis) {
@@ -489,19 +514,28 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   function handleStatusToggleAll(allKeys, allOn) {
     setVisibleStatuses(allOn ? new Set(allKeys) : new Set());
   }
+  function handleColorToggle(name) {
+    setVisibleColors(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n; });
+  }
+  function handleColorToggleAll(allKeys, allOn) {
+    setVisibleColors(allOn ? new Set(allKeys) : new Set());
+  }
   function handleReset() {
     localStorage.removeItem("attFilterPos");
     localStorage.removeItem("attFilterDept");
     localStorage.removeItem("attFilterStatus");
+    localStorage.removeItem("attFilterColor");
     setVisiblePositions(new Set(positionOptions));
     setVisibleDepartments(new Set(departments.map(d => d.name)));
     setVisibleStatuses(new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
+    setVisibleColors(new Set(COLOR_FILTER_ITEMS.map(i => i.value)));
   }
 
   const _f1 = positionOptions.some(p => !visiblePositions.has(p));
   const _f2 = allDepartmentItems.some(d => !visibleDepartments.has(d.value));
   const _f3 = STATUS_FILTER_ITEMS.some(i => !visibleStatuses.has(i.value));
-  const isFiltered = _f1 || _f2 || _f3;
+  const _f4 = COLOR_FILTER_ITEMS.some(i => !visibleColors.has(i.value));
+  const isFiltered = _f1 || _f2 || _f3 || _f4;
 
   /* ── period validation ── */
   const pDays    = periodDays(periodFrom, periodTo);
@@ -554,6 +588,29 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     return outMin >= shiftEnd ? "#dcfce7" : "#fef9c3"; // зелёный / жёлтый
   }
 
+  function getRowColorStatus(userId, date) {
+    const dayRecs = getRecordsForDay(userId, date);
+    const shift   = shiftMap[`${userId}_${date}`];
+    const clockIn  = dayRecs.find(r => r.recordType === "CLOCK_IN");
+    const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
+  
+    if (shift && !clockIn) return "blue";
+    if (!shift && clockIn) return "gray";
+    if (!clockIn) return null;
+  
+    const shiftStart = toMinutes(shift?.startTime);
+    const shiftEnd   = toMinutes(shift?.endTime);
+  
+    const inMin = new Date(clockIn.recordedAt).getHours() * 60 + new Date(clockIn.recordedAt).getMinutes();
+    if (inMin >= shiftStart) return "red";
+  
+    if (clockOut && shiftEnd) {
+      const outMin = new Date(clockOut.recordedAt).getHours() * 60 + new Date(clockOut.recordedAt).getMinutes();
+      if (outMin < shiftEnd) return "yellow";
+    }
+  
+    return "green";
+  }
   /* ── edit ── */
   async function handleEditSave() {
     if (!editRecord) return;
@@ -686,6 +743,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             visibleSet={visibleStatuses}
             onToggle={handleStatusToggle}
             onToggleAll={handleStatusToggleAll}
+          />
+
+          <CheckDropdown
+            label="状態フィルター"
+            items={COLOR_FILTER_ITEMS}
+            visibleSet={visibleColors}
+            onToggle={handleColorToggle}
+            onToggleAll={handleColorToggleAll}
           />
 
           <div className={styles.sortBarDivider} />
@@ -863,7 +928,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               display: "flex", alignItems: "center", justifyContent: "center",
                             }}>
                               {clockIn ? (
-                                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
                                   {fmtTime(clockIn.recordedAt)}
                                 </span>
                               ) : (
@@ -877,7 +942,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               display: "flex", alignItems: "center", justifyContent: "center",
                             }}>
                               {clockOut ? (
-                                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
                                   {fmtTime(clockOut.recordedAt)}
                                 </span>
                               ) : (

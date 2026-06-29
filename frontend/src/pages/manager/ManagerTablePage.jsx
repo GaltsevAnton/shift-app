@@ -880,6 +880,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [showInactive, setShowInactive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMap, setActiveMap]       = useState({});
+  const [breakRules, setBreakRules] = useState([]);
 
   /* ── persist view mode state ── */
   useEffect(() => { localStorage.setItem("managerViewMode",    viewMode);     }, [viewMode]);
@@ -949,12 +950,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         attTo   = `${ymVal}-${String(total).padStart(2,"0")}`;
       }
 
-      const [weeks, employees, wps, depts, attRecs] = await Promise.all([
+      const [weeks, employees, wps, depts, attRecs, breakRules] = await Promise.all([
         weeksPromise,
         api.managerEmployeesList(),
         api.settingsWorkplacesList(),
         api.settingsDepartmentsList(),
         api.attendanceRecords(attFrom, attTo).catch(() => []),
+        api.settingsBreakRulesList().catch(() => []),
       ]);
 
       // Строим attendanceMap: "userId_date" → "finished"|"working"|"break"
@@ -971,6 +973,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         else if (types.includes("CLOCK_IN")) resolvedAttMap[key] = "working";
       }
       setAttendanceMap(resolvedAttMap);
+
+      setBreakRules(Array.isArray(breakRules) ? breakRules : []);
 
       const posMap = {}, deptsMap = {};
       employees.forEach(e => {
@@ -1084,6 +1088,47 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       const day = getDayData(userId, date);
       return day.off || !day.slots || day.slots.length === 0;
     }).length;
+  }
+
+  function toMinutes(timeStr) {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
+    return h * 60 + m;
+  }
+  
+  function calcWorkMinutes(userId) {
+    let total = 0;
+    displayDates.forEach(date => {
+      const day = getDayData(userId, date);
+      if (day.off || !day.slots) return;
+  
+      // Суммируем все слоты за день
+      let dayMinutes = 0;
+      day.slots.forEach(s => {
+        if (!s.startTime || !s.endTime) return;
+        let start = toMinutes(s.startTime);
+        let end   = toMinutes(s.endTime);
+        if (end <= start) end += 24 * 60; // ночная смена
+        dayMinutes += end - start;
+      });
+  
+      if (dayMinutes === 0) return;
+  
+      // Применяем наиболее подходящее правило к суммарному времени дня
+      const rule = [...breakRules]
+        .filter(r => dayMinutes > r.thresholdMinutes)
+        .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+  
+      total += rule ? dayMinutes - rule.breakMinutes : dayMinutes;
+    });
+    return total;
+  }
+  
+  function fmtWorkHours(minutes) {
+    if (minutes <= 0) return "0h";
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h${m}m` : `${h}h`;
   }
 
   /* ── monthOptions для Year/Month селектов ── */
@@ -1640,7 +1685,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           departmentItems={departmentItems} visibleDepartments={visibleDepartments}
           onDeptToggle={handleDeptToggle} onDeptToggleAll={handleDeptToggleAll}
           onReset={handleReset} isFiltered={isFiltered}
-          showInactive={showInactive} onShowInactiveChange={setShowInactive}
           searchQuery={searchQuery} onSearchChange={setSearchQuery}
         />
 
@@ -1732,9 +1776,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     );
                   })}
 
-                  <th className={styles.thDay} style={{ minWidth: 44 }}>
+                  <th className={styles.thDay} style={{ minWidth: 44, background: "#f0f4ff"}}>
                     <span className={styles.thNum}>公休</span>
                     <span className={styles.thWd}>数</span>
+                  </th>
+                  <th className={styles.thDay} style={{ minWidth: 44, background: "#f0f4ff" }}>
+                    <span className={styles.thNum}>勤務</span>
+                    <span className={styles.thWd}>時間</span>
                   </th>
                 </tr>
               </thead>
@@ -1777,7 +1825,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           const slots    = day.slots || [];
                           const wd       = new Date(date).getDay();
                           const isWknd   = wd === 0 || wd === 6;
-                          // неделя начинается — левая граница ячейки
                           const isWeekStart = weeksRaw.some(w => w.weekStart === date);
                           const isSelected  = selectedCells.some(c => c.userId === staff.userId && c.date === date);
                           const isSaving    = savingCell === `${staff.userId}_${date}`;
@@ -1879,10 +1926,26 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                         })}
 
                         {subIdx === 0 && (
-                          <td rowSpan={maxSlots} className={styles.cell}
-                            style={{ textAlign:"center", verticalAlign:"middle", fontWeight:"bold", fontSize:13 }}>
-                            {countOffDays(staff.userId)}
-                          </td>
+                          <>
+                            <td rowSpan={maxSlots} className={styles.cell}
+                              style={{ textAlign:"center", verticalAlign:"middle", fontWeight:"bold", fontSize:13, background:"#f8faff" }}>
+                              {countOffDays(staff.userId)}
+                            </td>
+                            <td rowSpan={maxSlots} className={styles.cell}
+                              style={{ textAlign:"center", verticalAlign:"middle", background:"#f8faff" }}>
+                              {(() => {
+                                const mins = calcWorkMinutes(staff.userId);
+                                const h = Math.floor(mins / 60);
+                                const m = mins % 60;
+                                return (
+                                  <>
+                                    <div style={{ fontSize:12, fontWeight:700, color:"#2F5496", lineHeight:1.3 }}>{h}h</div>
+                                    {m > 0 && <div style={{ fontSize:10, color:"#94a3b8", lineHeight:1.2 }}>{m}m</div>}
+                                  </>
+                                );
+                              })()}
+                            </td>
+                          </>
                         )}
                       </tr>
                     ));

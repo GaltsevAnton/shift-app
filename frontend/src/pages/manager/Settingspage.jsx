@@ -336,11 +336,235 @@ function DepartmentsTab() {
   );
 }
 
+/* ─── Break Rules tab ───────────────────────────────────── */
+function BreakRulesTab() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState("");
+  const [form, setForm]       = useState({ name: "", thresholdMinutes: "", breakMinutes: "" });
+  const [editId, setEditId]   = useState(null);
+  const [editForm, setEditForm] = useState({});
+
+  async function load() {
+    setLoading(true); setErr("");
+    try { setItems(await api.settingsBreakRulesList()); }
+    catch (e) { setErr(e.message || "読み込みエラー"); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function onCreate() {
+    if (!form.name.trim() || !form.thresholdMinutes || !form.breakMinutes) return;
+    setErr("");
+    try {
+      await api.settingsBreakRulesCreate({
+        name: form.name.trim(),
+        thresholdMinutes: Number(form.thresholdMinutes),
+        breakMinutes: Number(form.breakMinutes),
+      });
+      setForm({ name: "", thresholdMinutes: "", breakMinutes: "" });
+      await load();
+    } catch (e) { setErr(e.message || "作成エラー"); }
+  }
+
+  async function onUpdate(id) {
+    setErr("");
+    try {
+      await api.settingsBreakRulesUpdate(id, {
+        name: editForm.name,
+        thresholdMinutes: Number(editForm.thresholdMinutes),
+        breakMinutes: Number(editForm.breakMinutes),
+      });
+      setEditId(null);
+      await load();
+    } catch (e) { setErr(e.message || "更新エラー"); }
+  }
+
+  async function onDelete(id) {
+    if (!window.confirm("削除しますか？")) return;
+    setErr("");
+    try { await api.settingsBreakRulesDelete(id); await load(); }
+    catch (e) { setErr(e.message || "削除エラー"); }
+  }
+
+  return (
+    <div>
+      {err && (
+        <div style={{
+          background: "#ffe5e5", color: "#c0392b", padding: "10px 14px",
+          borderRadius: 10, marginBottom: 16, fontSize: 13,
+        }}>
+          {err}
+        </div>
+      )}
+
+      {/* Create */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>新規追加</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, alignItems: "flex-end" }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+              名前 *
+            </label>
+            <input
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              style={inputStyle}
+              placeholder="例：休憩1"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+              しきい値（分以上）*
+            </label>
+            <input
+              type="number" min="1"
+              value={form.thresholdMinutes}
+              onChange={e => setForm({ ...form, thresholdMinutes: e.target.value })}
+              style={inputStyle}
+              placeholder="例：360"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+              休憩時間（分）*
+            </label>
+            <input
+              type="number" min="1"
+              value={form.breakMinutes}
+              onChange={e => setForm({ ...form, breakMinutes: e.target.value })}
+              style={inputStyle}
+              placeholder="例：45"
+            />
+          </div>
+          <button
+            style={{ ...btnPrimaryStyle, whiteSpace: "nowrap" }}
+            type="button"
+            disabled={!form.name.trim() || !form.thresholdMinutes || !form.breakMinutes}
+            onClick={onCreate}
+          >
+            ＋ 追加
+          </button>
+        </div>
+      </div>
+
+      {/* List */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>休憩ルール一覧</div>
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
+          勤務時間がしきい値を超えた場合、最も近いルールの休憩時間を差し引きます。
+        </div>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
+                <th style={thStyle}>名前</th>
+                <th style={thStyle}>勤務時間が X 分以上</th>
+                <th style={thStyle}>休憩時間（分）</th>
+                <th style={{ ...thStyle, textAlign: "right" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(item => (
+                editId === item.id ? (
+                  <tr key={item.id} style={{ background: "#f8f8ff", borderBottom: "1px solid #f0f1f6" }}>
+                    <td style={tdStyle}>
+                      <input
+                        value={editForm.name}
+                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                        style={{ ...inputStyle, maxWidth: 140 }}
+                      />
+                    </td>
+                    <td style={tdStyle}>
+                      <input
+                        type="number" min="1"
+                        value={editForm.thresholdMinutes}
+                        onChange={e => setEditForm({ ...editForm, thresholdMinutes: e.target.value })}
+                        style={{ ...inputStyle, maxWidth: 100 }}
+                      />
+                    </td>
+                    <td style={tdStyle}>
+                      <input
+                        type="number" min="1"
+                        value={editForm.breakMinutes}
+                        onChange={e => setEditForm({ ...editForm, breakMinutes: e.target.value })}
+                        style={{ ...inputStyle, maxWidth: 100 }}
+                      />
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        <button style={btnPrimaryStyle} type="button" onClick={() => onUpdate(item.id)}>保存</button>
+                        <button style={btnSecondaryStyle} type="button" onClick={() => setEditId(null)}>キャンセル</button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={item.id} style={{ borderBottom: "1px solid #f0f1f6" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
+                    onMouseLeave={e => e.currentTarget.style.background = ""}>
+                    <td style={tdStyle}>
+                      <span style={{
+                        fontSize: 13, color: "#1a1d2e", background: "#f1f5f9",
+                        padding: "3px 10px", borderRadius: 20, fontWeight: 600,
+                      }}>
+                        {item.name}
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ fontWeight: 600, color: "#475569" }}>
+                        {item.thresholdMinutes} 分以上
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ fontWeight: 600, color: "#6366f1" }}>
+                        {item.breakMinutes} 分
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        <button style={btnSecondaryStyle} type="button"
+                          onClick={() => {
+                            setEditId(item.id);
+                            setEditForm({
+                              name: item.name,
+                              thresholdMinutes: item.thresholdMinutes,
+                              breakMinutes: item.breakMinutes,
+                            });
+                          }}>
+                          編集
+                        </button>
+                        <button style={btnDangerStyle} type="button" onClick={() => onDelete(item.id)}>
+                          削除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              ))}
+              {items.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
+                    まだ登録されていません
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main page ─────────────────────────────────────────── */
 const TABS = [
   { key: "workplaces",  label: "勤務場所" },
   { key: "positions",   label: "職種・役職" },
   { key: "departments", label: "部署" },
+  { key: "breakrules",  label: "休憩ルール" },
 ];
 
 export default function SettingsPage({ view, onNavigate, onLogout }) {
@@ -392,6 +616,7 @@ export default function SettingsPage({ view, onNavigate, onLogout }) {
         {tab === "workplaces"  && <WorkplacesTab />}
         {tab === "positions"   && <PositionsTab />}
         {tab === "departments" && <DepartmentsTab />}
+        {tab === "breakrules"  && <BreakRulesTab />}
       </div>
       </div>
     </ManagerLayout>

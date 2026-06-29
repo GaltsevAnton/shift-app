@@ -237,4 +237,17 @@ export const api = {
 
   attendanceEdit: (id, payload) =>
     request(`/api/manager/attendance/${id}`, { method: "PUT", body: payload }),
+
+  // ===== SETTINGS: BREAK RULES =====
+  settingsBreakRulesList: () =>
+    request("/api/manager/settings/break-rules"),
+
+  settingsBreakRulesCreate: (payload) =>
+    request("/api/manager/settings/break-rules", { method: "POST", body: payload }),
+
+  settingsBreakRulesUpdate: (id, payload) =>
+    request(`/api/manager/settings/break-rules/${id}`, { method: "PUT", body: payload }),
+
+  settingsBreakRulesDelete: (id) =>
+    request(`/api/manager/settings/break-rules/${id}`, { method: "DELETE" }),
 };
