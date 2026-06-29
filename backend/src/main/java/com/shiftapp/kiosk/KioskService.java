@@ -123,19 +123,30 @@ public class KioskService {
 
         Instant now      = Instant.now();
         LocalDate today  = LocalDate.now(ZONE);
-
+        
+        // Для CLOCK_OUT/BREAK_START/BREAK_END — берём workDate из открытого CLOCK_IN
+        LocalDate workDate = today;
+        if (type != TimeRecordType.CLOCK_IN) {
+            workDate = timeRecordRepository.findByUser_IdOrderByRecordedAtAsc(req.getUserId())
+                .stream()
+                .filter(r -> r.getRecordType() == TimeRecordType.CLOCK_IN)
+                .reduce((first, second) -> second)
+                .map(TimeRecord::getWorkDate)
+                .orElse(today);
+        }
+        
         // Сохраняем фото если есть
         String photoPath = null;
         if (req.getPhotoBase64() != null && !req.getPhotoBase64().isBlank()) {
-            photoPath = savePhoto(req.getUserId(), type, today, now, req.getPhotoBase64());
+            photoPath = savePhoto(req.getUserId(), type, workDate, now, req.getPhotoBase64());
         }
-
+        
         TimeRecord record = new TimeRecord();
         record.setUser(user);
         record.setRestaurant(user.getRestaurant());
         record.setRecordType(type);
         record.setRecordedAt(now);
-        record.setWorkDate(today);
+        record.setWorkDate(workDate);
         record.setPhotoPath(photoPath);
 
         TimeRecord saved = timeRecordRepository.save(record);

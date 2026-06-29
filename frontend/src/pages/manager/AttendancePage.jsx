@@ -265,6 +265,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("attFilterDept")   || new Set());
   const [visibleStatuses,    setVisibleStatuses]    = useState(() => loadFilterSet("attFilterStatus") || new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
   const [sortConfig, setSortConfig] = useState({ field: "name", dir: "asc" });
+  const [showInactive, setShowInactive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [shiftMap, setShiftMap] = useState({});
 
   /* ── popup ── */
   const [detailPopup, setDetailPopup] = useState(null);
@@ -315,10 +318,11 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       const from = displayDates[0];
       const to   = displayDates[displayDates.length - 1];
 
-      const [recs, emps, depts] = await Promise.all([
+      const [recs, emps, depts, shiftData] = await Promise.all([
         api.attendanceRecords(from, to),
         api.managerEmployeesList(),
         api.settingsDepartmentsList(),
+        api.managerRange(from, to),
       ]);
 
       const posMap = {}, deptsMap = {};
@@ -331,7 +335,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       setDepartments(Array.isArray(depts) ? depts : []);
 
       const activeStaff = Array.isArray(emps)
-        ? emps.filter(e => e.active && (e.role === "STAFF" || e.role === "MANAGER"))
+        ? emps.filter(e => e.role === "STAFF" || e.role === "MANAGER")
         : [];
       setStaff(activeStaff);
 
@@ -343,6 +347,23 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       setVisibleDepartments(savedDept && savedDept.size > 0 ? savedDept : allDeptSet);
 
       setRecords(Array.isArray(recs) ? recs : []);
+      const sm = {};
+      for (const week of (shiftData || [])) {
+        for (const row of (week.rows || [])) {
+          for (const day of (row.days || [])) {
+            if (!day.off && day.slots && day.slots.length > 0) {
+              const starts = day.slots.map(s => s.startTime).filter(Boolean).sort();
+              const ends   = day.slots.map(s => s.endTime).filter(Boolean).sort();
+              sm[`${row.userId}_${day.date}`] = {
+                startTime: starts[0],
+                endTime:   ends[ends.length - 1],
+                slots:     day.slots,
+              };
+            }
+          }
+        }
+      }
+      setShiftMap(sm);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -422,15 +443,25 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const filteredStaff = useMemo(() => [...staffByDept].sort(sortFn), [staffByDept, sortConfig]);
 
   const filteredStaffByStatus = useMemo(() => {
-    return filteredStaff.filter(s => {
-      return displayDates.some(date => {
-        const dayRecs = getRecordsForDay(s.id, date);
-        const status  = getCellStatus(dayRecs);
-        if (!status) return visibleStatuses.has("none");
-        return visibleStatuses.has(status);
+    return filteredStaff
+      .filter(s => showInactive || s.active)
+      .filter(s => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          return (s.fullName || "").toLowerCase().includes(q) ||
+                 (s.fullNameKana || "").toLowerCase().includes(q);
+        }
+        return true;
+      })
+      .filter(s => {
+        return displayDates.some(date => {
+          const dayRecs = getRecordsForDay(s.id, date);
+          const status  = getCellStatus(dayRecs);
+          if (!status) return visibleStatuses.has("none");
+          return visibleStatuses.has(status);
       });
     });
-  }, [filteredStaff, displayDates, visibleStatuses, getRecordsForDay, getCellStatus]);
+  }, [filteredStaff, displayDates, visibleStatuses, getRecordsForDay, getCellStatus, showInactive, searchQuery]);
 
   /* ── filter handlers ── */
   function recalcDepts(newVis) {
@@ -487,20 +518,40 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     return 160;
   }
 
-  function getCellContent(dayRecs) {
-    const clockIn  = dayRecs.find(r => r.recordType === "CLOCK_IN");
-    const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
-    if (!clockIn) return null;
-    return {
-      in:  fmtTime(clockIn.recordedAt),
-      out: clockOut ? fmtTime(clockOut.recordedAt) : null,
-    };
+  function toMinutes(timeStr) {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
+    return h * 60 + m;
   }
-  function getDotColor(status) {
-    if (status === "finished") return "#16a34a";
-    if (status === "working")  return "#2563eb";
-    if (status === "break")    return "#d97706";
-    return null;
+
+  function getInColor(userId, date) {
+    const dayRecs = getRecordsForDay(userId, date);
+    const shift   = shiftMap[`${userId}_${date}`];
+    const clockIn = dayRecs.find(r => r.recordType === "CLOCK_IN");
+  
+    if (!clockIn) return null;
+    if (!shift)   return "#f1f5f9"; // серый — пришёл без смены
+  
+    const shiftStart = toMinutes(shift.startTime);
+    const t = new Date(clockIn.recordedAt);
+    const inMin = t.getHours() * 60 + t.getMinutes();
+  
+    return inMin >= shiftStart ? "#fee2e2" : "#dcfce7"; // красный / зелёный
+  }
+  
+  function getOutColor(userId, date) {
+    const dayRecs  = getRecordsForDay(userId, date);
+    const shift    = shiftMap[`${userId}_${date}`];
+    const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
+  
+    if (!clockOut) return null; // нет退勤 — null
+    if (!shift)    return "#f1f5f9"; // серый
+  
+    const shiftEnd = toMinutes(shift.endTime);
+    const t = new Date(clockOut.recordedAt);
+    const outMin = t.getHours() * 60 + t.getMinutes();
+  
+    return outMin >= shiftEnd ? "#dcfce7" : "#fef9c3"; // зелёный / жёлтый
   }
 
   /* ── edit ── */
@@ -647,6 +698,34 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
           <div className={styles.sortBarDivider} />
 
+          <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="氏名で検索..."
+              style={{
+                padding: "4px 10px", fontSize: 13,
+                border: "1.5px solid #e2e8f0", borderRadius: 6,
+                outline: "none", background: "#fff",
+                width: 140,
+              }}
+          />
+
+          <div className={styles.sortBarDivider} />
+
+          <label style={{
+            display: "flex", alignItems: "center", gap: 5,
+            fontSize: 13, cursor: "pointer", color: "#666",
+            whiteSpace: "nowrap",
+          }}>
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={e => setShowInactive(e.target.checked)}
+            />
+            非アクティブを表示
+          </label>
+
           <span className={styles.sortBarLabel}>並び替え：</span>
           {SORT_FIELDS.map(f => {
             const isActive = sortConfig.field === f.value;
@@ -735,7 +814,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   </tr>
                 ) : (
                   filteredStaffByStatus.map((s, idx) => (
-                    <tr key={s.id} className={styles.staffRow} data-staff={s.id}>
+                    <tr key={s.id} className={`${styles.staffRow} ${styles.attRow}`} data-staff={s.id}>
                       <td className={styles.tdNumber}
                         style={!colVisibility.number ? { display:"none" } : {}}>
                         {idx + 1}
@@ -751,39 +830,58 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                       <td className={styles.tdName} style={{ left: nameLeft() }}>{s.fullName}</td>
 
                       {displayDates.map(date => {
-                        const wd      = new Date(date).getDay();
-                        const isWknd  = wd === 0 || wd === 6;
+                        const wd          = new Date(date).getDay();
                         const isWeekStart = weekColSpans.some(({ week }) => week.weekStart === date);
-                        const dayRecs = getRecordsForDay(s.id, date);
-                        const status  = getCellStatus(dayRecs);
-                        const content = getCellContent(dayRecs);
-                        const dot     = getDotColor(status);
+                        const dayRecs     = getRecordsForDay(s.id, date);
+                        const shift       = shiftMap[`${s.id}_${date}`];
+                        const clockIn     = dayRecs.find(r => r.recordType === "CLOCK_IN");
+                        const clockOut    = dayRecs.find(r => r.recordType === "CLOCK_OUT");
+                        const hasShift    = !!shift;
+                        const hasPunch    = !!clockIn;
+
+                        let cellBg = "#fff";
+                        if (hasShift && !hasPunch) cellBg = "#e0f2fe";
+                        if (!hasShift && hasPunch) cellBg = "#f1f5f9";
+
+                        const inColor  = getInColor(s.id, date);
+                        const outColor = getOutColor(s.id, date);
 
                         return (
                           <td key={date}
-                            className={`${styles.cell} ${isWknd ? styles.cellWknd : ""} ${isWeekStart ? styles.cellWeekStart : ""}`}
-                            style={{ padding:0, verticalAlign:"top", cursor: dayRecs.length > 0 ? "pointer" : "default" }}
-                            onClick={() => dayRecs.length > 0 && setDetailPopup({
-                              userId: s.id, userName: s.fullName, date, dayRecords: dayRecs,
-                            })}
+                            className={`${styles.cell} ${isWeekStart ? styles.cellWeekStart : ""}`}
+                            style={{ padding: 0, verticalAlign: "top", background: cellBg, cursor: "pointer" }}
+                            onClick={() => {
+                              if (dayRecs.length > 0 || hasShift) {
+                                setDetailPopup({ userId: s.id, userName: s.fullName, date, dayRecords: dayRecs });
+                              }
+                            }}
                           >
-                            <div className={styles.cellAnchor} style={{ alignItems:"center", justifyContent:"center" }}>
-                              {dot && (
-                                <div style={{
-                                  position:"absolute", top:3, right:3,
-                                  width:6, height:6, borderRadius:"50%",
-                                  background: dot, zIndex:1,
-                                }} />
+                            <div style={{
+                              minHeight: 28, padding: "3px 4px",
+                              background: inColor || "transparent",
+                              borderBottom: "1px solid rgba(0,0,0,0.06)",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              {clockIn ? (
+                                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
+                                  {fmtTime(clockIn.recordedAt)}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 10, color: "#cbd5e1" }}>--:--</span>
                               )}
-                              {content && (
-                                <div style={{ padding:"4px 2px", textAlign:"center" }}>
-                                  <div style={{ fontSize:11, color:"#16a34a", fontWeight:600, fontFamily:"monospace" }}>
-                                    {content.in}
-                                  </div>
-                                  <div style={{ fontSize:11, color: content.out ? "#dc2626" : "#94a3b8", fontFamily:"monospace" }}>
-                                    {content.out || "--:--"}
-                                  </div>
-                                </div>
+                            </div>
+
+                            <div style={{
+                              minHeight: 28, padding: "3px 4px",
+                              background: outColor || "transparent",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              {clockOut ? (
+                                <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
+                                  {fmtTime(clockOut.recordedAt)}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 10, color: "#cbd5e1" }}>--:--</span>
                               )}
                             </div>
                           </td>
@@ -812,45 +910,114 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             minWidth:340, maxWidth:440,
             boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
           }}>
+            {(() => {
+              const shift = shiftMap[`${detailPopup.userId}_${detailPopup.date}`];
+              if (!shift) return null;
+              return (
+                <div style={{
+                  padding: "10px 14px", borderRadius: 10,
+                  background: "#f0f7ff", border: "1px solid #bfdbfe",
+                  marginBottom: 12,
+                }}>
+                  <div style={{ fontSize: 12, color: "#1e40af", fontWeight: 700, marginBottom: 6 }}>
+                    📅 シフト予定
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>
+                    {shift.startTime?.slice(0,5)} 〜 {shift.endTime?.slice(0,5)}
+                  </div>
+                  {shift.slots.map((sl, i) => sl.workplace && (
+                    <div key={i} style={{ fontSize: 12, color: "#64748b" }}>{sl.workplace}</div>
+                  ))}
+                  <button
+                    onClick={() => onNavigate("SHIFTS")}
+                    style={{
+                      marginTop: 8, fontSize: 12, color: "#2563eb",
+                      background: "none", border: "none", cursor: "pointer",
+                      padding: 0, textDecoration: "underline",
+                    }}
+                  >
+                    シフト管理で確認 →
+                  </button>
+                </div>
+              );
+            })()}
             <div style={{ fontSize:16, fontWeight:800, color:"#1e293b", marginBottom:4 }}>
               {detailPopup.userName}
             </div>
             <div style={{ fontSize:13, color:"#94a3b8", marginBottom:16 }}>{detailPopup.date}</div>
 
             <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-              {detailPopup.dayRecords.map(r => (
-                <div key={r.id} style={{
-                  display:"flex", alignItems:"center", justifyContent:"space-between",
-                  padding:"10px 14px", borderRadius:10,
-                  background:"#f8fafc", border:"1px solid #e2e8f0",
-                }}>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:getTypeColor(r.recordType) }}>
-                      {getTypeLabel(r.recordType)}
+              {(() => {
+                // Группируем по фактической дате записи
+                const groups = [];
+                let currentDate = null;
+                for (const r of detailPopup.dayRecords) {
+                  const recDate = new Date(r.recordedAt).toLocaleDateString("ja-JP", {
+                    year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo",
+                  });
+                  if (recDate !== currentDate) {
+                    currentDate = recDate;
+                    groups.push({ date: recDate, records: [] });
+                  }
+                  groups[groups.length - 1].records.push(r);
+                }
+
+                return groups.map((group, gi) => (
+                  <div key={gi}>
+                    {/* Показываем дату только если она отличается от даты попапа или группа не первая */}
+                    {(() => {
+                      const popupDateStr = new Date(detailPopup.date + "T00:00:00").toLocaleDateString("ja-JP", {
+                        year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo",
+                      });
+                      return group.date !== popupDateStr || gi > 0 ? (
+                        <div style={{
+                          fontSize: 12, color: "#94a3b8", fontWeight: 600,
+                          marginBottom: 6, marginTop: gi > 0 ? 8 : 0,
+                          paddingBottom: 4, borderBottom: "1px solid #f1f5f9",
+                        }}>
+                          {group.date}
+                        </div>
+                      ) : null;
+                    })()}
+
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {group.records.map(r => (
+                        <div key={r.id} style={{
+                          display:"flex", alignItems:"center", justifyContent:"space-between",
+                          padding:"10px 14px", borderRadius:10,
+                          background:"#f8fafc", border:"1px solid #e2e8f0",
+                        }}>
+                          <div>
+                            <div style={{ fontSize:13, fontWeight:700, color:getTypeColor(r.recordType) }}>
+                              {getTypeLabel(r.recordType)}
+                            </div>
+                            <div style={{ fontSize:15, fontWeight:700, fontFamily:"monospace", color:"#1e293b" }}>
+                              {fmtTime(r.recordedAt)}
+                            </div>
+                            {r.note   && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>📝 {r.note}</div>}
+                            {r.edited && <div style={{ fontSize:11, color:"#f59e0b", marginTop:2 }}>✏️ 編集済み</div>}
+                          </div>
+                          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                            {r.photoPath && (
+                              <button onClick={() => setPhotoPopup(r.photoPath)}
+                                style={{ fontSize:20, background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                                📷
+                              </button>
+                            )}
+                            <button onClick={() => setEditRecord({
+                              id: r.id,
+                              recordedAt: new Date(r.recordedAt).toISOString().slice(0, 16),
+                              note: r.note || "",
+                            })} style={{ padding:"4px 10px", fontSize:12, background:"#f1f5f9", border:"none", borderRadius:6, cursor:"pointer", color:"#475569" }}>
+                              編集
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ fontSize:15, fontWeight:700, fontFamily:"monospace", color:"#1e293b" }}>
-                      {fmtTime(r.recordedAt)}
-                    </div>
-                    {r.note   && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>📝 {r.note}</div>}
-                    {r.edited && <div style={{ fontSize:11, color:"#f59e0b", marginTop:2 }}>✏️ 編集済み</div>}
                   </div>
-                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                    {r.photoPath && (
-                      <button onClick={() => setPhotoPopup(r.photoPath)}
-                        style={{ fontSize:20, background:"none", border:"none", cursor:"pointer", padding:0 }}>
-                        📷
-                    </button>
-                    )}
-                    <button onClick={() => setEditRecord({
-                      id: r.id,
-                      recordedAt: new Date(r.recordedAt).toISOString().slice(0, 16),
-                      note: r.note || "",
-                    })} style={{ padding:"4px 10px", fontSize:12, background:"#f1f5f9", border:"none", borderRadius:6, cursor:"pointer", color:"#475569" }}>
-                      編集
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ));
+              })()}
             </div>
 
             {editRecord && (
@@ -929,6 +1096,36 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* ── Легенда внизу ── */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 56, right: 0,
+        height: 36, zIndex: 100,
+        background: "linear-gradient(45deg, #d8d8d8 0%, #ffffff 100%)",
+        justifyContent: "flex-end",
+        borderTop: "1px solid #e2e8f0",
+        display: "flex", alignItems: "center",
+        gap: 20, padding: "0 20px",
+        fontSize: 12, color: "#475569",
+        flexShrink: 0,
+      }}>
+        {[
+          { color: "#dcfce7", border: "#86efac", label: "緑：時間通り（1分以上前）" },
+          { color: "#fee2e2", border: "#fca5a5", label: "赤：遅刻（出勤）" },
+          { color: "#fef9c3", border: "#fde047", label: "黄：早退（退勤）" },
+          { color: "#e0f2fe", border: "#7dd3fc", label: "青：シフト予定あり" },
+          { color: "#f1f5f9", border: "#cbd5e1", label: "グレー：シフトなし・出勤あり" },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <div style={{
+              width: 32, height: 16, borderRadius: 1,
+              background: color, border: `1px solid #000`,
+              flexShrink: 0,
+            }} />
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
     </ManagerLayout>
   );
 }

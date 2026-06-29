@@ -70,7 +70,7 @@
 }
 
 /* ─── Table wrap ────────────────────────────────────────── */
-.tableWrap { flex: 1; overflow: auto; }
+.tableWrap { flex: 1; overflow: auto; padding-bottom: 36px; }
 
 /* ─── Table ─────────────────────────────────────────────── */
 .table {
@@ -765,4 +765,8 @@ tr[data-staff]:first-of-type td { border-top: 2px solid #e2e8f0; }
   font-size: 11px; color: #94a3b8;
   text-align: center;
   vertical-align: middle;
+}
+
+.attRow td {
+  border-bottom: 2px solid #cbd5e1 !important;
 }

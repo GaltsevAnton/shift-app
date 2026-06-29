@@ -725,6 +725,8 @@ function SortBar({
   positionItems, visiblePositions, onPosToggle, onPosToggleAll,
   departmentItems, visibleDepartments, onDeptToggle, onDeptToggleAll,
   onReset, isFiltered,
+  showInactive, onShowInactiveChange,
+  searchQuery, onSearchChange,
 }) {
   return (
     <div className={styles.sortBar}>
@@ -768,6 +770,32 @@ function SortBar({
           リセット
         </button>
       )}
+
+      <input
+        type="text"
+        value={searchQuery}
+        onChange={e => onSearchChange(e.target.value)}
+        placeholder="氏名で検索..."
+        style={{
+          padding: "4px 10px", fontSize: 13,
+          border: "1.5px solid #e2e8f0", borderRadius: 6,
+          outline: "none", background: "#fff",
+          width: 140,
+        }}
+      />
+
+      <label style={{
+        display: "flex", alignItems: "center", gap: 5,
+        fontSize: 13, cursor: "pointer", color: "#666",
+        whiteSpace: "nowrap",
+      }}>
+        <input
+          type="checkbox"
+          checked={showInactive}
+          onChange={e => onShowInactiveChange(e.target.checked)}
+        />
+        非アクティブを表示
+      </label>
 
       <div className={styles.sortBarDivider} />
 
@@ -848,7 +876,10 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [visibleWorkplaces, setVisibleWorkplaces]   = useState(() => loadFilterSet("mgrFilterWp")   || new Set());
   const [visiblePositions, setVisiblePositions]     = useState(() => loadFilterSet("mgrFilterPos")  || new Set());
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("mgrFilterDept") || new Set());
-  const [attendanceMap, setAttendanceMap] = useState({}); // "userId_date" → status
+  const [attendanceMap, setAttendanceMap] = useState({});
+  const [showInactive, setShowInactive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeMap, setActiveMap]       = useState({});
 
   /* ── persist view mode state ── */
   useEffect(() => { localStorage.setItem("managerViewMode",    viewMode);     }, [viewMode]);
@@ -945,7 +976,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       employees.forEach(e => {
         posMap[e.id]    = e.position || "";
         deptsMap[e.id]  = (e.departments || []).map(d => d.name);
+        activeMap[e.id] = e.active;
       });
+      setActiveMap(activeMap);
       setPositions(posMap);
       setStaffDepts(deptsMap);
       setWorkplaces(Array.isArray(wps)   ? wps   : []);
@@ -1130,10 +1163,19 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
 
   const filteredStaff = (() => {
     if (staffByDept.length === 0) return [];
+    const byActive = staffByDept
+      .filter(s => showInactive || activeMap[s.userId] !== false)
+      .filter(s => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          return (s.userName || "").toLowerCase().includes(q);
+        }
+        return true;
+      });
     const allWpKeys = [...workplaceItems.map(i => i.value), ...wpExtraItems.map(i => i.value)];
     if (allWpKeys.length > 0 && visibleWorkplaces.size === 0) return [];
-    if (allWpKeys.length === 0) return [...staffByDept].sort(sortFn);
-    return staffByDept.filter(s =>
+    if (allWpKeys.length === 0) return [...byActive].sort(sortFn);
+    return byActive.filter(s =>
       displayDates.some(date => {
         const day = getDayData(s.userId, date);
         if (day.off || !day.slots || day.slots.length === 0) return visibleWorkplaces.has("__off__");
@@ -1588,6 +1630,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         {/* ── SortBar ── */}
         <SortBar
           sortConfig={sortConfig} onSortChange={setSortConfig}
+          showInactive={showInactive} onShowInactiveChange={setShowInactive}
           colVisibility={colVisibility} onColVisibilityChange={setColVisibility}
           workplaceItems={workplaceItems} wpExtraItems={wpExtraItems}
           visibleWorkplaces={visibleWorkplaces}
@@ -1597,6 +1640,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           departmentItems={departmentItems} visibleDepartments={visibleDepartments}
           onDeptToggle={handleDeptToggle} onDeptToggleAll={handleDeptToggleAll}
           onReset={handleReset} isFiltered={isFiltered}
+          showInactive={showInactive} onShowInactiveChange={setShowInactive}
+          searchQuery={searchQuery} onSearchChange={setSearchQuery}
         />
 
         {/* ── period warning banner ── */}
@@ -1777,17 +1822,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                   ref={el => { anchorRef.current = el; }}
                                   onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
                                   onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
-                            
-                                  {/* Индикатор посещаемости */}
-                                  {attStatus && (
-                                    <div style={{
-                                      position: "absolute", top: 3, right: 3,
-                                      width: 6, height: 6, borderRadius: "50%",
-                                      background: attStatus === "finished" ? "#16a34a"
-                                                : attStatus === "working"  ? "#2563eb" : "#d97706",
-                                      zIndex: 1,
-                                    }} />
-                                  )}
                             
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
