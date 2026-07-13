@@ -65,7 +65,7 @@ function formatTime(t) {
   return typeof t === "string" ? t.slice(0, 5) : t;
 }
 function emptySlot() {
-  return { startTime:"", endTime:"", last:false, workplace:"" };
+  return { startTime:"", endTime:"", last:false, workplace:"", breakOverride: null, _breakOpen: false };
 }
 function periodDays(from, to) {
   if (!from || !to) return 0;
@@ -357,16 +357,20 @@ function ReportLoader() {
 
 /* ─── CellPopover ───────────────────────────────────────── */
 function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
-                       anchorRef, onClose, onSave, workplaces }) {
+                       anchorRef, onClose, onSave, workplaces, breakRules = [] }) {
   const isOff = day.off && (!day.slots || day.slots.length === 0);
   const [off, setOff]     = useState(isOff);
   const [slots, setSlots] = useState(() => {
     if (isOff || !day.slots || day.slots.length === 0) return [emptySlot()];
     return day.slots.map(s => ({
-      startTime: s.startTime ? formatTime(s.startTime) : "",
-      endTime:   s.endTime   ? formatTime(s.endTime)   : "",
-      last:      s.last || false,
-      workplace: s.workplace || "",
+      startTime:     s.startTime ? formatTime(s.startTime) : "",
+      endTime:       s.endTime   ? formatTime(s.endTime)   : "",
+      last:          s.last || false,
+      workplace:     s.workplace || "",
+      breakOverride: (s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined)
+        ? s.breakOverrideMinutes
+        : null,
+      _breakOpen:    false,
     }));
   });
   const popRef = useRef();
@@ -416,6 +420,85 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
     if (slots.length <= 1) return;
     setSlots(prev => prev.filter((_, idx) => idx !== i));
   }
+  function getAutoBreakMinutes(startTime, endTime) {
+    if (!startTime || !endTime) return null;
+    let start = toMinutesLocal(startTime);
+    let end   = toMinutesLocal(endTime);
+    if (end <= start) end += 24 * 60;
+    const duration = end - start;
+    if (duration <= 0) return null;
+    const rule = [...breakRules]
+      .filter(r => duration > r.thresholdMinutes)
+      .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+    return rule ? rule.breakMinutes : 0;
+  }
+  function getBreakHint(startTime, endTime, breakOverride) {
+    if (!startTime || !endTime) return null;
+    let start = toMinutesLocal(startTime);
+    let end   = toMinutesLocal(endTime);
+    if (end <= start) end += 24 * 60;
+    const duration = end - start;
+    if (duration <= 0) return null;
+  
+    // если выбрано вручную
+    if (breakOverride !== null && breakOverride !== undefined) {
+      if (breakOverride === 0) {
+        return { text: "⏱ 休憩: なし（手動）", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
+      }
+      const rule = breakRules.find(r => r.breakMinutes === breakOverride);
+      return {
+        text: `⏱ 休憩: ${breakOverride}分${rule ? `（${rule.name}・手動）` : "（手動）"}`,
+        color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
+      };
+    }
+  
+    // автоматически
+    const rule = [...breakRules]
+      .filter(r => duration > r.thresholdMinutes)
+      .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+  
+    if (!rule) return { text: "⏱ 休憩: なし", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
+    return {
+      text: `⏱ 休憩: ${rule.breakMinutes}分（${rule.name}）`,
+      color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
+    };
+  }
+
+  function getWorkHint(startTime, endTime, breakOverride) {
+    if (!startTime || !endTime) return null;
+    let start = toMinutesLocal(startTime);
+    let end   = toMinutesLocal(endTime);
+    if (end <= start) end += 24 * 60;
+    const duration = end - start;
+    if (duration <= 0) return null;
+  
+    const breakMin = breakOverride !== null
+      ? breakOverride
+      : (getAutoBreakMinutes(startTime, endTime) || 0);
+  
+    const workMin = duration - breakMin;
+    const h = Math.floor(workMin / 60);
+    const m = workMin % 60;
+    return m > 0 ? `${h}時間${m}分` : `${h}時間`;
+  }
+
+  function getTotalHint(startTime, endTime) {
+    if (!startTime || !endTime) return null;
+    let start = toMinutesLocal(startTime);
+    let end   = toMinutesLocal(endTime);
+    if (end <= start) end += 24 * 60;
+    const duration = end - start;
+    if (duration <= 0) return null;
+    const h = Math.floor(duration / 60);
+    const m = duration % 60;
+    return m > 0 ? `${h}時間${m}分` : `${h}時間`;
+  }
+  
+  function toMinutesLocal(timeStr) {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
+    return h * 60 + m;
+  }
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
   
@@ -428,11 +511,12 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
     const validSlots = slots
       .filter(s => s.startTime)
       .map(s => ({
-        startTime: s.startTime,
-        endTime:   s.endTime,
-        last:      s.last,
-        workplace: s.workplace || null,
-        nextDay:   isNextDay(s.startTime, s.endTime),
+        startTime:     s.startTime,
+        endTime:       s.endTime,
+        last:          s.last,
+        workplace:     s.workplace || null,
+        nextDay:       isNextDay(s.startTime, s.endTime),
+        breakOverrideMinutes: s.breakOverride,
       }));
   
     onSave(validSlots.length === 0
@@ -550,6 +634,90 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
                       {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                 </div>
+
+                {(() => {
+                  const total = getTotalHint(slot.startTime, slot.endTime);
+                  const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride);
+                  const autoBreak = getAutoBreakMinutes(slot.startTime, slot.endTime);
+                  const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride);
+                  if (!total && !hint && !work) return null;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: -4 }}>
+                      {total && (
+                        <div style={{
+                          fontSize: 11, color: "#475569", background: "#f8fafc",
+                          border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px",
+                        }}>
+                          🕐 合計: {total}
+                        </div>
+                      )}
+
+                      {/* 休憩 — автоматически + выбор вручную */}
+                      {hint && (
+                        <div style={{ position: "relative" }}>
+                          <div
+                            onClick={() => updateSlot(i, "_breakOpen", !slot._breakOpen)}
+                            style={{
+                              fontSize: 11, color: hint.color, background: hint.bg,
+                              border: `1px solid ${hint.border}`, borderRadius: 6,
+                              padding: "4px 8px", cursor: "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                            }}
+                          >
+                            <span>{hint.text}</span>
+                            <span style={{ fontSize: 10, opacity: 0.6 }}>▼</span>
+                          </div>
+
+                          {slot._breakOpen && (
+                            <div style={{
+                              position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                              background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+                              boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden",
+                            }}>
+                              <div
+                                onClick={() => { updateSlot(i, "breakOverride", 0); updateSlot(i, "_breakOpen", false); }}
+                                style={{
+                                  padding: "8px 12px", fontSize: 12, cursor: "pointer",
+                                  color: "#64748b",
+                                  background: (slot.breakOverride === 0) ? "#f1f5f9" : "#fff",
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                                onMouseLeave={e => e.currentTarget.style.background = (slot.breakOverride === 0) ? "#f1f5f9" : "#fff"}
+                              >
+                                なし（0分）
+                              </div>
+                              {breakRules.map(r => (
+                                <div
+                                  key={r.id}
+                                  onClick={() => { updateSlot(i, "breakOverride", r.breakMinutes); updateSlot(i, "_breakOpen", false); }}
+                                  style={{
+                                    padding: "8px 12px", fontSize: 12, cursor: "pointer",
+                                    background: (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff",
+                                    color: "#475569",
+                                    borderTop: "1px solid #f1f5f9",
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                                  onMouseLeave={e => e.currentTarget.style.background = (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff"}
+                                >
+                                  {r.name}（{r.breakMinutes}分）
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {work && (
+                        <div style={{
+                          fontSize: 11, color: "#0369a1", background: "#f0f9ff",
+                          border: "1px solid #bae6fd", borderRadius: 6, padding: "4px 8px",
+                        }}>
+                          ⏰ 実働: {work}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <label className={styles.popRow}>
                   <input type="checkbox" checked={slot.last}
@@ -896,7 +1064,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     }
     if (viewMode === "period") {
       const days = periodDays(periodFrom, periodTo);
-      if (days < 7 || days > 35) return [];
+      if (days < 7 || days > 50) return [];
       const dates = [];
       const cur = new Date(periodFrom);
       const end = new Date(periodTo);
@@ -927,7 +1095,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         weeksPromise = api.managerRange(wk, to);
       } else if (mode === "period") {
         const days = periodDays(pFrom, pTo);
-        if (!pFrom || !pTo || days < 7 || days > 35) {
+        if (!pFrom || !pTo || days < 7 || days > 50) {
           if (!silent) { setWeeksRaw([]); setData({}); setAllStaff([]); setLoading(false); }
           return;
         }
@@ -1114,12 +1282,19 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   
       if (dayMinutes === 0) return;
   
-      // Применяем наиболее подходящее правило к суммарному времени дня
-      const rule = [...breakRules]
-        .filter(r => dayMinutes > r.thresholdMinutes)
-        .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
-  
-      total += rule ? dayMinutes - rule.breakMinutes : dayMinutes;
+      // Если у любого слота есть breakOverrideMinutes — используем его
+      const overrideSlot = day.slots.find(s => s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined);
+      let breakMin;
+      if (overrideSlot) {
+        breakMin = overrideSlot.breakOverrideMinutes;
+      } else {
+        const rule = [...breakRules]
+          .filter(r => dayMinutes > r.thresholdMinutes)
+          .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+        breakMin = rule ? rule.breakMinutes : 0;
+      }
+
+      total += dayMinutes - breakMin;
     });
     return total;
   }
@@ -1512,7 +1687,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const pDays      = periodDays(periodFrom, periodTo);
   const periodOk   = pDays >= 7 && pDays <= 35;
   const periodWarn = periodFrom && periodTo && !periodOk
-    ? (pDays < 7 ? "7日以上を指定してください" : "35日以内を指定してください")
+    ? (pDays < 7 ? "7日以上を指定してください" : "50日以内を指定してください")
     : null;
 
   /* ── thead: второй ряд — недели со статусами ── */
@@ -1916,6 +2091,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                       workplaces={workplaces}
                                       onClose={() => setOpenCell(null)}
                                       onSave={patch => { setOpenCell(null); saveCell(staff.userId, date, patch); }}
+                                      breakRules={breakRules}
                                     />
                                   );
                                 })()}

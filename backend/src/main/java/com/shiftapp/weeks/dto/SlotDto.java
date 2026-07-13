@@ -13,15 +13,17 @@ public class SlotDto {
 
     private String workplace;
     private boolean nextDay;
+    private Integer breakOverrideMinutes;
 
     public SlotDto() {}
 
-    public SlotDto(LocalTime startTime, LocalTime endTime, boolean last, String workplace, boolean nextDay) {
+    public SlotDto(LocalTime startTime, LocalTime endTime, boolean last, String workplace, boolean nextDay, Integer breakOverrideMinutes) {
         this.startTime = startTime;
         this.endTime   = endTime;
         this.last      = last;
         this.workplace = workplace;
         this.nextDay   = nextDay;
+        this.breakOverrideMinutes = breakOverrideMinutes;
     }
 
     public LocalTime getStartTime() { return startTime; }
@@ -41,4 +43,6 @@ public class SlotDto {
 
     public boolean isNextDay() { return nextDay; }
     public void setNextDay(boolean nextDay) { this.nextDay = nextDay; }
+
+    public Integer getBreakOverrideMinutes() { return breakOverrideMinutes; }
 }

@@ -44,7 +44,7 @@ public class ManagerMonthController {
             rangeTo   = LocalDate.parse(to);
             long days = ChronoUnit.DAYS.between(rangeFrom, rangeTo) + 1;
             if (days < 7)  throw new IllegalArgumentException("期間は7日以上を指定してください");
-            if (days > 35) throw new IllegalArgumentException("期間は35日以内を指定してください");
+            if (days > 50) throw new IllegalArgumentException("期間は50日以内を指定してください");
         } else {
             throw new IllegalArgumentException("month または from/to を指定してください");
         }
@@ -133,7 +133,8 @@ public class ManagerMonthController {
                     s.getEndTime(),
                     s.isLast(),
                     s.getWorkplace(),
-                    s.isNextDay()
+                    s.isNextDay(),
+                    s.getBreakOverrideMinutes()
             ));
         }
         day.setSlots(slotDtos);

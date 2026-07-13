@@ -1,0 +1,1 @@
+ALTER TABLE shift_slots ADD COLUMN break_override_minutes INT NULL;

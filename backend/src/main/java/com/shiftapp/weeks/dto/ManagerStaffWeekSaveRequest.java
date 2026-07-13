@@ -43,6 +43,7 @@ public class ManagerStaffWeekSaveRequest {
         private boolean last;
         private String workplace;
         private boolean nextDay;
+        public Integer breakOverrideMinutes;
 
         public java.time.LocalTime getStartTime() { return startTime; }
         public void setStartTime(java.time.LocalTime startTime) { this.startTime = startTime; }
@@ -58,5 +59,8 @@ public class ManagerStaffWeekSaveRequest {
 
         public boolean isNextDay() { return nextDay; }
         public void setNextDay(boolean nextDay) { this.nextDay = nextDay; }
+
+        public Integer getBreakOverrideMinutes() { return breakOverrideMinutes; }
+        public void setBreakOverrideMinutes(Integer breakOverrideMinutes) { this.breakOverrideMinutes = breakOverrideMinutes; }
     }
 }

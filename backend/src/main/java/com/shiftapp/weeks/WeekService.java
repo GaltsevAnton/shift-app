@@ -117,7 +117,8 @@ public class WeekService {
                 s.getEndTime(),
                 s.isLast(),
                 s.getWorkplace(),
-                s.isNextDay()
+                s.isNextDay(),
+                s.getBreakOverrideMinutes()
             ));
         }
         day.setSlots(slotDtos);
@@ -426,6 +427,7 @@ public class WeekService {
                     slot.setEndTime(si.getEndTime());
                     slot.setWorkplace(si.getWorkplace());
                     slot.setNextDay(si.isLast() ? false : si.isNextDay());
+                    slot.setBreakOverrideMinutes(si.getBreakOverrideMinutes());
                     p.getSlots().add(slot);
                 }
             }

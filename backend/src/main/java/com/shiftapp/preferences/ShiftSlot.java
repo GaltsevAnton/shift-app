@@ -33,6 +33,9 @@ public class ShiftSlot {
     @Column(name = "next_day", nullable = false)
     private boolean nextDay = false;
 
+    @Column(name = "break_override_minutes")
+    private Integer breakOverrideMinutes;
+
     public ShiftSlot() {}
 
     public Long getId() { return id; }
@@ -57,4 +60,7 @@ public class ShiftSlot {
 
     public boolean isNextDay() { return nextDay; }
     public void setNextDay(boolean nextDay) { this.nextDay = nextDay; }
+
+    public Integer getBreakOverrideMinutes() { return breakOverrideMinutes; }
+    public void setBreakOverrideMinutes(Integer breakOverrideMinutes) { this.breakOverrideMinutes = breakOverrideMinutes; }
 }

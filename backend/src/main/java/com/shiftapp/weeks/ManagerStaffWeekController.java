@@ -97,7 +97,8 @@ public class ManagerStaffWeekController {
                             s.getEndTime(),
                             s.isLast(),
                             s.getWorkplace(),
-                            s.isNextDay()
+                            s.isNextDay(),
+                            s.getBreakOverrideMinutes()
                     ));
                 }
                 day.setSlots(slotDtos);
