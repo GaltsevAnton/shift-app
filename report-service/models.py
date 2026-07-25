@@ -23,13 +23,19 @@ class StaffModel(BaseModel):
     days: list[DayModel] = []
 
 class DaySessionModel(BaseModel):
+    # факт (сырые пробивки) — используется в 打刻一覧
     clockIn: Optional[str] = None
     clockOut: Optional[str] = None
     breakStart: Optional[str] = None
     breakEnd: Optional[str] = None
-    breakMinutes: Optional[int] = None   # гибрид: факт, либо авто по 休憩ルール
-    workMinutes: Optional[int] = None    # 実働 = (退勤-出勤) - breakMinutes
-
+    # официальные значения (округление по плану 出勤/退勤/休憩) — используется в 勤怠集計表（実績）
+    hasPlan: bool = False
+    officialClockIn: Optional[str] = None
+    officialClockOut: Optional[str] = None
+    officialBreakMinutes: Optional[int] = None
+    workMinutes: Optional[int] = None
+    lateIn: bool = False
+    earlyOut: bool = False
 
 class AttendanceDayModel(BaseModel):
     date: str                       # "2026-05-01"
@@ -55,12 +61,23 @@ class SessionModel(BaseModel):
     userId: int
     userName: str
     workDate: str
+    # факт (сырые пробивки)
     clockIn: Optional[str] = None
     clockOut: Optional[str] = None
     breakStart: Optional[str] = None
     breakEnd: Optional[str] = None
-    shiftStart: Optional[str] = None
-    shiftEnd: Optional[str] = None
+    # план (сырые значения слота, без округления)
+    scheduledClockIn: Optional[str] = None
+    scheduledClockOut: Optional[str] = None
+    scheduledBreakMinutes: Optional[int] = None
+    # официальные (округлённые по плану) значения — только для 勤務時間
+    hasPlan: bool = False
+    officialClockIn: Optional[str] = None
+    officialClockOut: Optional[str] = None
+    officialBreakMinutes: Optional[int] = None
+    workMinutes: Optional[int] = None
+    lateIn: bool = False
+    earlyOut: bool = False
 
 class AttendanceSessionsRequest(BaseModel):
     hotelName: str = "ホテル・ヘリテイジ飯能sta．"

@@ -502,6 +502,22 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [listPageSize, setListPageSize] = useState(20);
   const [listPage, setListPage]         = useState(1);
   const [listShiftMap, setListShiftMap] = useState({});
+  const LIST_COLUMNS = [
+    { key: "scheduledIn",    value: "scheduledIn",    label: "出勤予定" },
+    { key: "actualIn",       value: "actualIn",       label: "出勤時刻" },
+    { key: "scheduledOut",   value: "scheduledOut",   label: "退勤予定" },
+    { key: "actualOut",      value: "actualOut",      label: "退勤時刻" },
+    { key: "breakStart",     value: "breakStart",     label: "休憩開始" },
+    { key: "breakEnd",       value: "breakEnd",       label: "休憩終了" },
+    { key: "scheduledBreak", value: "scheduledBreak", label: "予定休憩" },
+    { key: "actualBreakTime", value: "actualBreakTime", label: "休憩時刻" },
+    { key: "workTime",       value: "workTime",       label: "勤務時間" },
+    { key: "actualWorkTime", value: "actualWorkTime", label: "実際に働いた時間" },
+    { key: "shiftPlan",      value: "shiftPlan",      label: "シフト予定" },
+  ];
+  const [visibleListCols, setVisibleListCols] = useState(
+    () => loadFilterSet("attListCols") || new Set(LIST_COLUMNS.map(c => c.key))
+  );
 
   /* ── persist ── */
   useEffect(() => { localStorage.setItem("attPageMode", pageMode); }, [pageMode]);
@@ -510,6 +526,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   useEffect(() => { localStorage.setItem("attListWeek", listWeek); }, [listWeek]);
   useEffect(() => { if (listPeriodFrom) localStorage.setItem("attListPeriodFrom", listPeriodFrom); }, [listPeriodFrom]);
   useEffect(() => { if (listPeriodTo)   localStorage.setItem("attListPeriodTo",   listPeriodTo);   }, [listPeriodTo]);
+  useEffect(() => { saveFilterSet("attListCols", visibleListCols); }, [visibleListCols]);
+
+  function handleListColToggle(key) {
+    setVisibleListCols(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  }
+  function handleListColToggleAll(allKeys, allOn) {
+    setVisibleListCols(allOn ? new Set(allKeys) : new Set());
+  }
   useEffect(() => { localStorage.setItem("attViewMode",      viewMode);     }, [viewMode]);
   useEffect(() => { localStorage.setItem("attSelectedMonth", ym);           }, [ym]);
   useEffect(() => { localStorage.setItem("attSelectedWeek",  selectedWeek); }, [selectedWeek]);
@@ -663,6 +687,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               sm[`${row.userId}_${day.date}`] = {
                 startTime: starts[0],
                 endTime:   ends[ends.length - 1],
+                slots:     day.slots,
               };
             }
           }
@@ -698,27 +723,45 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       if (!byUser[r.userId]) byUser[r.userId] = [];
       byUser[r.userId].push(r);
     });
+
     const out = [];
     Object.entries(byUser).forEach(([uid, recs]) => {
       const sorted = [...recs].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
       let cur = null;
+      const rawSessions = [];
       for (const r of sorted) {
         if (r.recordType === "CLOCK_IN") {
-          if (cur) out.push(cur);
+          if (cur) rawSessions.push(cur);
           cur = { userId: Number(uid), userName: r.userName, workDate: r.workDate, clockIn: r.recordedAt, clockOut: null, breakStart: null, breakEnd: null };
         } else if (cur) {
           if (r.recordType === "BREAK_START") cur.breakStart = r.recordedAt;
           if (r.recordType === "BREAK_END")   cur.breakEnd   = r.recordedAt;
-          if (r.recordType === "CLOCK_OUT") { cur.clockOut = r.recordedAt; out.push(cur); cur = null; }
+          if (r.recordType === "CLOCK_OUT") { cur.clockOut = r.recordedAt; rawSessions.push(cur); cur = null; }
         }
       }
-      if (cur) out.push(cur);
+      if (cur) rawSessions.push(cur);
+
+      // Группируем по дню — плановые слоты сопоставляются в рамках одного дня
+      const byDate = {};
+      rawSessions.forEach(s => {
+        if (!byDate[s.workDate]) byDate[s.workDate] = [];
+        byDate[s.workDate].push(s);
+      });
+
+      Object.entries(byDate).forEach(([wd, daySessions]) => {
+        const shift = listShiftMap[`${uid}_${wd}`];
+        const matched = matchSessionsToSlots(daySessions, shift?.slots || []);
+        matched.forEach(({ session, slot }) => {
+          const info = computeSessionOfficial(session, slot, wd, breakRules);
+          out.push({ ...session, slot, info });
+        });
+      });
     });
+
     return out
       .filter(s => listSelectedStaff.size === 0 || listSelectedStaff.has(s.userId))
-      .map(s => ({ ...s, shift: listShiftMap[`${s.userId}_${s.workDate}`] || null }))
       .sort(listSortFn);
-  }, [listRecords, listSelectedStaff, listSortConfig, listShiftMap]);
+  }, [listRecords, listSelectedStaff, listSortConfig, listShiftMap, breakRules]);
 
   useEffect(() => { setListPage(1); }, [listSessions.length, listPageSize, listSortConfig, listSelectedStaff]);
 
@@ -745,6 +788,20 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   function fmtTimeOnly(instant) {
     if (!instant) return "--:--";
     return new Date(instant).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
+  }
+  function rawBreakMinutes(session) {
+    if (!session.breakStart || !session.breakEnd) return null;
+    const mins = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
+    return mins > 0 ? mins : 0;
+  }
+  function rawActualWorkedMinutes(session) {
+    if (!session.clockIn || !session.clockOut) return null;
+    let mins = Math.round((new Date(session.clockOut) - new Date(session.clockIn)) / 60000);
+    if (session.breakStart && session.breakEnd) {
+      const brk = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
+      mins -= Math.max(brk, 0);
+    }
+    return mins > 0 ? mins : 0;
   }
   function formatShiftTime(t) {
     if (!t) return "--:--";
@@ -1087,7 +1144,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       <div className={styles.page}>
 
         {/* ── Mode toggle: カレンダー / リスト ── */}
-        <div style={{ display: "flex", gap: 0, padding: "10px 20px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "10px 20px 0" }}>
           {[
             { value: "calendar", label: "📅 カレンダー" },
             { value: "list",     label: "📋 リスト" },
@@ -1113,20 +1170,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         <>
         {/* ── TopBar ── */}
         <div className={styles.topBar}>
-          <select className={styles.monthSelect}
-            value={ym.split("-")[0]}
-            onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}>
-            {yearOptions.map(y => <option key={y} value={y}>{y}年</option>)}
-          </select>
-
-          <select className={styles.monthSelect}
-            value={ym.split("-")[1]}
-            onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}>
-            {MONTHS_JA.map((label, i) => (
-              <option key={i} value={String(i+1).padStart(2,"0")}>{label}</option>
-            ))}
-          </select>
-
           <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid #ccc", flexShrink:0 }}>
             {VIEW_MODES.map((m, idx) => (
               <button key={m.value} type="button"
@@ -1143,6 +1186,24 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               </button>
             ))}
           </div>
+
+          {viewMode === "month" && (
+            <>
+              <select className={styles.monthSelect}
+                value={ym.split("-")[0]}
+                onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}>
+                {yearOptions.map(y => <option key={y} value={y}>{y}年</option>)}
+              </select>
+
+              <select className={styles.monthSelect}
+                value={ym.split("-")[1]}
+                onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}>
+                {MONTHS_JA.map((label, i) => (
+                  <option key={i} value={String(i+1).padStart(2,"0")}>{label}</option>
+                ))}
+              </select>
+            </>
+          )}
 
           {viewMode === "week" && (
             <select className={styles.monthSelect} value={selectedWeek}
@@ -1302,6 +1363,12 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               </button>
             );
           })}
+
+          {!loading && staff.length > 0 && (
+            <span style={{ marginLeft: "auto", fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>
+              表示中: {filteredStaffByStatus.length} / {staff.length} 人
+            </span>
+          )}
         </div>
 
         {viewMode === "period" && periodWarn && (
@@ -1617,6 +1684,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                 />
               )}
 
+              <CheckDropdown
+                label="表示列"
+                items={LIST_COLUMNS}
+                visibleSet={visibleListCols}
+                onToggle={handleListColToggle}
+                onToggleAll={handleListColToggleAll}
+              />
+
               <button type="button" className={styles.exportBtn}
                 onClick={loadListData}
                 disabled={!listRange.from || !listRange.to || listLoading}>
@@ -1631,23 +1706,19 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-              <span className={styles.sortBarLabel}>並び替え：</span>
-              {[
-                { value: "date", label: "日付" },
-                { value: "name", label: "申請者" },
-              ].map(f => {
-                const isActive = listSortConfig.field === f.value;
+            <span className={styles.sortBarLabel}>並び替え：</span>
+              {SORT_FIELDS.map(f => {
+                const isActive = sortConfig.field === f.value;
                 return (
                   <button key={f.value} type="button"
                     className={`${styles.sortBtn} ${isActive ? styles.sortBtnActive : ""}`}
-                    onClick={() => setListSortConfig({
+                    onClick={() => setSortConfig({
                       field: f.value,
-                      dir: isActive ? (listSortConfig.dir === "asc" ? "desc" : "asc") : (f.value === "date" ? "desc" : "asc"),
-                    })}
-                  >
+                      dir: isActive ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
+                    })}>
                     {f.label}
                     <span className={styles.sortArrow}>
-                      {isActive ? (listSortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
+                      {isActive ? (sortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
                     </span>
                   </button>
                 );
@@ -1682,30 +1753,72 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
-                    <tr style={{ background: "#f0f4ff" }}>
-                      {["申請者", "日付", "出勤時刻", "退勤時刻", "休憩開始", "休憩終了", "勤務時間", "シフト予定"].map(h => (
-                        <th key={h} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {listPagedSessions.map((s, i) => (
-                      <tr key={`${s.userId}_${s.workDate}_${s.clockIn}`}
-                        style={{ background: i % 2 === 1 ? "#f8fafc" : "#fff", borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap" }}>👤 {s.userName}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", color: "#2563eb" }}>{fmtDateWithWd(s.workDate)}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace" }}>{fmtTimeOnly(s.clockIn)}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace" }}>{fmtTimeOnly(s.clockOut)}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace", color: "#94a3b8" }}>{s.breakStart ? fmtTimeOnly(s.breakStart) : "―"}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace", color: "#94a3b8" }}>{s.breakEnd ? fmtTimeOnly(s.breakEnd) : "―"}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontWeight: 700, color: "#0f172a" }}>{fmtWorkMinutes(calcSessionMinutes(s))}</td>
-                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", color: "#0369a1" }}>
-                          {s.shift ? `${formatShiftTime(s.shift.startTime)}〜${formatShiftTime(s.shift.endTime)}` : "―"}
-                        </td>
+                      <tr style={{ background: "#f0f4ff" }}>
+                        <th style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>申請者</th>
+                        <th style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>日付</th>
+                        {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
+                          <th key={c.key} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
+                            {c.label}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
+                    </thead>
+                  <tbody>
+                    {listPagedSessions.map((s, i) => {
+                      const cellStyle = { padding: "8px 14px", whiteSpace: "nowrap" };
+                      const renderCell = (key) => {
+                        switch (key) {
+                          case "scheduledIn":
+                            return s.slot ? formatShiftTime(s.slot.startTime) : "―";
+                          case "actualIn":
+                            return fmtTimeOnly(s.clockIn);
+                          case "scheduledOut":
+                            return s.slot ? formatShiftTime(s.slot.endTime) : "―";
+                          case "actualOut":
+                            return fmtTimeOnly(s.clockOut);
+                          case "breakStart":
+                            return s.breakStart ? fmtTimeOnly(s.breakStart) : "―";
+                          case "breakEnd":
+                            return s.breakEnd ? fmtTimeOnly(s.breakEnd) : "―";
+                          case "scheduledBreak":
+                            return s.slot ? fmtWorkMinutes(plannedSlotBreakMinutes(s.slot, breakRules)) : "―";
+                          case "actualBreakTime":
+                            return fmtWorkMinutes(rawBreakMinutes(s));
+                          case "workTime":
+                            return fmtWorkMinutes(s.info?.workMin ?? null);
+                          case "actualWorkTime":
+                            return fmtWorkMinutes(rawActualWorkedMinutes(s));
+                          case "shiftPlan":
+                            return s.slot ? `${formatShiftTime(s.slot.startTime)}〜${formatShiftTime(s.slot.endTime)}` : "―";
+                          default:
+                            return "";
+                        }
+                      };
+                      return (
+                        <tr key={`${s.userId}_${s.workDate}_${s.clockIn}`}
+                          style={{ background: i % 2 === 1 ? "#f8fafc" : "#fff", borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={cellStyle}>👤 {s.userName}</td>
+                          <td style={{ ...cellStyle, color: "#2563eb" }}>{fmtDateWithWd(s.workDate)}</td>
+                          {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
+                            <td key={c.key} style={{
+                              ...cellStyle,
+                              fontFamily: ["actualIn","actualOut","breakStart","breakEnd","scheduledIn","scheduledOut"].includes(c.key) ? "monospace" : undefined,
+                              color:
+                                c.key === "breakStart" || c.key === "breakEnd" ? "#94a3b8" :
+                                c.key === "workTime" ? "#0f172a" :
+                                c.key === "actualWorkTime" ? "#0369a1" :
+                                c.key === "shiftPlan" ? "#0369a1" :
+                                c.key === "scheduledIn" || c.key === "scheduledOut" || c.key === "scheduledBreak" ? "#64748b" :
+                                c.key === "actualBreakTime" ? "#94a3b8" :
+                                undefined,
+                              fontWeight: c.key === "workTime" ? 700 : undefined,
+                            }}>
+                              {renderCell(c.key)}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -199,10 +199,6 @@ def build(req: AttendanceReportRequest) -> bytes:
             day_work_min = sum(sess.workMinutes or 0 for sess in sessions)
             total_work_minutes += day_work_min
 
-            first_in = _parse_hm(sessions[0].clockIn) if sessions else None
-            is_late = bool(d.hasShift and d.shiftStart and first_in and first_in > d.shiftStart)
-            day_bg = C_LATE_BG if is_late else row_bg
-
             for session_idx in range(max_sessions):
                 block_r = r + session_idx * 4
                 sess = sessions[session_idx] if session_idx < len(sessions) else None
@@ -218,11 +214,11 @@ def build(req: AttendanceReportRequest) -> bytes:
                         c.font = _font(size=9)
                     continue
 
-                in_time    = _parse_hm(sess.clockIn) or ""
-                out_time   = _parse_hm(sess.clockOut) or ""
+                in_time    = _parse_hm(sess.officialClockIn) or ""
+                out_time   = _parse_hm(sess.officialClockOut) or ""
                 work_time  = _fmt_hm(sess.workMinutes)
-                break_time = _fmt_hm(sess.breakMinutes)
-                block_bg   = day_bg if session_idx == 0 else row_bg
+                break_time = _fmt_hm(sess.officialBreakMinutes)
+                block_bg   = C_LATE_BG if (sess.lateIn or sess.earlyOut) else row_bg
 
                 for sub, val in enumerate([in_time, out_time, work_time, break_time]):
                     c = ws.cell(row=block_r + sub, column=col)

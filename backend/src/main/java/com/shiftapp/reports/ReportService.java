@@ -27,6 +27,7 @@ import java.util.*;
 import java.time.ZoneId;
 import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.time.Instant;
 
 @Service
@@ -43,6 +44,7 @@ public class ReportService {
     private String reportServiceUrl;
 
     private static final String hotelName = "ホテル・ヘリテイジ飯能sta．";
+    private static final ZoneId ZONE = ZoneId.of("Asia/Tokyo");
 
     public ReportService(UserRepository userRepository,
                 PreferenceRepository preferenceRepository,
@@ -294,37 +296,26 @@ public class ReportService {
             if (current != null) sessions.add(current); // смена ещё открыта
         }
 
-        // Гибридный расчёт休憩/実働 для каждой сессии: приоритет реальной пробивке, иначе — по 休憩ルール
-        for (Map<String, Object> session : sessions) {
-            String ci = (String) session.get("clockIn");
-            String co = (String) session.get("clockOut");
-            String bs = (String) session.get("breakStart");
-            String be = (String) session.get("breakEnd");
+        // Плановые слоты дня, отсортированные по времени начала — для сопоставления с сессиями по порядку
+        boolean hasShift = pref != null && !pref.isOff() && !pref.getSlots().isEmpty();
+        List<ShiftSlot> sortedSlots = hasShift
+                ? pref.getSlots().stream()
+                    .filter(sl -> sl.getStartTime() != null)
+                    .sorted(Comparator.comparing(ShiftSlot::getStartTime))
+                    .toList()
+                : Collections.emptyList();
 
-            Integer grossMin = minutesBetweenIso(ci, co);
-            int breakMin;
-            if (bs != null && be != null) {
-                Integer actualBreak = minutesBetweenIso(bs, be);
-                breakMin = (actualBreak != null && actualBreak > 0) ? actualBreak : 0;
-            } else if (grossMin != null) {
-                breakMin = autoBreakMinutes(grossMin, breakRules);
-            } else {
-                breakMin = 0;
-            }
-            Integer workMin = grossMin != null ? Math.max(grossMin - breakMin, 0) : null;
-
-            session.put("breakMinutes", breakMin);
-            session.put("workMinutes",  workMin);
+        // Сессии тоже уже в хронологическом порядке (собраны по возрастанию recordedAt)
+        for (int i = 0; i < sessions.size(); i++) {
+            ShiftSlot slot = i < sortedSlots.size() ? sortedSlots.get(i) : null;
+            computeSessionOfficial(sessions.get(i), slot, date, breakRules);
         }
 
         day.put("sessions", sessions);
-
-        boolean hasShift = pref != null && !pref.isOff() && !pref.getSlots().isEmpty();
         day.put("hasShift", hasShift);
         if (hasShift) {
-            String shiftStart = pref.getSlots().stream()
-                    .map(ShiftSlot::getStartTime).filter(Objects::nonNull)
-                    .map(Object::toString).sorted().findFirst().orElse(null);
+            String shiftStart = sortedSlots.stream()
+                    .map(sl -> sl.getStartTime().toString()).findFirst().orElse(null);
             String shiftEnd = pref.getSlots().stream()
                     .map(ShiftSlot::getEndTime).filter(Objects::nonNull)
                     .map(Object::toString).sorted(Comparator.reverseOrder()).findFirst().orElse(null);
@@ -336,6 +327,139 @@ public class ReportService {
         }
 
         return day;
+    }
+
+    // ── Округление по плану (勤怠管理・実績) ────────────────────────────────
+
+    private static final long HALF_HOUR_MILLIS = 30L * 60 * 1000;
+
+    // 出勤/休憩開始: строго вверх к получасу (даже если ровно на отметке)
+    private Instant roundUpHalfHour(Instant instant) {
+        long bucket = Math.floorDiv(instant.toEpochMilli(), HALF_HOUR_MILLIS) + 1;
+        return Instant.ofEpochMilli(bucket * HALF_HOUR_MILLIS);
+    }
+
+    // 退勤/休憩終了: строго вниз к получасу (даже если ровно на отметке)
+    private Instant roundDownHalfHour(Instant instant) {
+        long bucket = Math.floorDiv(instant.toEpochMilli() - 1, HALF_HOUR_MILLIS);
+        return Instant.ofEpochMilli(bucket * HALF_HOUR_MILLIS);
+    }
+
+    // Округление ДЛИТЕЛЬНОСТИ перерыва (не меток) к ближайшим 30 мин
+    private int roundNearestHalfHourMinutes(int mins) {
+        return (int) (Math.round(mins / 30.0) * 30);
+    }
+
+    private Instant parseIsoToInstant(String iso) {
+        if (iso == null) return null;
+        try {
+            return OffsetDateTime.parse(iso).toInstant();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Instant planTimeToInstant(LocalDate date, LocalTime time) {
+        if (date == null || time == null) return null;
+        return date.atTime(time).atZone(ZONE).toInstant();
+    }
+
+    // Плановая длительность перерыва слота: ручной override, иначе авто по 休憩ルール от ПЛАНОВОЙ длительности
+    private int plannedSlotBreakMinutes(ShiftSlot slot, List<BreakRule> breakRules) {
+        if (slot == null) return 0;
+        if (slot.getBreakOverrideMinutes() != null) return slot.getBreakOverrideMinutes();
+        LocalTime start = slot.getStartTime();
+        LocalTime end = slot.getEndTime();
+        if (start == null || end == null) return 0;
+        int startMin = start.getHour() * 60 + start.getMinute();
+        int endMin = end.getHour() * 60 + end.getMinute();
+        if (endMin <= startMin) endMin += 24 * 60;
+        return autoBreakMinutes(endMin - startMin, breakRules);
+    }
+
+    // Основной расчёт официального 出勤/退勤/休憩/実働 для одной сессии — мутирует переданную map
+    private void computeSessionOfficial(Map<String, Object> session, ShiftSlot slot, LocalDate date, List<BreakRule> breakRules) {
+        boolean hasPlan = slot != null;
+
+        Instant clockIn  = parseIsoToInstant((String) session.get("clockIn"));
+        Instant clockOut = parseIsoToInstant((String) session.get("clockOut"));
+
+        Instant planStart = null, planEnd = null;
+        if (hasPlan) {
+            planStart = planTimeToInstant(date, slot.getStartTime());
+            planEnd   = planTimeToInstant(date, slot.getEndTime());
+            if (planStart != null && planEnd != null) {
+                boolean nextDay = slot.isNextDay() || !planEnd.isAfter(planStart);
+                if (nextDay) planEnd = planEnd.plus(Duration.ofDays(1));
+            }
+        }
+
+        Instant officialIn = clockIn;
+        boolean lateIn = false;
+        if (clockIn != null) {
+            if (hasPlan && planStart != null) {
+                if (clockIn.isBefore(planStart)) {
+                    officialIn = planStart;
+                } else {
+                    officialIn = roundUpHalfHour(clockIn);
+                    lateIn = true;
+                }
+            } else {
+                officialIn = roundUpHalfHour(clockIn);
+            }
+        }
+
+        Instant officialOut = clockOut;
+        boolean earlyOut = false;
+        if (clockOut != null) {
+            if (hasPlan && planEnd != null) {
+                if (clockOut.isAfter(planEnd)) {
+                    officialOut = planEnd;
+                } else {
+                    officialOut = roundDownHalfHour(clockOut);
+                    earlyOut = true;
+                }
+            } else {
+                officialOut = roundDownHalfHour(clockOut);
+            }
+        }
+
+        Instant breakStart = parseIsoToInstant((String) session.get("breakStart"));
+        Instant breakEnd   = parseIsoToInstant((String) session.get("breakEnd"));
+
+        int officialBreakMinutes = 0;
+        if (hasPlan) {
+            int planBreakMin = plannedSlotBreakMinutes(slot, breakRules);
+            if (breakStart != null && breakEnd != null) {
+                long rawMin = Duration.between(breakStart, breakEnd).toMinutes();
+                int roundedMin = roundNearestHalfHourMinutes((int) Math.max(rawMin, 0));
+                officialBreakMinutes = roundedMin <= planBreakMin ? planBreakMin : roundedMin;
+            } else {
+                officialBreakMinutes = planBreakMin;
+            }
+        } else {
+            if (breakStart != null && breakEnd != null) {
+                long rawMin = Duration.between(breakStart, breakEnd).toMinutes();
+                officialBreakMinutes = (int) Math.max(rawMin, 0);
+            } else if (officialIn != null && officialOut != null) {
+                long grossMin = Duration.between(officialIn, officialOut).toMinutes();
+                officialBreakMinutes = autoBreakMinutes((int) grossMin, breakRules);
+            }
+        }
+
+        Integer workMin = null;
+        if (officialIn != null && officialOut != null) {
+            long grossMin = Duration.between(officialIn, officialOut).toMinutes();
+            workMin = (int) Math.max(grossMin - officialBreakMinutes, 0);
+        }
+
+        session.put("hasPlan", hasPlan);
+        session.put("officialClockIn",  officialIn  != null ? toJstIso(officialIn)  : null);
+        session.put("officialClockOut", officialOut != null ? toJstIso(officialOut) : null);
+        session.put("officialBreakMinutes", officialBreakMinutes);
+        session.put("workMinutes", workMin);
+        session.put("lateIn", lateIn);
+        session.put("earlyOut", earlyOut);
     }
 
     private Integer minutesBetweenIso(String startIso, String endIso) {
@@ -368,7 +492,6 @@ public class ReportService {
             byUser.computeIfAbsent(uid, k -> new ArrayList<>()).add(t);
         }
 
-        // Плановые смены за тот же период — для колонки シフト予定
         List<Preference> allPrefs = preferenceRepository
                 .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to);
         Map<String, Preference> prefByUserDate = new HashMap<>();
@@ -376,53 +499,84 @@ public class ReportService {
             prefByUserDate.put(p.getUser().getId() + "_" + p.getWorkDate(), p);
         }
 
-        // Группируем пробивки в сессии: CLOCK_IN → (BREAK_START/END) → CLOCK_OUT
+        List<BreakRule> breakRules = breakRuleRepository.findByRestaurant_IdOrderByThresholdMinutesAsc(restaurantId);
+
         List<Map<String, Object>> sessions = new ArrayList<>();
-        for (List<TimeRecord> recs : byUser.values()) {
-            List<TimeRecord> sorted = new ArrayList<>(recs);
+        for (Map.Entry<Long, List<TimeRecord>> entry : byUser.entrySet()) {
+            Long uid = entry.getKey();
+            List<TimeRecord> sorted = new ArrayList<>(entry.getValue());
             sorted.sort(Comparator.comparing(TimeRecord::getRecordedAt));
 
-            Map<String, Object> current = null;
+            // Группируем по workDate (это якорь смены — уже назначен корректно при пробивке/правке)
+            Map<LocalDate, List<TimeRecord>> byDate = new LinkedHashMap<>();
             for (TimeRecord r : sorted) {
-                switch (r.getRecordType()) {
-                    case CLOCK_IN -> {
-                        if (current != null) sessions.add(current); // незакрытая предыдущая — сохраняем как есть
-                        current = new LinkedHashMap<>();
-                        current.put("userId",     r.getUser().getId());
-                        current.put("userName",   r.getUser().getFullName());
-                        current.put("workDate",   r.getWorkDate().toString());
-                        current.put("clockIn",    toJstIso(r.getRecordedAt()));
-                        current.put("clockOut",   null);
-                        current.put("breakStart", null);
-                        current.put("breakEnd",   null);
+                byDate.computeIfAbsent(r.getWorkDate(), k -> new ArrayList<>()).add(r);
+            }
 
-                        Preference pref = prefByUserDate.get(r.getUser().getId() + "_" + r.getWorkDate());
-                        if (pref != null && !pref.isOff() && !pref.getSlots().isEmpty()) {
-                            String shiftStart = pref.getSlots().stream()
-                                    .map(ShiftSlot::getStartTime).filter(Objects::nonNull)
-                                    .map(Object::toString).sorted().findFirst().orElse(null);
-                            String shiftEnd = pref.getSlots().stream()
-                                    .map(ShiftSlot::getEndTime).filter(Objects::nonNull)
-                                    .map(Object::toString).sorted(Comparator.reverseOrder()).findFirst().orElse(null);
-                            current.put("shiftStart", shiftStart);
-                            current.put("shiftEnd",   shiftEnd);
-                        } else {
-                            current.put("shiftStart", null);
-                            current.put("shiftEnd",   null);
+            for (Map.Entry<LocalDate, List<TimeRecord>> dateEntry : byDate.entrySet()) {
+                LocalDate date = dateEntry.getKey();
+                List<TimeRecord> dayRecs = dateEntry.getValue();
+
+                // Собираем сессии дня: CLOCK_IN → (BREAK_*) → CLOCK_OUT
+                List<Map<String, Object>> daySessions = new ArrayList<>();
+                Map<String, Object> current = null;
+                for (TimeRecord r : dayRecs) {
+                    switch (r.getRecordType()) {
+                        case CLOCK_IN -> {
+                            if (current != null) daySessions.add(current);
+                            current = new LinkedHashMap<>();
+                            current.put("userId",     uid);
+                            current.put("userName",   r.getUser().getFullName());
+                            current.put("workDate",   date.toString());
+                            current.put("clockIn",    toJstIso(r.getRecordedAt()));
+                            current.put("clockOut",   null);
+                            current.put("breakStart", null);
+                            current.put("breakEnd",   null);
                         }
-                    }
-                    case BREAK_START -> { if (current != null) current.put("breakStart", toJstIso(r.getRecordedAt())); }
-                    case BREAK_END   -> { if (current != null) current.put("breakEnd",   toJstIso(r.getRecordedAt())); }
-                    case CLOCK_OUT   -> {
-                        if (current != null) {
-                            current.put("clockOut", toJstIso(r.getRecordedAt()));
-                            sessions.add(current);
-                            current = null;
+                        case BREAK_START -> { if (current != null) current.put("breakStart", toJstIso(r.getRecordedAt())); }
+                        case BREAK_END   -> { if (current != null) current.put("breakEnd",   toJstIso(r.getRecordedAt())); }
+                        case CLOCK_OUT   -> {
+                            if (current != null) {
+                                current.put("clockOut", toJstIso(r.getRecordedAt()));
+                                daySessions.add(current);
+                                current = null;
+                            }
                         }
                     }
                 }
+                if (current != null) daySessions.add(current); // смена ещё открыта
+
+                // Плановые слоты этого дня, по порядку начала — для сопоставления с сессиями
+                Preference pref = prefByUserDate.get(uid + "_" + date);
+                boolean hasShiftDay = pref != null && !pref.isOff() && !pref.getSlots().isEmpty();
+                List<ShiftSlot> sortedSlots = hasShiftDay
+                        ? pref.getSlots().stream()
+                            .filter(sl -> sl.getStartTime() != null)
+                            .sorted(Comparator.comparing(ShiftSlot::getStartTime))
+                            .toList()
+                        : Collections.emptyList();
+
+                for (int i = 0; i < daySessions.size(); i++) {
+                    Map<String, Object> session = daySessions.get(i);
+                    ShiftSlot slot = i < sortedSlots.size() ? sortedSlots.get(i) : null;
+
+                    // Официальные (округлённые по плану) значения — та же логика, что в календаре/табеле
+                    computeSessionOfficial(session, slot, date, breakRules);
+
+                    // Сырые плановые значения слота — для 出勤予定/退勤予定/予定休憩
+                    if (slot != null) {
+                        session.put("scheduledClockIn",  slot.getStartTime() != null ? slot.getStartTime().toString() : null);
+                        session.put("scheduledClockOut", slot.getEndTime()   != null ? slot.getEndTime().toString()   : null);
+                        session.put("scheduledBreakMinutes", plannedSlotBreakMinutes(slot, breakRules));
+                    } else {
+                        session.put("scheduledClockIn",  null);
+                        session.put("scheduledClockOut", null);
+                        session.put("scheduledBreakMinutes", null);
+                    }
+
+                    sessions.add(session);
+                }
             }
-            if (current != null) sessions.add(current); // смена ещё открыта
         }
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -464,7 +618,6 @@ public class ReportService {
     }
 
     // ── Вызов Python-сервиса ─────────────────────────────────────────────
-
     private byte[] callPython(String path, Map<String, Object> payload) {
         try {
             RestTemplate restTemplate = new RestTemplate();
