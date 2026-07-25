@@ -9,8 +9,11 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
+import org.springframework.format.annotation.DateTimeFormat;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/manager/reports")
@@ -67,6 +70,23 @@ public class ReportController {
         String filename = "勤怠_" + ym + ".xlsx";
         return xlsxResponse(data, filename);
     }
+    
+    /**
+         * POST /api/manager/reports/attendance/sessions?from=2026-07-01&to=2026-07-31
+         * Список смен (session-based), фильтр по сотрудникам — соответствует экрану リスト
+         */
+    @PostMapping("/attendance/sessions")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> attendanceSessions(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestBody(required = false) List<Long> userIds) {
+
+        byte[] data = reportService.generateAttendanceSessions(user.getRestaurantId(), from, to, userIds);
+        String filename = "勤怠リスト_" + from + "_" + to + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
 
     /**
      * POST /api/manager/reports/shift/filtered
@@ -81,6 +101,36 @@ public class ReportController {
 
         byte[] data = reportService.generateShiftFiltered(user.getRestaurantId(), ym, userIds);
         String filename = "シフト_" + ym + "_選択.xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * GET /api/manager/reports/attendance/timesheet?ym=2026-07
+     * Табель фактического времени (по打刻)
+     */
+    @GetMapping("/attendance/timesheet")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> attendanceTimesheet(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam String ym) {
+
+        byte[] data = reportService.generateAttendanceTimesheet(user.getRestaurantId(), ym);
+        String filename = "勤怠集計_" + ym + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * GET /api/manager/reports/attendance/list?ym=2026-07
+     * Плоский список всех打刻
+     */
+    @GetMapping("/attendance/list")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> attendanceList(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam String ym) {
+
+        byte[] data = reportService.generateAttendanceList(user.getRestaurantId(), ym);
+        String filename = "打刻一覧_" + ym + ".xlsx";
         return xlsxResponse(data, filename);
     }
 

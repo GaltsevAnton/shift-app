@@ -286,3 +286,124 @@
   .period { font-size: 12px; }
   .openBtn { padding: 8px 12px; font-size: 12px; }
 }
+
+
+/* ─── Month view additions ──────────────────────────────── */
+.titleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.locked {
+  font-size: 12px;
+  color: #f43f5e;
+  font-weight: 600;
+}
+
+.infoHint {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  margin-bottom: 14px;
+}
+
+.infoWarning {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #c2410c;
+  margin-top: 14px;
+}
+
+/* ─── Day row colors ─────────────────────────────────────── */
+.saturday { background: #f0f7ff; }
+.sunday   { background: #fff5f5; }
+
+.tdDate { font-size: 13px; font-weight: 600; color: #1e293b; }
+.wkndDate { font-weight: 700; }
+.saturday .wkndDate { color: #2563eb; }
+.sunday   .wkndDate { color: #dc2626; }
+
+/* ─── Time row ───────────────────────────────────────────── */
+.timeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.timeSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #f8fafc;
+  cursor: pointer;
+  outline: none;
+  min-width: 72px;
+}
+.timeSelect:disabled { opacity: 0.45; cursor: not-allowed; }
+.timeSelect:focus { border-color: #6366f1; background: #fff; }
+
+.duration { font-size: 11px; margin-left: 4px; }
+.durationOk { color: #16a34a; font-weight: 600; }
+.warn { color: #dc2626; font-weight: 600; font-size: 11px; }
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+.checkbox:disabled { cursor: not-allowed; }
+
+/* ─── Bottom bar ─────────────────────────────────────────── */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.saveBtn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  padding: 11px 32px;
+  border-radius: 50px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.saveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.saveBtn:hover:not(:disabled) { opacity: 0.9; }
+
+.toast {
+  font-size: 13px;
+  font-weight: 700;
+  color: #16a34a;
+}
+
+/* ─── Mobile additions ───────────────────────────────────── */
+@media (max-width: 480px) {
+  .timeSelect { min-width: 60px; font-size: 12px; padding: 5px 6px; }
+  .tdDate { font-size: 12px; }
+}

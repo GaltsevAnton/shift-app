@@ -1,7 +1,119 @@
 # HannoSHIFT — CHANGELOG
 
 Лог изменений по дням разработки.
+# HannoSHIFT — CHANGELOG
 
+ログ変更履歴。
+
+---
+
+## 2026-07-14
+
+### スタッフ画面 — 週別から月別へ完全移行
+
+#### Backend — 新パッケージ `com.shiftapp.months`
+- **`V13__add_month_status.sql`** — `month_status`テーブル作成
+  `(id, restaurant_id, year_month, status, updated_by, updated_at, UNIQUE(restaurant_id, year_month))`
+- **`V14__add_month_status_half.sql`** — `half`カラム追加、UNIQUE制約を`(restaurant_id, year_month, half)`に変更
+- **`MonthStatus.java`** — entity: restaurant, yearMonth, status, half, updatedBy, updatedAt
+- **`MonthStatusRepository.java`** — `findByRestaurant_IdAndYearMonthAndHalf(Long, String, int)`
+- **`MonthStatusController.java`** — `GET/POST /api/manager/month-status?month=&status=&half=`
+  - GET: `{status1, status2}` (half=1と2を別々に返す)
+  - POST: 指定した半月のステータスを変更
+- **`StaffMonthController.java`** — `GET /api/staff/month?month=` / `POST /api/staff/month/save`
+  - GET: `{status1, status2, days[]}` — 月全体のデータを返す
+  - POST: ステータスがRECEIVINGの半月のみ保存（ブロック済みはスキップ）
+- **`SaveMonthRequest.java`** — `{month, days: [{date, off, startTime, endTime}]}`
+
+#### Frontend — `api.js`
+```js
+staffMonth(month), staffMonthSave(month, days),
+managerMonthStatus(month), managerMonthStatusSet(month, status, half)
+```
+
+#### Frontend — `StaffMonth.jsx` (完全リライト、`StaffWeek.module.css`使用)
+- 月選択セレクト（5ヶ月分）
+- 前半（1〜15日）と後半（16〜末日）の2ブロック表示
+- 各ブロック: タイトル + 締切警告 + 一括入力ツールバー + ステータスバッジ + テーブル
+- 一括入力: `[開始▼]〜[終了▼] [全日程] [平日のみ] [全て休み]`
+  - 各ボタンは対応する半月のみ更新
+  - 保存は「更新」ボタンを押すまでローカルstate内
+- ステータスがRECEIVING以外の半月は編集不可
+- Lフラグ対応: マネージャーがLastを設定した場合、終了時間の代わりにLを表示
+- 締切案内:
+  - 1〜15日: 「前月20日までに提出してください」
+  - 16〜末日: 「当月5日までに提出してください」
+
+#### Frontend — `ManagerTablePage.jsx`
+- TopBarに月別ステータスを2つ追加（月モード時のみ表示）
+  - `1〜15日: [受付中▼]` と `16〜末日: [受付中▼]`
+- 週ステータスのセレクトは引き続き表示（週/期間モード対応のため残留）
+- `monthStatus1`, `monthStatus2` state追加
+- `changeMonthStatus(newStatus, half)` — half指定でAPIコール
+
+---
+
+### 休憩ルール機能追加
+
+#### Backend
+- **`V11__add_break_rules.sql`** — `break_rules(id, restaurant_id, name, threshold_minutes, break_minutes)`
+- **`V12__add_break_override.sql`** — `shift_slots`に`break_override_minutes INT NULL`追加
+- **`BreakRule.java`**, **`BreakRuleRepository.java`**, **`BreakRuleController.java`**
+  - `GET/POST/PUT/DELETE /api/manager/settings/break-rules`
+- **`ShiftSlot.java`** — `breakOverrideMinutes`フィールド追加
+- **`SlotDto.java`** — 6引数コンストラクタ（`breakOverrideMinutes`追加）
+- **`ManagerStaffWeekSaveRequest.SlotInput`** — `breakOverrideMinutes`フィールド追加（getter/setter）
+- **`WeekService.managerSaveStaffWeek()`** — `slot.setBreakOverrideMinutes(si.getBreakOverrideMinutes())`
+- **`ManagerMonthController.buildDayForManager()`** / **`ManagerStaffWeekController`** — `new SlotDto(..., s.getBreakOverrideMinutes())`
+
+#### Frontend — `SettingsPage.jsx`
+- 新タブ「休憩ルール」追加
+- テーブル形式でルール一覧（名前 / しきい値（分以上） / 休憩時間（分））
+- 追加・編集・削除対応
+
+#### Frontend — `CellPopover`（`ManagerTablePage.jsx`内）
+- 終了時間の下に3つのヒントを表示:
+  - 🕐 合計: X時間Y分
+  - ⏱ 休憩: Xmin（クリックでドロップダウン、手動選択可）
+  - ⏰ 実働: X時間Y分
+- 休憩ドロップダウン: `なし（0分）` + 登録済みルール一覧
+- 手動選択は`breakOverride`としてDBに保存・復元
+- `getAutoBreakMinutes()`, `getBreakHint()`, `getWorkHint()`, `getTotalHint()` — CellPopover内の関数
+
+#### Frontend — `ManagerTablePage.jsx`
+- `breakRules` stateを追加、`load()`でAPIから取得
+- `calcWorkMinutes(userId)` — 日ごとに全スロットを合計し、最適な休憩ルールを適用
+  - `breakOverrideMinutes`がある場合はそちらを優先
+- `勤務時間`列追加（公休数の隣）: 時間と分を別行で表示
+- 公休数・勤務時間列に背景色`#f8faff`、ヘッダーに`#f0f4ff`
+
+---
+
+### その他の修正（07/14）
+- **勤怠管理画面** — 時刻表示に秒を復活（`.slice(0,5)`を削除）
+- **シフト管理画面** — 出退勤インジケーターの色付きドットを削除
+- **期間モード** — 最大日数を35日→50日に拡張（フロント・バック両方）
+
+---
+
+## 2026-07-13
+
+### 勤怠管理 — 状態フィルター追加
+- 5種類の色でフィルタリング: 🟢時間通り / 🔴遅刻 / 🟡早退 / 🔵シフト予定あり / ⚪シフトなし出勤あり
+- `getRowColorStatus(userId, date)` — シフトと打刻を比較して自動判定
+- `CheckDropdown`で状態フィルターUIを追加
+
+### シフト管理 — 氏名検索
+- SortBarに「氏名で検索...」テキスト入力を追加
+
+### 勤怠管理画面のフォント拡大
+- 打刻時刻のfontSizeを10→12に変更
+
+---
+
+## 2026-06-22 〜 2026-07-12 (以前のエントリーは省略)
+
+※ 詳細は旧CHANGELOGを参照
 
 ---
  

@@ -5,12 +5,17 @@ import com.shiftapp.attendance.dto.AttendanceRecordResponse;
 import com.shiftapp.common.CurrentUser;
 import com.shiftapp.kiosk.TimeRecord;
 import com.shiftapp.kiosk.TimeRecordRepository;
+import com.shiftapp.kiosk.TimeRecordType;
 import com.shiftapp.users.UserRepository;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -27,6 +32,7 @@ public class AttendanceController {
     }
 
     // Все записи ресторана за диапазон дат
+    @Transactional(readOnly = true)
     @GetMapping
     public List<AttendanceRecordResponse> getRecords(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -40,7 +46,7 @@ public class AttendanceController {
             .toList();
     }
 
-    // Ручная правка записи менеджером
+    @Transactional
     @PutMapping("/{id}")
     public AttendanceRecordResponse editRecord(
         @PathVariable Long id,
@@ -50,18 +56,55 @@ public class AttendanceController {
         TimeRecord record = timeRecordRepository.findById(id)
             .orElseThrow(() -> new IllegalArgumentException("Record not found"));
 
-        // Проверяем что запись принадлежит тому же ресторану
         if (!record.getRestaurant().getId().equals(me.getRestaurantId()))
             throw new IllegalArgumentException("Access denied");
 
-        if (req.getRecordedAt() != null) record.setRecordedAt(req.getRecordedAt());
-        if (req.getNote() != null)       record.setNote(req.getNote());
+        if (req.getRecordedAt() != null) {
+            if (record.getRecordType() == TimeRecordType.CLOCK_IN) {
+                // CLOCK_IN определяет ячейку всей смены — двигаем всю сессию целиком
+                List<TimeRecord> session = findSessionRecords(record);
+                LocalDate newWorkDate = req.getRecordedAt()
+                    .atZone(ZoneId.of("Asia/Tokyo"))
+                    .toLocalDate();
+                for (TimeRecord r : session) {
+                    r.setWorkDate(newWorkDate);
+                }
+            }
+            // Для BREAK_*/CLOCK_OUT workDate не трогаем —
+            // ячейка всегда остаётся днём открытия смены (CLOCK_IN)
+            record.setRecordedAt(req.getRecordedAt());
+        }
+        if (req.getNote() != null) record.setNote(req.getNote());
 
         var editor = userRepository.findById(me.getUserId()).orElseThrow();
         record.setEditedBy(editor);
         record.setEditedAt(Instant.now());
 
         return toResponse(timeRecordRepository.save(record));
+    }
+
+    // Собираем все записи одной смены: от данного CLOCK_IN до ближайшего
+    // следующего CLOCK_OUT включительно, либо до следующего CLOCK_IN (не включая его —
+    // значит уже началась другая смена, её не трогаем)
+    private List<TimeRecord> findSessionRecords(TimeRecord clockIn) {
+        List<TimeRecord> all = timeRecordRepository
+            .findByUser_IdOrderByRecordedAtAsc(clockIn.getUser().getId());
+
+        List<TimeRecord> session = new ArrayList<>();
+        boolean started = false;
+        for (TimeRecord r : all) {
+            if (!started) {
+                if (r.getId().equals(clockIn.getId())) started = true;
+                else continue;
+            }
+            if (started && !r.getId().equals(clockIn.getId())
+                    && r.getRecordType() == TimeRecordType.CLOCK_IN) {
+                break;
+            }
+            session.add(r);
+            if (r.getRecordType() == TimeRecordType.CLOCK_OUT) break;
+        }
+        return session;
     }
 
     private AttendanceRecordResponse toResponse(TimeRecord r) {

@@ -230,7 +230,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify(userIds),
     }),
+  
+  reportAttendanceTimesheet: (ym) =>
+    fetchBlob(`/api/manager/reports/attendance/timesheet?ym=${ym}`),
 
+  reportAttendanceList: (ym) =>
+    fetchBlob(`/api/manager/reports/attendance/list?ym=${ym}`),
+
+  reportAttendanceSessions: (from, to, userIds) =>
+    fetchBlob(`/api/manager/reports/attendance/sessions?from=${from}&to=${to}`, {
+      method: "POST",
+      body: JSON.stringify(userIds || []),
+    }),
+    
   // ===== ATTENDANCE =====
   attendanceRecords: (from, to) =>
     request(`/api/manager/attendance?from=${from}&to=${to}`),
@@ -250,4 +262,18 @@ export const api = {
 
   settingsBreakRulesDelete: (id) =>
     request(`/api/manager/settings/break-rules/${id}`, { method: "DELETE" }),
+
+  // ===== STAFF MONTH =====
+  staffMonth: (month) =>
+    request(`/api/staff/month?month=${month}`),
+
+  staffMonthSave: (month, days) =>
+    request("/api/staff/month/save", { method: "POST", body: { month, days } }),
+
+  // ===== MONTH STATUS =====
+  managerMonthStatus: (month) =>
+    request(`/api/manager/month-status?month=${month}`),
+  
+  managerMonthStatusSet: (month, status, half) =>
+    request(`/api/manager/month-status?month=${month}&status=${status}&half=${half}`, { method: "POST" }),
 };

@@ -1049,6 +1049,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMap, setActiveMap]       = useState({});
   const [breakRules, setBreakRules] = useState([]);
+  const [monthStatus1, setMonthStatus1] = useState("RECEIVING");
+  const [monthStatus2, setMonthStatus2] = useState("RECEIVING");
+  const [monthStatusLoading, setMonthStatusLoading] = useState(false);
 
   /* ── persist view mode state ── */
   useEffect(() => { localStorage.setItem("managerViewMode",    viewMode);     }, [viewMode]);
@@ -1118,13 +1121,14 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         attTo   = `${ymVal}-${String(total).padStart(2,"0")}`;
       }
 
-      const [weeks, employees, wps, depts, attRecs, breakRules] = await Promise.all([
+      const [weeks, employees, wps, depts, attRecs, breakRules, monthStatusRes] = await Promise.all([
         weeksPromise,
         api.managerEmployeesList(),
         api.settingsWorkplacesList(),
         api.settingsDepartmentsList(),
         api.attendanceRecords(attFrom, attTo).catch(() => []),
         api.settingsBreakRulesList().catch(() => []),
+        mode === "month" ? api.managerMonthStatus(ymVal).catch(() => ({ status: "RECEIVING" })) : Promise.resolve({ status: "RECEIVING" }),
       ]);
 
       // Строим attendanceMap: "userId_date" → "finished"|"working"|"break"
@@ -1143,6 +1147,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       setAttendanceMap(resolvedAttMap);
 
       setBreakRules(Array.isArray(breakRules) ? breakRules : []);
+      setMonthStatus1(monthStatusRes?.status1 || "RECEIVING");
+      setMonthStatus2(monthStatusRes?.status2 || "RECEIVING");
 
       const posMap = {}, deptsMap = {};
       employees.forEach(e => {
@@ -1425,6 +1431,18 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     finally { setStatusLoading(p => ({ ...p, [weekStart]: false })); }
   }
 
+  async function changeMonthStatus(newStatus, half) {
+    setMonthStatusLoading(true);
+    try {
+      const res = await api.managerMonthStatusSet(ym, newStatus, half);
+      if (half === 1) setMonthStatus1(res.status);
+      else setMonthStatus2(res.status);
+    } catch (e) {
+      setAlertMsg("ステータスの変更に失敗しました: " + e.message);
+    } finally {
+      setMonthStatusLoading(false);
+    }
+  }
   async function saveCell(userId, date, patch) {
     const week = findWeekForDate(weeksRaw, date);
     if (!week) return;
@@ -1844,6 +1862,34 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             )}
           </div>
 
+          {viewMode === "month" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>1〜15日:</span>
+              <select
+                className={`${styles.statusSelect} ${styles[`s_${(STATUS_META[monthStatus1] || STATUS_META.RECEIVING).cls}`]}`}
+                value={monthStatus1}
+                disabled={monthStatusLoading}
+                onChange={e => changeMonthStatus(e.target.value, 1)}
+              >
+                <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
+                <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
+                <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
+              </select>
+              <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>16〜末日:</span>
+              <select
+                className={`${styles.statusSelect} ${styles[`s_${(STATUS_META[monthStatus2] || STATUS_META.RECEIVING).cls}`]}`}
+                value={monthStatus2}
+                disabled={monthStatusLoading}
+                onChange={e => changeMonthStatus(e.target.value, 2)}
+              >
+                <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
+                <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
+                <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
+              </select>
+              {monthStatusLoading && <span style={{ fontSize: 12, color: "#94a3b8" }}>…</span>}
+            </div>
+          )}
+
           <span className={styles.topHint}>📅 シフト管理</span>
         </div>
 
@@ -1899,31 +1945,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     const isLoad  = !!statusLoading[week.weekStart];
                     const narrow  = count <= 4;
                     return (
-                      <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
-                        <div className={styles.thWeekInner}>
-                          <span className={styles.thWeekRange}>
-                            {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
-                          </span>
-                          <select
-                            className={`${styles.statusSelect} ${styles[`s_${sm.cls}`]}`}
-                            value={wkData.status}
-                            disabled={isLoad}
-                            onChange={e => changeStatus(week.weekStart, e.target.value)}
-                            style={narrow ? {
-                              color: "transparent",
-                              padding: "3px 20px 3px 2px",
-                              minWidth: 0,
-                              width: "28px",
-                              flexShrink: 0,
-                            } : {}}
-                          >
-                            <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
-                            <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
-                            <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
-                          </select>
-                          {isLoad && <span className={styles.statusSpinner}>…</span>}
-                        </div>
-                      </th>
+                        <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
+                          <div className={styles.thWeekInner}>
+                            <span className={styles.thWeekRange}>
+                              {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
+                            </span>
+                          </div>
+                        </th>
                     );
                   })}
 

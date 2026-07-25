@@ -79,10 +79,199 @@ function periodDays(from, to) {
   if (!from || !to) return 0;
   return Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
 }
+function isNextDayJst(recordedAt, cellDate) {
+  if (!recordedAt) return false;
+  const d = new Date(recordedAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  return d !== cellDate;
+}
+
+// Группируем плоские пробивки в сессии (CLOCK_IN → BREAK_* → CLOCK_OUT) по пользователю и дню
+function buildSessionsFromRecords(records) {
+  const byUser = {};
+  records.forEach(r => {
+    if (!byUser[r.userId]) byUser[r.userId] = [];
+    byUser[r.userId].push(r);
+  });
+  const result = {};
+  Object.entries(byUser).forEach(([uid, recs]) => {
+    const sorted = [...recs].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+    let cur = null;
+    const sessions = [];
+    for (const r of sorted) {
+      if (r.recordType === "CLOCK_IN") {
+        if (cur) sessions.push(cur);
+        cur = { workDate: r.workDate, clockIn: r.recordedAt, clockOut: null, breakStart: null, breakEnd: null };
+      } else if (cur) {
+        if (r.recordType === "BREAK_START") cur.breakStart = r.recordedAt;
+        if (r.recordType === "BREAK_END")   cur.breakEnd   = r.recordedAt;
+        if (r.recordType === "CLOCK_OUT") { cur.clockOut = r.recordedAt; sessions.push(cur); cur = null; }
+      }
+    }
+    if (cur) sessions.push(cur);
+    result[uid] = {};
+    sessions.forEach(s => {
+      if (!result[uid][s.workDate]) result[uid][s.workDate] = [];
+      result[uid][s.workDate].push(s);
+    });
+  });
+  return result;
+}
+
+const HALF_HOUR_MS = 30 * 60 * 1000;
+
+// 出勤/休憩開始: строго вверх к получасу (даже если ровно на отметке — сдвигаем на следующую)
+function roundUpHalfHour(dateLike) {
+  const ms = new Date(dateLike).getTime();
+  const bucket = Math.floor(ms / HALF_HOUR_MS) + 1;
+  return new Date(bucket * HALF_HOUR_MS);
+}
+
+// 退勤/休憩終了: строго вниз к получасу (даже если ровно на отметке — сдвигаем на предыдущую)
+function roundDownHalfHour(dateLike) {
+  const ms = new Date(dateLike).getTime();
+  const bucket = Math.floor((ms - 1) / HALF_HOUR_MS);
+  return new Date(bucket * HALF_HOUR_MS);
+}
+
+// Округление ДЛИТЕЛЬНОСТИ (не меток) к ближайшим 30 мин — используется для перерыва
+function roundNearestHalfHourMinutes(mins) {
+  return Math.round(mins / 30) * 30;
+}
+
+function toMinutesOfDay(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
+}
+
+// Плановое время (HH:MM) + дата (YYYY-MM-DD) → реальный Date в JST
+function planTimeToDate(workDate, hhmm) {
+  if (!workDate || !hhmm) return null;
+  const t = hhmm.slice(0, 5);
+  return new Date(`${workDate}T${t}:00+09:00`);
+}
+
+// Плановая длительность перерыва слота: ручной override, иначе авто по 休憩ルール от ПЛАНОВОЙ длительности
+function plannedSlotBreakMinutes(slot, breakRules = []) {
+  if (!slot) return 0;
+  if (slot.breakOverrideMinutes !== null && slot.breakOverrideMinutes !== undefined) {
+    return slot.breakOverrideMinutes;
+  }
+  const start = toMinutesOfDay(slot.startTime);
+  let end = toMinutesOfDay(slot.endTime);
+  if (start === null || end === null) return 0;
+  if (end <= start) end += 24 * 60; // смена через полночь
+  const duration = end - start;
+  const rule = [...breakRules]
+    .filter(r => duration > r.thresholdMinutes)
+    .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+  return rule ? rule.breakMinutes : 0;
+}
+
+// Авторасчёт перерыва по ФАКТИЧЕСКОЙ длительности (старая логика, для дней без плана)
+function autoBreakMinutesByGross(grossMin, breakRules = []) {
+  const rule = [...breakRules]
+    .filter(r => grossMin > r.thresholdMinutes)
+    .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+  return rule ? rule.breakMinutes : 0;
+}
+
+// Сопоставление фактических смен с плановыми слотами: по порядку (сортировка по времени начала)
+function matchSessionsToSlots(sessions, slots) {
+  const sortedSessions = [...sessions].sort((a, b) => new Date(a.clockIn) - new Date(b.clockIn));
+  const sortedSlots = [...(slots || [])]
+    .filter(sl => sl.startTime)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  return sortedSessions.map((session, i) => ({ session, slot: sortedSlots[i] || null }));
+}
+
+// Основной расчёт официального 出勤/退勤/休憩/実働 для одной смены
+function computeSessionOfficial(session, slot, workDate, breakRules = []) {
+  const hasPlan = !!slot;
+  const clockInDate  = session.clockIn  ? new Date(session.clockIn)  : null;
+  const clockOutDate = session.clockOut ? new Date(session.clockOut) : null;
+
+  let officialIn = clockInDate, lateIn = false;
+  let officialOut = clockOutDate, earlyOut = false;
+  let planStart = null, planEnd = null;
+
+  if (hasPlan) {
+    planStart = planTimeToDate(workDate, slot.startTime);
+    planEnd   = planTimeToDate(workDate, slot.endTime);
+    if (planStart && planEnd && (slot.nextDay || planEnd <= planStart)) {
+      planEnd = new Date(planEnd.getTime() + 24 * 60 * 60 * 1000);
+    }
+  }
+
+  if (clockInDate) {
+    if (hasPlan && planStart) {
+      if (clockInDate < planStart) {
+        officialIn = planStart; // строго раньше плана — вовремя
+      } else {
+        officialIn = roundUpHalfHour(clockInDate); // >= план — опоздание
+        lateIn = true;
+      }
+    } else {
+      officialIn = roundUpHalfHour(clockInDate); // нет плана — просто округляем
+    }
+  }
+
+  if (clockOutDate) {
+    if (hasPlan && planEnd) {
+      if (clockOutDate > planEnd) {
+        officialOut = planEnd; // строго позже плана — вовремя
+      } else {
+        officialOut = roundDownHalfHour(clockOutDate); // <= план — ушёл рано
+        earlyOut = true;
+      }
+    } else {
+      officialOut = roundDownHalfHour(clockOutDate);
+    }
+  }
+
+  // 休憩
+  let officialBreakMinutes = 0;
+  if (hasPlan) {
+    const planBreakMin = plannedSlotBreakMinutes(slot, breakRules);
+    if (session.breakStart && session.breakEnd) {
+      const rawMin = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
+      const roundedMin = roundNearestHalfHourMinutes(Math.max(rawMin, 0));
+      officialBreakMinutes = roundedMin <= planBreakMin ? planBreakMin : roundedMin;
+    } else {
+      officialBreakMinutes = planBreakMin; // не пробивал — берём план как есть
+    }
+  } else {
+    if (session.breakStart && session.breakEnd) {
+      const rawMin = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
+      officialBreakMinutes = rawMin > 0 ? rawMin : 0; // старая логика: точный факт, без округления
+    } else if (officialIn && officialOut) {
+      const grossMin = Math.round((officialOut - officialIn) / 60000);
+      officialBreakMinutes = autoBreakMinutesByGross(grossMin, breakRules);
+    }
+  }
+
+  let workMin = null;
+  if (officialIn && officialOut) {
+    const grossMin = Math.round((officialOut - officialIn) / 60000);
+    workMin = Math.max(grossMin - officialBreakMinutes, 0);
+  }
+
+  const inColor  = !clockInDate  ? null : (!hasPlan ? "#f1f5f9" : (lateIn   ? "#fee2e2" : "#dcfce7"));
+  const outColor = !clockOutDate ? null : (!hasPlan ? "#f1f5f9" : (earlyOut ? "#fef9c3" : "#dcfce7"));
+
+  return { officialIn, officialOut, officialBreakMinutes, workMin, hasPlan, lateIn, earlyOut, inColor, outColor };
+}
+
+function fmtHM(mins) {
+  if (mins === null || mins === undefined) return "0時間0分";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `${h}時間${m}分`;
+}
+
 function fmtTime(instant) {
   if (!instant) return "--:--";
   return new Date(instant).toLocaleTimeString("ja-JP", {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Tokyo",
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
   });
 }
 function saveFilterSet(key, set) {
@@ -96,6 +285,14 @@ function loadFilterSet(key) {
 }
 function getName() {
   return localStorage.getItem("staffName") || "";
+}
+function pagerBtnStyle(disabled) {
+  return {
+    padding: "5px 10px", fontSize: 13, border: "1px solid #ccc", borderRadius: 6,
+    background: disabled ? "#f1f5f9" : "#fff",
+    color: disabled ? "#cbd5e1" : "#334155",
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
 }
 function fmtWeekLabel(ws, we) {
   const wsD = new Date(ws), weD = new Date(we);
@@ -164,7 +361,7 @@ function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
 }
 
 /* ─── CheckDropdown ─────────────────────────────────────── */
-function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems }) {
+function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight }) {
   const [open, setOpen] = useState(false);
   const ref = useRef();
 
@@ -194,7 +391,8 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
         <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className={styles.wpDropdownPanel}>
+        <div className={styles.wpDropdownPanel}
+          style={panelMaxHeight ? { maxHeight: panelMaxHeight, overflowY: "auto" } : undefined}>
           <label className={styles.wpDropdownAll}>
             <input type="checkbox" className={styles.colToggleCheck}
               checked={allOn}
@@ -277,6 +475,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [showInactive, setShowInactive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftMap, setShiftMap] = useState({});
+  const [breakRules, setBreakRules] = useState([]);
 
   /* ── popup ── */
   const [detailPopup, setDetailPopup] = useState(null);
@@ -284,8 +483,33 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [editLoading, setEditLoading] = useState(false);
   const [editErr,     setEditErr]     = useState(null);
   const [photoPopup, setPhotoPopup] = useState(null);
+  const [reportMenuOpen, setReportMenuOpen] = useState(false);
+  const [reportLoading, setReportLoading]   = useState(false);
+  const [alertMsg, setAlertMsg]             = useState(null);
+  const reportMenuRef = useRef();
+  const [pageMode, setPageMode]     = useState(() => localStorage.getItem("attPageMode") || "calendar");
+  const [listMode, setListMode]     = useState(() => localStorage.getItem("attListMode") || "month");
+  const [listYm, setListYm]         = useState(() => localStorage.getItem("attListYm") || currentYM());
+  const [listWeek, setListWeek]     = useState(() => localStorage.getItem("attListWeek") || currentMondayLocal());
+  const [listPeriodFrom, setListPeriodFrom] = useState(() => localStorage.getItem("attListPeriodFrom") || "");
+  const [listPeriodTo, setListPeriodTo]     = useState(() => localStorage.getItem("attListPeriodTo") || "");
+  const [listSelectedStaff, setListSelectedStaff] = useState(() => new Set());
+  const [listRecords, setListRecords] = useState([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listErr, setListErr]         = useState(null);
+  const [listSearched, setListSearched] = useState(false);
+  const [listSortConfig, setListSortConfig] = useState({ field: "date", dir: "desc" });
+  const [listPageSize, setListPageSize] = useState(20);
+  const [listPage, setListPage]         = useState(1);
+  const [listShiftMap, setListShiftMap] = useState({});
 
   /* ── persist ── */
+  useEffect(() => { localStorage.setItem("attPageMode", pageMode); }, [pageMode]);
+  useEffect(() => { localStorage.setItem("attListMode", listMode); }, [listMode]);
+  useEffect(() => { localStorage.setItem("attListYm",   listYm);   }, [listYm]);
+  useEffect(() => { localStorage.setItem("attListWeek", listWeek); }, [listWeek]);
+  useEffect(() => { if (listPeriodFrom) localStorage.setItem("attListPeriodFrom", listPeriodFrom); }, [listPeriodFrom]);
+  useEffect(() => { if (listPeriodTo)   localStorage.setItem("attListPeriodTo",   listPeriodTo);   }, [listPeriodTo]);
   useEffect(() => { localStorage.setItem("attViewMode",      viewMode);     }, [viewMode]);
   useEffect(() => { localStorage.setItem("attSelectedMonth", ym);           }, [ym]);
   useEffect(() => { localStorage.setItem("attSelectedWeek",  selectedWeek); }, [selectedWeek]);
@@ -328,11 +552,12 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       const from = displayDates[0];
       const to   = displayDates[displayDates.length - 1];
 
-      const [recs, emps, depts, shiftData] = await Promise.all([
+      const [recs, emps, depts, shiftData, brRules] = await Promise.all([
         api.attendanceRecords(from, to),
         api.managerEmployeesList(),
         api.settingsDepartmentsList(),
         api.managerRange(from, to),
+        api.settingsBreakRulesList().catch(() => []),
       ]);
 
       const posMap = {}, deptsMap = {};
@@ -357,6 +582,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       setVisibleDepartments(savedDept && savedDept.size > 0 ? savedDept : allDeptSet);
 
       setRecords(Array.isArray(recs) ? recs : []);
+      setBreakRules(Array.isArray(brRules) ? brRules : []);
       const sm = {};
       for (const week of (shiftData || [])) {
         for (const row of (week.rows || [])) {
@@ -382,6 +608,176 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   }, [displayDates]);
 
   useEffect(() => { load(false); }, [displayDates]);
+
+  /* ── リスト表示: デフォルトで全スタッフ選択 ── */
+  useEffect(() => {
+    if (staff.length > 0 && listSelectedStaff.size === 0 && !listSearched) {
+      setListSelectedStaff(new Set(staff.map(s => s.id)));
+    }
+  }, [staff]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleListStaffToggle(id) {
+    setListSelectedStaff(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function handleListStaffToggleAll(allKeys, allOn) {
+    setListSelectedStaff(allOn ? new Set(allKeys) : new Set());
+  }
+
+  /* ── リスト表示の期間（月/週/期間） ── */
+  const listWeekOptions = useMemo(() => weeksInMonth(listYm), [listYm]);
+  const listPDays  = periodDays(listPeriodFrom, listPeriodTo);
+  const listPOk    = listPDays >= 1 && listPDays <= 90;
+  const listPWarn  = listPeriodFrom && listPeriodTo && !listPOk
+    ? (listPDays < 1 ? "期間を正しく指定してください" : "90日以内を指定してください")
+    : null;
+
+  const listRange = useMemo(() => {
+    if (listMode === "week") {
+      return { from: listWeek, to: addDays(listWeek, 6) };
+    }
+    if (listMode === "period") {
+      if (!listPeriodFrom || !listPeriodTo || !listPOk) return { from: "", to: "" };
+      return { from: listPeriodFrom, to: listPeriodTo };
+    }
+    const total = daysInMonth(listYm);
+    return { from: dateStr(listYm, 1), to: dateStr(listYm, total) };
+  }, [listMode, listYm, listWeek, listPeriodFrom, listPeriodTo, listPOk]);
+
+  async function loadListData() {
+    if (!listRange.from || !listRange.to) return;
+    setListLoading(true); setListErr(null); setListSearched(true);
+    try {
+      const [recs, shiftData] = await Promise.all([
+        api.attendanceRecords(listRange.from, listRange.to),
+        api.managerRange(listRange.from, listRange.to).catch(() => []),
+      ]);
+      setListRecords(Array.isArray(recs) ? recs : []);
+
+      const sm = {};
+      for (const week of (shiftData || [])) {
+        for (const row of (week.rows || [])) {
+          for (const day of (row.days || [])) {
+            if (!day.off && day.slots && day.slots.length > 0) {
+              const starts = day.slots.map(s => s.startTime).filter(Boolean).sort();
+              const ends   = day.slots.map(s => s.endTime).filter(Boolean).sort();
+              sm[`${row.userId}_${day.date}`] = {
+                startTime: starts[0],
+                endTime:   ends[ends.length - 1],
+              };
+            }
+          }
+        }
+      }
+      setListShiftMap(sm);
+    } catch (e) {
+      setListErr(e.message);
+    } finally {
+      setListLoading(false);
+    }
+  }
+
+  // Автозагрузка при выборе месяца/недели (диапазон всегда валиден);
+  // для 期間 — только по кнопке「表示」, т.к. диапазон может быть невалиден
+  useEffect(() => {
+    if (pageMode !== "list") return;
+    if (listMode === "period") return;
+    loadListData();
+  }, [pageMode, listMode, listYm, listWeek]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function listSortFn(a, b) {
+    let va, vb;
+    if (listSortConfig.field === "date") { va = a.workDate; vb = b.workDate; }
+    else                                 { va = a.userName; vb = b.userName; }
+    const cmp = va.localeCompare(vb, "ja");
+    return listSortConfig.dir === "asc" ? cmp : -cmp;
+  }
+
+  const listSessions = useMemo(() => {
+    const byUser = {};
+    listRecords.forEach(r => {
+      if (!byUser[r.userId]) byUser[r.userId] = [];
+      byUser[r.userId].push(r);
+    });
+    const out = [];
+    Object.entries(byUser).forEach(([uid, recs]) => {
+      const sorted = [...recs].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+      let cur = null;
+      for (const r of sorted) {
+        if (r.recordType === "CLOCK_IN") {
+          if (cur) out.push(cur);
+          cur = { userId: Number(uid), userName: r.userName, workDate: r.workDate, clockIn: r.recordedAt, clockOut: null, breakStart: null, breakEnd: null };
+        } else if (cur) {
+          if (r.recordType === "BREAK_START") cur.breakStart = r.recordedAt;
+          if (r.recordType === "BREAK_END")   cur.breakEnd   = r.recordedAt;
+          if (r.recordType === "CLOCK_OUT") { cur.clockOut = r.recordedAt; out.push(cur); cur = null; }
+        }
+      }
+      if (cur) out.push(cur);
+    });
+    return out
+      .filter(s => listSelectedStaff.size === 0 || listSelectedStaff.has(s.userId))
+      .map(s => ({ ...s, shift: listShiftMap[`${s.userId}_${s.workDate}`] || null }))
+      .sort(listSortFn);
+  }, [listRecords, listSelectedStaff, listSortConfig, listShiftMap]);
+
+  useEffect(() => { setListPage(1); }, [listSessions.length, listPageSize, listSortConfig, listSelectedStaff]);
+
+  const listTotalPages = Math.max(1, Math.ceil(listSessions.length / listPageSize));
+  const listPageClamped = Math.min(listPage, listTotalPages);
+  const listPagedSessions = useMemo(() => {
+    const start = (listPageClamped - 1) * listPageSize;
+    return listSessions.slice(start, start + listPageSize);
+  }, [listSessions, listPageClamped, listPageSize]);
+
+  function calcSessionMinutes(s) {
+    if (!s.clockIn || !s.clockOut) return null;
+    let mins = Math.round((new Date(s.clockOut) - new Date(s.clockIn)) / 60000);
+    if (s.breakStart && s.breakEnd) {
+      mins -= Math.round((new Date(s.breakEnd) - new Date(s.breakStart)) / 60000);
+    }
+    return mins > 0 ? mins : 0;
+  }
+  function fmtWorkMinutes(mins) {
+    if (mins === null) return "―";
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return `${h}時間${m}分`;
+  }
+  function fmtTimeOnly(instant) {
+    if (!instant) return "--:--";
+    return new Date(instant).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
+  }
+  function formatShiftTime(t) {
+    if (!t) return "--:--";
+    return typeof t === "string" ? t.slice(0, 5) : t;
+  }
+  function fmtDateWithWd(dateStr) {
+    if (!dateStr) return "";
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const wd = WD_JA[new Date(y, m - 1, d).getDay()];
+    return `${dateStr}（${wd}）`;
+  }
+
+  async function handleListExport() {
+    if (!listRange.from || !listRange.to) return;
+    setReportLoading(true);
+    try {
+      await api.reportAttendanceSessions(listRange.from, listRange.to, [...listSelectedStaff]);
+    } catch (e) {
+      setAlertMsg("レポートの生成に失敗しました: " + e.message);
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!reportMenuOpen) return;
+    function onDown(e) {
+      if (reportMenuRef.current && !reportMenuRef.current.contains(e.target))
+        setReportMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [reportMenuOpen]);
 
   /* ── options ── */
   const monthOptions = useMemo(() => {
@@ -438,6 +834,37 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     if (types.includes("CLOCK_IN")) return "working";
     return null;
   }, []);
+
+  const sessionsByUserDate = useMemo(() => buildSessionsFromRecords(records), [records]);
+
+  function getSessionsForDay(userId, date) {
+    return sessionsByUserDate[userId]?.[date] || [];
+  }
+
+  function maxSessionsForStaff(userId) {
+    let max = 1;
+    displayDates.forEach(date => {
+      const cnt = getSessionsForDay(userId, date).length;
+      if (cnt > max) max = cnt;
+    });
+    return max;
+  }
+
+  function calcActualWorkMinutes(userId) {
+    let total = 0;
+    displayDates.forEach(date => {
+      const sessions = getSessionsForDay(userId, date);
+      if (sessions.length === 0) return;
+      const shift = shiftMap[`${userId}_${date}`];
+      const matched = matchSessionsToSlots(sessions, shift?.slots || []);
+      matched.forEach(({ session, slot }) => {
+        if (!session.clockOut) return;
+        const info = computeSessionOfficial(session, slot, date, breakRules);
+        if (info.workMin) total += info.workMin;
+      });
+    });
+    return total;
+  }
 
   function sortFn(a, b) {
     let va = "", vb = "";
@@ -558,59 +985,71 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     return h * 60 + m;
   }
 
-  function getInColor(userId, date) {
-    const dayRecs = getRecordsForDay(userId, date);
-    const shift   = shiftMap[`${userId}_${date}`];
-    const clockIn = dayRecs.find(r => r.recordType === "CLOCK_IN");
+  // function getInColor(userId, date) {
+  //   const dayRecs = getRecordsForDay(userId, date);
+  //   const shift   = shiftMap[`${userId}_${date}`];
+  //   const clockIn = dayRecs.find(r => r.recordType === "CLOCK_IN");
   
-    if (!clockIn) return null;
-    if (!shift)   return "#f1f5f9"; // серый — пришёл без смены
+  //   if (!clockIn) return null;
+  //   if (!shift)   return "#f1f5f9"; // серый — пришёл без смены
   
-    const shiftStart = toMinutes(shift.startTime);
-    const t = new Date(clockIn.recordedAt);
-    const inMin = t.getHours() * 60 + t.getMinutes();
+  //   const shiftStart = toMinutes(shift.startTime);
+  //   const t = new Date(clockIn.recordedAt);
+  //   const inMin = t.getHours() * 60 + t.getMinutes();
   
-    return inMin >= shiftStart ? "#fee2e2" : "#dcfce7"; // красный / зелёный
-  }
+  //   return inMin >= shiftStart ? "#fee2e2" : "#dcfce7"; // красный / зелёный
+  // }
   
-  function getOutColor(userId, date) {
-    const dayRecs  = getRecordsForDay(userId, date);
-    const shift    = shiftMap[`${userId}_${date}`];
-    const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
+  // function getOutColor(userId, date) {
+  //   const dayRecs  = getRecordsForDay(userId, date);
+  //   const shift    = shiftMap[`${userId}_${date}`];
+  //   const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
   
-    if (!clockOut) return null; // нет退勤 — null
-    if (!shift)    return "#f1f5f9"; // серый
+  //   if (!clockOut) return null; // нет退勤 — null
+  //   if (!shift)    return "#f1f5f9"; // серый
   
-    const shiftEnd = toMinutes(shift.endTime);
-    const t = new Date(clockOut.recordedAt);
-    const outMin = t.getHours() * 60 + t.getMinutes();
+  //   const shiftEnd = toMinutes(shift.endTime);
+  //   const t = new Date(clockOut.recordedAt);
+  //   const outMin = t.getHours() * 60 + t.getMinutes();
   
-    return outMin >= shiftEnd ? "#dcfce7" : "#fef9c3"; // зелёный / жёлтый
-  }
+  //   return outMin >= shiftEnd ? "#dcfce7" : "#fef9c3"; // зелёный / жёлтый
+  // }
 
   function getRowColorStatus(userId, date) {
-    const dayRecs = getRecordsForDay(userId, date);
-    const shift   = shiftMap[`${userId}_${date}`];
-    const clockIn  = dayRecs.find(r => r.recordType === "CLOCK_IN");
-    const clockOut = dayRecs.find(r => r.recordType === "CLOCK_OUT");
-  
-    if (shift && !clockIn) return "blue";
-    if (!shift && clockIn) return "gray";
-    if (!clockIn) return null;
-  
-    const shiftStart = toMinutes(shift?.startTime);
-    const shiftEnd   = toMinutes(shift?.endTime);
-  
-    const inMin = new Date(clockIn.recordedAt).getHours() * 60 + new Date(clockIn.recordedAt).getMinutes();
-    if (inMin >= shiftStart) return "red";
-  
-    if (clockOut && shiftEnd) {
-      const outMin = new Date(clockOut.recordedAt).getHours() * 60 + new Date(clockOut.recordedAt).getMinutes();
-      if (outMin < shiftEnd) return "yellow";
-    }
-  
+    const shift    = shiftMap[`${userId}_${date}`];
+    const sessions = getSessionsForDay(userId, date);
+
+    if (shift && sessions.length === 0) return "blue"; // запланировано, но ещё не пришёл
+    if (!shift && sessions.length > 0)  return "gray";  // пришёл без плана
+    if (sessions.length === 0) return null;
+
+    const matched = matchSessionsToSlots(sessions, shift?.slots || []);
+    const first = matched[0];
+    if (!first) return null;
+
+    const info = computeSessionOfficial(first.session, first.slot, date, breakRules);
+    if (!info.hasPlan) return "gray";
+    if (info.lateIn) return "red";
+    if (first.session.clockOut && info.earlyOut) return "yellow";
     return "green";
   }
+
+  async function handleReport(type) {
+    setReportMenuOpen(false);
+    setReportLoading(true);
+    try {
+      if (type === "timesheet") {
+        await api.reportAttendanceTimesheet(ym);
+      } else if (type === "list") {
+        await api.reportAttendanceList(ym);
+      }
+    } catch (e) {
+      setAlertMsg("レポートの生成に失敗しました: " + e.message);
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   /* ── edit ── */
   async function handleEditSave() {
     if (!editRecord) return;
@@ -647,6 +1086,31 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     <ManagerLayout name={getName()} view={view} onNavigate={onNavigate} onLogout={onLogout}>
       <div className={styles.page}>
 
+        {/* ── Mode toggle: カレンダー / リスト ── */}
+        <div style={{ display: "flex", gap: 0, padding: "10px 20px 0" }}>
+          {[
+            { value: "calendar", label: "📅 カレンダー" },
+            { value: "list",     label: "📋 リスト" },
+          ].map((m, idx) => (
+            <button key={m.value} type="button"
+              onClick={() => setPageMode(m.value)}
+              style={{
+                padding: "7px 18px", fontSize: 13, cursor: "pointer",
+                border: "1px solid #ccc",
+                borderRight: idx === 0 ? "none" : "1px solid #ccc",
+                borderRadius: idx === 0 ? "6px 0 0 6px" : "0 6px 6px 0",
+                background: pageMode === m.value ? "#2F5496" : "#fff",
+                color:      pageMode === m.value ? "#fff"    : "#333",
+                fontWeight: pageMode === m.value ? "600" : "normal",
+              }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        {pageMode === "calendar" && (
+        <>
         {/* ── TopBar ── */}
         <div className={styles.topBar}>
           <select className={styles.monthSelect}
@@ -709,6 +1173,36 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               )}
             </div>
           )}
+
+          <div ref={reportMenuRef} style={{ position: "relative" }}>
+            <button type="button" className={styles.exportBtn}
+              onClick={() => setReportMenuOpen(v => !v)}
+              disabled={loading || reportLoading}>
+              {reportLoading ? "..." : "📊 レポート▼"}
+            </button>
+            {reportMenuOpen && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, zIndex: 1000,
+                background: "#fff", border: "1px solid #ccc", borderRadius: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: 220, marginTop: 4,
+              }}>
+                {[
+                  { key: "timesheet", icon: "🕐", label: "勤怠集計表（実績）" },
+                  { key: "list",      icon: "📋", label: "打刻一覧" },
+                ].map(item => (
+                  <button key={item.key} type="button"
+                    onClick={() => handleReport(item.key)}
+                    style={{ display: "block", width: "100%", padding: "10px 16px",
+                      textAlign: "left", border: "none", background: "none",
+                      cursor: "pointer", fontSize: 13 }}
+                    onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+                    onMouseLeave={e => e.target.style.background = "none"}>
+                    {item.icon} {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <span className={styles.topHint}>🕐 勤怠管理</span>
         </div>
@@ -837,6 +1331,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                     <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
                       style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
                     <th className={`${styles.thNameSub} ${styles.thNameSubPos}`} style={{ left: nameLeft() }}></th>
+                    <th className={styles.thNameSub}></th>
 
                     {weekColSpans.map(({ week, count }) => (
                       <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
@@ -847,6 +1342,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                         </div>
                       </th>
                     ))}
+                    <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
                   </tr>
                 <tr>
                   <th className={styles.thNumber}
@@ -858,6 +1354,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                     部署
                   </th>
                   <th className={styles.thName} style={{ left: nameLeft() }}>氏名</th>
+                  <th className={styles.thDay} style={{ minWidth: 50 }}></th>
                   {displayDates.map(date => {
                     const wd = new Date(date).getDay();
                     const d  = parseInt(date.slice(8), 10);
@@ -868,6 +1365,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                       </th>
                     );
                   })}
+                  <th className={styles.thDay} style={{ minWidth: 60, background: "#f0f4ff" }}>
+                    <span className={styles.thNum}>勤務</span>
+                    <span className={styles.thWd}>時間</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -894,69 +1395,362 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                       </td>
                       <td className={styles.tdName} style={{ left: nameLeft() }}>{s.fullName}</td>
 
+                      {(() => {
+                        const sessionRows = maxSessionsForStaff(s.id);
+                        return (
+                          <td className={styles.cell} style={{ padding: 0, verticalAlign: "top" }}>
+                            {Array.from({ length: sessionRows }, (_, si) => (
+                              <div key={si} style={{ borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none" }}>
+                                {["出勤", "退勤", "実働", "休憩"].map(label => (
+                                  <div key={label} style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    display: "flex", alignItems: "center",
+                                    fontSize: 11, color: "#64748b", fontWeight: 600,
+                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
+                                  }}>
+                                    {label}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </td>
+                        );
+                      })()}
+
                       {displayDates.map(date => {
                         const wd          = new Date(date).getDay();
                         const isWeekStart = weekColSpans.some(({ week }) => week.weekStart === date);
                         const dayRecs     = getRecordsForDay(s.id, date);
                         const shift       = shiftMap[`${s.id}_${date}`];
-                        const clockIn     = dayRecs.find(r => r.recordType === "CLOCK_IN");
-                        const clockOut    = dayRecs.find(r => r.recordType === "CLOCK_OUT");
+                        const daySessions = getSessionsForDay(s.id, date);
                         const hasShift    = !!shift;
-                        const hasPunch    = !!clockIn;
+                        const hasPunch    = daySessions.length > 0;
+                        const sessionRows = maxSessionsForStaff(s.id);
+                        const matched     = matchSessionsToSlots(daySessions, shift?.slots || []);
 
                         let cellBg = "#fff";
                         if (hasShift && !hasPunch) cellBg = "#e0f2fe";
                         if (!hasShift && hasPunch) cellBg = "#f1f5f9";
 
-                        const inColor  = getInColor(s.id, date);
-                        const outColor = getOutColor(s.id, date);
-
                         return (
                           <td key={date}
                             className={`${styles.cell} ${isWeekStart ? styles.cellWeekStart : ""}`}
-                            style={{ padding: 0, verticalAlign: "top", background: cellBg, cursor: "pointer" }}
+                            style={{ padding: 0, verticalAlign: "top", background: cellBg, cursor: "pointer", position: "relative" }}
                             onClick={() => {
                               if (dayRecs.length > 0 || hasShift) {
                                 setDetailPopup({ userId: s.id, userName: s.fullName, date, dayRecords: dayRecs });
                               }
                             }}
                           >
-                            <div style={{
-                              minHeight: 28, padding: "3px 4px",
-                              background: inColor || "transparent",
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>
-                              {clockIn ? (
-                                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
-                                  {fmtTime(clockIn.recordedAt)}
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: 10, color: "#cbd5e1" }}>--:--</span>
-                              )}
-                            </div>
+                            {Array.from({ length: sessionRows }, (_, si) => {
+                              const pair       = matched[si];
+                              const session    = pair?.session || null;
+                              const slot       = pair?.slot || null;
+                              const info       = session ? computeSessionOfficial(session, slot, date, breakRules) : null;
+                              const outNextDay = session?.clockOut && isNextDayJst(session.clockOut, date);
 
-                            <div style={{
-                              minHeight: 28, padding: "3px 4px",
-                              background: outColor || "transparent",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>
-                              {clockOut ? (
-                                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: "#1e293b" }}>
-                                  {fmtTime(clockOut.recordedAt)}
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: 10, color: "#cbd5e1" }}>--:--</span>
-                              )}
-                            </div>
+                              return (
+                                <div key={si} style={{
+                                  position: "relative",
+                                  borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none",
+                                }}>
+                                  {outNextDay && (
+                                    <div style={{
+                                      position: "absolute", top: 0, left: 0, right: 0,
+                                      height: 3, background: "#7c3aed", zIndex: 1, pointerEvents: "none",
+                                    }} />
+                                  )}
+
+                                  {/* 出勤 */}
+                                  <div style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    background: info?.inColor || "transparent",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
+                                  }}>
+                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: info?.officialIn ? "#1e293b" : "#cbd5e1" }}>
+                                      {info?.officialIn ? fmtTime(info.officialIn) : "--:--"}
+                                    </span>
+                                  </div>
+
+                                  {/* 退勤 */}
+                                  <div style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    background: info?.outColor || "transparent",
+                                    display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
+                                  }}>
+                                    <span style={{
+                                      fontSize: 12, fontWeight: 600, fontFamily: "monospace",
+                                      color: !info?.officialOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
+                                    }}>
+                                      {info?.officialOut ? fmtTime(info.officialOut) : "--:--"}
+                                    </span>
+                                    {outNextDay && (
+                                      <span style={{
+                                        fontSize: 9, fontWeight: 700, color: "#fff",
+                                        background: "#7c3aed", borderRadius: 3, padding: "1px 3px", lineHeight: 1.4,
+                                      }}>翌日</span>
+                                    )}
+                                  </div>
+
+                                  {/* 実働 */}
+                                  <div style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
+                                  }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
+                                      {!session ? "--:--" : (info?.workMin === null ? "―" : fmtHM(info.workMin))}
+                                    </span>
+                                  </div>
+
+                                  {/* 休憩 */}
+                                  <div style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                  }}>
+                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8" }}>
+                                      {session ? fmtHM(info?.officialBreakMinutes) : "--:--"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </td>
                         );
                       })}
+
+                      <td style={{ textAlign: "center", verticalAlign: "middle", background: "#f8faff", fontWeight: 700, color: "#2F5496" }}>
+                        {fmtHM(calcActualWorkMinutes(s.id))}
+                      </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+        </>
+        )}
+
+        {pageMode === "list" && (
+          <div style={{ padding: "16px 20px" }}>
+
+            {/* ── フィルターバー ── */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ccc", flexShrink: 0 }}>
+                {VIEW_MODES.map((m, idx) => (
+                  <button key={m.value} type="button"
+                    onClick={() => setListMode(m.value)}
+                    style={{
+                      padding: "5px 14px", fontSize: 13, border: "none", cursor: "pointer",
+                      background: listMode === m.value ? "#2F5496" : "#fff",
+                      color:      listMode === m.value ? "#fff"    : "#333",
+                      borderRight: idx < VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
+                      fontWeight:  listMode === m.value ? "600" : "normal",
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {listMode === "month" && (
+                <>
+                  <select className={styles.monthSelect}
+                    value={listYm.split("-")[0]}
+                    onChange={e => setListYm(`${e.target.value}-${listYm.split("-")[1]}`)}>
+                    {yearOptions.map(y => <option key={y} value={y}>{y}年</option>)}
+                  </select>
+                  <select className={styles.monthSelect}
+                    value={listYm.split("-")[1]}
+                    onChange={e => setListYm(`${listYm.split("-")[0]}-${e.target.value}`)}>
+                    {MONTHS_JA.map((label, i) => (
+                      <option key={i} value={String(i+1).padStart(2,"0")}>{label}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {listMode === "week" && (
+                <select className={styles.monthSelect} value={listWeek}
+                  onChange={e => setListWeek(e.target.value)}>
+                  {listWeekOptions.map(w => (
+                    <option key={w.weekStart} value={w.weekStart}>
+                      {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {listMode === "period" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="date" value={listPeriodFrom}
+                    onChange={e => setListPeriodFrom(e.target.value)}
+                    style={{ padding: "6px 10px", fontSize: 13, border: "1px solid", borderColor: listPWarn ? "#cc0000" : "#ccc", borderRadius: 6 }}
+                  />
+                  <span style={{ fontSize: 13, color: "#666" }}>〜</span>
+                  <input type="date" value={listPeriodTo} min={listPeriodFrom || undefined}
+                    onChange={e => setListPeriodTo(e.target.value)}
+                    style={{ padding: "6px 10px", fontSize: 13, border: "1px solid", borderColor: listPWarn ? "#cc0000" : "#ccc", borderRadius: 6 }}
+                  />
+                  {listPeriodFrom && listPeriodTo && (
+                    <span style={{ fontSize: 12, color: listPOk ? "#5a8a5a" : "#cc0000", whiteSpace: "nowrap" }}>
+                      {listPDays}日{listPWarn ? `（${listPWarn}）` : ""}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {staff.length > 0 && (
+                <CheckDropdown
+                  label="申請者"
+                  items={staff
+                    .slice()
+                    .sort((a, b) => (a.fullName || "").localeCompare(b.fullName || "", "ja"))
+                    .map(s => ({ value: s.id, label: s.fullName }))}
+                  visibleSet={listSelectedStaff}
+                  onToggle={handleListStaffToggle}
+                  onToggleAll={handleListStaffToggleAll}
+                  panelMaxHeight={240}
+                />
+              )}
+
+              <button type="button" className={styles.exportBtn}
+                onClick={loadListData}
+                disabled={!listRange.from || !listRange.to || listLoading}>
+                {listLoading ? "..." : "🔍 表示"}
+              </button>
+
+              <button type="button" className={styles.exportBtn}
+                onClick={handleListExport}
+                disabled={!listRange.from || !listRange.to || reportLoading || listSessions.length === 0}>
+                {reportLoading ? "..." : "📥 Excel"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <span className={styles.sortBarLabel}>並び替え：</span>
+              {[
+                { value: "date", label: "日付" },
+                { value: "name", label: "申請者" },
+              ].map(f => {
+                const isActive = listSortConfig.field === f.value;
+                return (
+                  <button key={f.value} type="button"
+                    className={`${styles.sortBtn} ${isActive ? styles.sortBtnActive : ""}`}
+                    onClick={() => setListSortConfig({
+                      field: f.value,
+                      dir: isActive ? (listSortConfig.dir === "asc" ? "desc" : "asc") : (f.value === "date" ? "desc" : "asc"),
+                    })}
+                  >
+                    {f.label}
+                    <span className={styles.sortArrow}>
+                      {isActive ? (listSortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {listSearched && !listLoading && listSessions.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: "#64748b" }}>
+                  全 {listSessions.length} 件
+                </span>
+              </div>
+            )}
+
+            {listErr && (
+              <div style={{ padding: "10px 14px", background: "#fee2e2", color: "#dc2626", fontSize: 13, borderRadius: 8, marginBottom: 12 }}>
+                {listErr}
+              </div>
+            )}
+
+              {!listRange.from || !listRange.to ? (
+              <div className={styles.loading} style={{ color: "#999" }}>
+                {listMode === "period" ? "期間を正しく設定してください（1〜90日）" : "期間を選択してください"}
+              </div>
+            ) : listLoading ? (
+              <div className={styles.loading}>読み込み中...</div>
+            ) : !listSearched ? (
+              <div className={styles.loading} style={{ color: "#999" }}>「表示」を押してください</div>
+            ) : listSessions.length === 0 ? (
+              <div className={styles.loading} style={{ color: "#999" }}>該当するデータがありません</div>
+            ) : (
+              <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "#f0f4ff" }}>
+                      {["申請者", "日付", "出勤時刻", "退勤時刻", "休憩開始", "休憩終了", "勤務時間", "シフト予定"].map(h => (
+                        <th key={h} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listPagedSessions.map((s, i) => (
+                      <tr key={`${s.userId}_${s.workDate}_${s.clockIn}`}
+                        style={{ background: i % 2 === 1 ? "#f8fafc" : "#fff", borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap" }}>👤 {s.userName}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", color: "#2563eb" }}>{fmtDateWithWd(s.workDate)}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace" }}>{fmtTimeOnly(s.clockIn)}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace" }}>{fmtTimeOnly(s.clockOut)}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace", color: "#94a3b8" }}>{s.breakStart ? fmtTimeOnly(s.breakStart) : "―"}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontFamily: "monospace", color: "#94a3b8" }}>{s.breakEnd ? fmtTimeOnly(s.breakEnd) : "―"}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", fontWeight: 700, color: "#0f172a" }}>{fmtWorkMinutes(calcSessionMinutes(s))}</td>
+                        <td style={{ padding: "8px 14px", whiteSpace: "nowrap", color: "#0369a1" }}>
+                          {s.shift ? `${formatShiftTime(s.shift.startTime)}〜${formatShiftTime(s.shift.endTime)}` : "―"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {listSearched && !listLoading && listSessions.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, flexWrap: "wrap", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "#64748b" }}>表示件数：</span>
+                  <select
+                    value={listPageSize}
+                    onChange={e => setListPageSize(Number(e.target.value))}
+                    style={{ padding: "5px 8px", fontSize: 13, border: "1px solid #ccc", borderRadius: 6 }}
+                  >
+                    {[10, 20, 30, 50].map(n => <option key={n} value={n}>{n}件</option>)}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button type="button" onClick={() => setListPage(1)}
+                    disabled={listPageClamped === 1}
+                    style={pagerBtnStyle(listPageClamped === 1)}>
+                    ≪
+                  </button>
+                  <button type="button" onClick={() => setListPage(p => Math.max(1, p - 1))}
+                    disabled={listPageClamped === 1}
+                    style={pagerBtnStyle(listPageClamped === 1)}>
+                    ＜
+                  </button>
+                  <span style={{ fontSize: 13, color: "#334155", padding: "0 8px", whiteSpace: "nowrap" }}>
+                    {listPageClamped} / {listTotalPages} ページ
+                  </span>
+                  <button type="button" onClick={() => setListPage(p => Math.min(listTotalPages, p + 1))}
+                    disabled={listPageClamped === listTotalPages}
+                    style={pagerBtnStyle(listPageClamped === listTotalPages)}>
+                    ＞
+                  </button>
+                  <button type="button" onClick={() => setListPage(listTotalPages)}
+                    disabled={listPageClamped === listTotalPages}
+                    style={pagerBtnStyle(listPageClamped === listTotalPages)}>
+                    ≫
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1163,34 +1957,89 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       )}
 
       {/* ── Легенда внизу ── */}
-      <div style={{
-        position: "fixed", bottom: 0, left: 56, right: 0,
-        height: 36, zIndex: 100,
-        background: "linear-gradient(45deg, #d8d8d8 0%, #ffffff 100%)",
-        justifyContent: "flex-end",
-        borderTop: "1px solid #e2e8f0",
-        display: "flex", alignItems: "center",
-        gap: 20, padding: "0 20px",
-        fontSize: 12, color: "#475569",
-        flexShrink: 0,
-      }}>
-        {[
-          { color: "#dcfce7", border: "#86efac", label: "緑：時間通り（1分以上前）" },
-          { color: "#fee2e2", border: "#fca5a5", label: "赤：遅刻（出勤）" },
-          { color: "#fef9c3", border: "#fde047", label: "黄：早退（退勤）" },
-          { color: "#e0f2fe", border: "#7dd3fc", label: "青：シフト予定あり" },
-          { color: "#f1f5f9", border: "#cbd5e1", label: "グレー：シフトなし・出勤あり" },
-        ].map(({ color, label }) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+      {pageMode === "calendar" && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 56, right: 0,
+          height: 36, zIndex: 100,
+          background: "linear-gradient(45deg, #d8d8d8 0%, #ffffff 100%)",
+          justifyContent: "flex-end",
+          borderTop: "1px solid #e2e8f0",
+          display: "flex", alignItems: "center",
+          gap: 20, padding: "0 20px",
+          fontSize: 12, color: "#475569",
+          flexShrink: 0,
+        }}>
+          {[
+            { color: "#dcfce7", border: "#86efac", label: "緑：時間通り（1分以上前）" },
+            { color: "#fee2e2", border: "#fca5a5", label: "赤：遅刻（出勤）" },
+            { color: "#fef9c3", border: "#fde047", label: "黄：早退（退勤）" },
+            { color: "#e0f2fe", border: "#7dd3fc", label: "青：シフト予定あり" },
+            { color: "#f1f5f9", border: "#cbd5e1", label: "グレー：シフトなし・出勤あり" },
+          ].map(({ color, label }) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+              <div style={{
+                width: 32, height: 16, borderRadius: 1,
+                background: color, border: `1px solid #000`,
+                flexShrink: 0,
+              }} />
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {reportLoading && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 3000,
+          background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 16, padding: "36px 48px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.22)",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 20,
+            minWidth: 260,
+          }}>
             <div style={{
-              width: 32, height: 16, borderRadius: 1,
-              background: color, border: `1px solid #000`,
-              flexShrink: 0,
+              width: 48, height: 48,
+              border: "4px solid #E0E8F5",
+              borderTop: "4px solid #2F5496",
+              borderRadius: "50%",
+              animation: "att-spin 0.8s linear infinite",
             }} />
-            <span>{label}</span>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: "bold", color: "#1a1a1a", marginBottom: 6 }}>
+                レポートを生成中...
+              </div>
+              <div style={{ fontSize: 13, color: "#666" }}>しばらくお待ちください</div>
+            </div>
+            <style>{`@keyframes att-spin { to { transform: rotate(360deg); } }`}</style>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+      {alertMsg && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 2000,
+          background: "rgba(0,0,0,0.3)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 12, padding: "28px 32px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            minWidth: 280, maxWidth: 360, textAlign: "center",
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 14, color: "#333", marginBottom: 24, lineHeight: 1.6 }}>
+              {alertMsg}
+            </div>
+            <button onClick={() => setAlertMsg(null)} style={{
+              background: "#2F5496", color: "#fff", border: "none",
+              borderRadius: 8, padding: "8px 28px", fontSize: 14, cursor: "pointer",
+            }}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </ManagerLayout>
   );
 }

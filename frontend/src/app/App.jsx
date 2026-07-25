@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { clearToken, getToken } from "../shared/api/api";
 import Login from "../pages/auth/LoginPage";
 import ManagerTablePage from "../pages/manager/ManagerTablePage";
-import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
+// import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
 import StaffMonthPage from "../pages/staff/StaffMonthPage";
 import EmployeesPage from "../pages/manager/EmployeesPage";
 import SettingsPage from "../pages/manager/SettingsPage";

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import shift
+from routers import shift, attendance
 
 app = FastAPI(title="HannoSHIFT Report Service", version="1.0.0")
 
@@ -12,6 +12,7 @@ app.add_middleware(
 )
 
 app.include_router(shift.router, prefix="/generate")
+app.include_router(attendance.router, prefix="/generate/attendance")
 
 
 @app.get("/health")

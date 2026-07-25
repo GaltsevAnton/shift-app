@@ -593,11 +593,11 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
   return (
     <div onClick={onClick} style={{
       display: "flex", flexDirection: "column", alignItems: "center",
-      cursor: "pointer", width: 160,
+      cursor: "pointer", width: 192,
       opacity: isFinished ? 0.55 : 1,
     }}>
       <div style={{
-        width: 140, height: 140, borderRadius: 6,
+        width: 172, height: 172, borderRadius: 6,
         overflow: "hidden", position: "relative",
         background: "#d0dff0",
         border: isSelected ? "3px solid #2F5496" : "3px solid rgba(0,0,0,0.1)",
@@ -616,7 +616,7 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
-            <svg viewBox="0 0 100 100" width="72" height="72" opacity="0.5">
+            <svg viewBox="0 0 100 100" width="88" height="88" opacity="0.5">
               <circle cx="50" cy="50" r="45" fill="none" stroke="#1e3a5f" strokeWidth="4"/>
               <path d="M 30 60 Q 50 78 70 60" fill="none" stroke="#1e3a5f" strokeWidth="4" strokeLinecap="round"/>
               <path d="M 33 38 Q 38 32 43 38" fill="none" stroke="#1e3a5f" strokeWidth="3.5" strokeLinecap="round"/>
@@ -638,7 +638,7 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
         {clockIn && (
           <div style={{
             position: "absolute", top: 5, left: 0, right: 0,
-            textAlign: "center", fontSize: 12, fontWeight: 700, color: "#fff",
+            textAlign: "center", fontSize: 14, fontWeight: 700, color: "#fff",
             textShadow: "0 1px 3px rgba(0,0,0,0.6)",
             background: "rgba(0,0,0,0.3)", padding: "2px 0",
           }}>
@@ -648,7 +648,7 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
       </div>
 
       <div style={{
-        marginTop: 6, fontSize: 15, fontWeight: 600,
+        marginTop: 6, fontSize: 18, fontWeight: 600,
         color: "#1e293b", textAlign: "center", lineHeight: 1.3,
         maxWidth: 150, overflow: "hidden",
       }}>
