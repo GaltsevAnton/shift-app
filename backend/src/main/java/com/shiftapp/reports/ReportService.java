@@ -112,7 +112,7 @@ public class ReportService {
 
         List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
                 .stream()
-                .filter(u -> u.getRole() == UserRole.STAFF && u.isActive())
+                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
                 .toList();
 
         List<User> staffList = department == null ? allStaff : allStaff.stream()
@@ -155,7 +155,20 @@ public class ReportService {
         payload.put("hotelName",  hotelName);
         payload.put("department", department);
         payload.put("staff",      staffData);
+        payload.put("breakRules", buildBreakRulesPayload(restaurantId));
         return payload;
+    }
+
+    private List<Map<String, Object>> buildBreakRulesPayload(Long restaurantId) {
+        return breakRuleRepository.findByRestaurant_IdOrderByThresholdMinutesAsc(restaurantId)
+                .stream()
+                .map(r -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("thresholdMinutes", r.getThresholdMinutes());
+                    m.put("breakMinutes",     r.getBreakMinutes());
+                    return m;
+                })
+                .toList();
     }
 
     private Map<String, Object> buildPayloadForUsers(Long restaurantId, String ym, List<Long> userIds) {
@@ -165,7 +178,7 @@ public class ReportService {
     
         List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
                 .stream()
-                .filter(u -> u.getRole() == UserRole.STAFF && u.isActive())
+                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
                 .filter(u -> userIds.contains(u.getId()))
                 .toList();
     
@@ -203,6 +216,7 @@ public class ReportService {
         payload.put("hotelName",  hotelName);
         payload.put("department", null);
         payload.put("staff",      staffData);
+        payload.put("breakRules", buildBreakRulesPayload(restaurantId));
         return payload;
     }
 
@@ -606,7 +620,7 @@ public class ReportService {
         for (ShiftSlot s : p.getSlots()) {
             Map<String, Object> slot = new LinkedHashMap<>();
             slot.put("startTime", s.getStartTime() != null ? s.getStartTime().toString() : null);
-            slot.put("endTime",   s.isLast() ? null : (s.getEndTime() != null ? s.getEndTime().toString() : null));
+            slot.put("endTime",   s.getEndTime() != null ? s.getEndTime().toString() : null);
             slot.put("last",      s.isLast());
             slot.put("workplace", s.getWorkplace());
             slots.add(slot);

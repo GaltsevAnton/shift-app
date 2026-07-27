@@ -84,8 +84,13 @@ class AttendanceSessionsRequest(BaseModel):
     fromDate: str
     toDate: str
     sessions: list[SessionModel] = []
+class BreakRuleModel(BaseModel):
+    thresholdMinutes: int
+    breakMinutes: int
+
 class ReportRequest(BaseModel):
     ym: str                        # "2026-05"
     hotelName: str = "ホテル・ヘリテイジ飯能sta．"
     department: Optional[str] = None   # для отчёта по отделу
     staff: list[StaffModel] = []
+    breakRules: list[BreakRuleModel] = []

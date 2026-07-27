@@ -23,7 +23,7 @@ from openpyxl.styles import (
     GradientFill,
 )
 from openpyxl.utils import get_column_letter
-from models import ReportRequest, StaffModel, DayModel, SlotModel
+from models import ReportRequest, StaffModel, DayModel, SlotModel, BreakRuleModel
 from openpyxl.worksheet.page import PageMargins
 
 # ── Константы ──────────────────────────────────────────────────────────────
@@ -85,6 +85,34 @@ def _format_time(t: str | None) -> str:
     if not t:
         return ""
     return t[:5]
+def _slot_duration_minutes(sl: SlotModel):
+    if not sl.startTime or not sl.endTime:
+        return None
+    try:
+        sh, sm = map(int, sl.startTime[:5].split(":"))
+        eh, em = map(int, sl.endTime[:5].split(":"))
+        start_min = sh * 60 + sm
+        end_min   = eh * 60 + em
+        if end_min <= start_min:
+            end_min += 24 * 60
+        return end_min - start_min
+    except Exception:
+        return None
+
+def _auto_break_minutes(duration_min, break_rules: list[BreakRuleModel]):
+    if duration_min is None:
+        return None
+    applicable = [r for r in break_rules if duration_min > r.thresholdMinutes]
+    if not applicable:
+        return 0
+    best = max(applicable, key=lambda r: r.thresholdMinutes)
+    return best.breakMinutes
+
+def _fmt_break(mins):
+    if mins is None:
+        return ""
+    h, m = divmod(mins, 60)
+    return f"{h}:{m:02d}"
 
 def _apply_outer_border(ws, min_row, max_row, min_col, max_col, color=C_GRID):
     """Рисует внешнюю рамку вокруг диапазона ячеек."""
@@ -233,8 +261,8 @@ def build(req: ReportRequest) -> bytes:
         c.border    = _thin()
         _apply_outer_border(ws, r, r+2, 2, 2)
 
-        # C labels: 出勤 / 退勤 / 職場 / (пусто)
-        labels = ["出勤", "退勤", "職場"]
+        # C labels: 出勤 / 退勤 / 休憩
+        labels = ["出勤", "退勤", "休憩"]
         for sub, label in enumerate(labels):
             c = ws.cell(row=r + sub, column=3)
             c.value     = label
@@ -274,14 +302,16 @@ def build(req: ReportRequest) -> bytes:
                 ends = "\n".join(
                     ("L" if sl.last else _format_time(sl.endTime)) for sl in slots
                 )
-                # Строка 職場 label (r+2): уже поставлен
-                # Строка r+2: workplace через \n
-                workplaces = "\n".join(sl.workplace or "" for sl in slots)
+                # Строка 休憩 (r+2): авто по 休憩ルール от длительности слота
+                breaks = "\n".join(
+                    _fmt_break(_auto_break_minutes(_slot_duration_minutes(sl), req.breakRules))
+                    for sl in slots
+                )
 
                 for sub, (val, is_label_row) in enumerate([
-                    (starts,     False),
-                    (ends,       False),
-                    (workplaces, False),
+                    (starts, False),
+                    (ends,   False),
+                    (breaks, False),
                 ]):
                     c = ws.cell(row=r + sub, column=col)
                     c.value     = val

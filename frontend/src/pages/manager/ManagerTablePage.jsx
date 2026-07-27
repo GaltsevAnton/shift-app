@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import * as XLSX from "xlsx-js-style";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
 import styles from "./ManagerTablePage.module.css";
@@ -74,6 +73,89 @@ function periodDays(from, to) {
 function isNextDay(startTime, endTime) {
   if (!startTime || !endTime) return false;
   return endTime < startTime;
+}
+function toMinutesLocal(timeStr) {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
+}
+
+function getAutoBreakMinutes(startTime, endTime, breakRules = []) {
+  if (!startTime || !endTime) return null;
+  let start = toMinutesLocal(startTime);
+  let end   = toMinutesLocal(endTime);
+  if (end <= start) end += 24 * 60;
+  const duration = end - start;
+  if (duration <= 0) return null;
+  const rule = [...breakRules]
+    .filter(r => duration > r.thresholdMinutes)
+    .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+  return rule ? rule.breakMinutes : 0;
+}
+
+function getBreakHint(startTime, endTime, breakOverride, breakRules = []) {
+  if (!startTime || !endTime) return null;
+  let start = toMinutesLocal(startTime);
+  let end   = toMinutesLocal(endTime);
+  if (end <= start) end += 24 * 60;
+  const duration = end - start;
+  if (duration <= 0) return null;
+
+  if (breakOverride !== null && breakOverride !== undefined) {
+    if (breakOverride === 0) {
+      return { text: "⏱ 休憩: なし（手動）", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
+    }
+    const rule = breakRules.find(r => r.breakMinutes === breakOverride);
+    return {
+      text: `⏱ 休憩: ${breakOverride}分${rule ? `（${rule.name}・手動）` : "（手動）"}`,
+      color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
+    };
+  }
+
+  const rule = [...breakRules]
+    .filter(r => duration > r.thresholdMinutes)
+    .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
+
+  if (!rule) return { text: "⏱ 休憩: なし", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
+  return {
+    text: `⏱ 休憩: ${rule.breakMinutes}分（${rule.name}）`,
+    color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
+  };
+}
+
+function getWorkHint(startTime, endTime, breakOverride, breakRules = []) {
+  if (!startTime || !endTime) return null;
+  let start = toMinutesLocal(startTime);
+  let end   = toMinutesLocal(endTime);
+  if (end <= start) end += 24 * 60;
+  const duration = end - start;
+  if (duration <= 0) return null;
+
+  const breakMin = breakOverride !== null && breakOverride !== undefined
+    ? breakOverride
+    : (getAutoBreakMinutes(startTime, endTime, breakRules) || 0);
+
+  const workMin = duration - breakMin;
+  const h = Math.floor(workMin / 60);
+  const m = workMin % 60;
+  return m > 0 ? `${h}時${m}分` : `${h}時`;
+}
+function fmtBreakMinutes(mins) {
+  if (mins === null || mins === undefined) return null;
+  if (mins === 0) return "0分";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m > 0 ? `${h}時${m}分` : `${h}時`;
+}
+function getTotalHint(startTime, endTime) {
+  if (!startTime || !endTime) return null;
+  let start = toMinutesLocal(startTime);
+  let end   = toMinutesLocal(endTime);
+  if (end <= start) end += 24 * 60;
+  const duration = end - start;
+  if (duration <= 0) return null;
+  const h = Math.floor(duration / 60);
+  const m = duration % 60;
+  return m > 0 ? `${h}時${m}分` : `${h}時`;
 }
 // Вернуть список недель (monday) для данного месяца ym
 function weeksInMonth(ymStr) {
@@ -190,7 +272,7 @@ function ContextMenu({ x, y, copiedPattern, selectedCount, onEdit, onCopy, onPas
 }
 
 /* ─── BulkPopover ───────────────────────────────────────── */
-function BulkPopover({ onClose, onSave, workplaces }) {
+function BulkPopover({ onClose, onSave, workplaces, breakRules = [] }) {
   const [off, setOff]     = useState(false);
   const [slots, setSlots] = useState([emptySlot()]);
 
@@ -209,20 +291,33 @@ function BulkPopover({ onClose, onSave, workplaces }) {
     if (slots.length <= 1) return;
     setSlots(prev => prev.filter((_, idx) => idx !== i));
   }
+
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
+
+    const incomplete = slots.some(s => s.startTime && !s.endTime);
+    if (incomplete) {
+      alert("終了時間を入力してください");
+      return;
+    }
+
     const validSlots = slots
-      .filter(s => s.startTime && s.endTime)
+      .filter(s => s.startTime)
       .map(s => ({
         startTime: s.startTime,
-        endTime:   s.last ? null : (s.endTime || null),
+        endTime:   s.endTime,
         last:      s.last,
         workplace: s.workplace || null,
+        nextDay:   isNextDay(s.startTime, s.endTime),
+        breakOverrideMinutes: s.breakOverride,
       }));
+
     onSave(validSlots.length === 0
       ? { off: true, slots: [] }
       : { off: false, slots: validSlots });
   }
+
+  const saveDisabled = !off && slots.some(s => !s.startTime || !s.endTime);
 
   return (
     <div style={{
@@ -239,43 +334,140 @@ function BulkPopover({ onClose, onSave, workplaces }) {
         </label>
         {!off && (
           <>
-            {slots.map((slot, i) => (
-              <div key={i} className={styles.slotBlock}>
-                <div className={styles.slotHeader}>
-                  <span className={styles.slotNum}>#{i + 1}</span>
-                  {slots.length > 1 && (
-                    <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
-                  )}
-                </div>
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>場所</span>
-                  <select className={styles.popSelect} value={slot.workplace} onChange={e => updateSlot(i, "workplace", e.target.value)}>
-                    <option value="">— 未選択 —</option>
-                    {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                  </select>
-                </div>
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>開始</span>
-                  <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i, "startTime", e.target.value)}>
-                    <option value="">--</option>
+            {slots.map((slot, i) => {
+              const nd = isNextDay(slot.startTime, slot.endTime);
+              return (
+                <div key={i} className={styles.slotBlock}>
+                  <div className={styles.slotHeader}>
+                    <span className={styles.slotNum}>#{i + 1}</span>
+                    {slots.length > 1 && (
+                      <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
+                    )}
+                  </div>
+
+                  <div className={styles.popRow}>
+                    <span className={styles.popLabel}>場所</span>
+                    <select className={styles.popSelect} value={slot.workplace} onChange={e => updateSlot(i, "workplace", e.target.value)}>
+                      <option value="">— 未選択 —</option>
+                      {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className={styles.popRow}>
+                    <span className={styles.popLabel}>
+                      <span style={{ fontSize: 10, color: "#6B7280", display: "block", marginBottom: 1 }}>当日</span>
+                      開始
+                    </span>
+                    <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i, "startTime", e.target.value)}>
+                      <option value="">--</option>
                       {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>終了</span>
+                    </select>
+                  </div>
+
+                  <div className={styles.popRow}>
+                    <span className={styles.popLabel}>
+                      <span style={{
+                        fontSize: 10, display: "block", marginBottom: 1,
+                        color:      nd ? "#dc2626" : "#6B7280",
+                        fontWeight: nd ? "bold"    : "normal",
+                      }}>
+                        {nd ? "翌日" : "当日"}
+                      </span>
+                      終了
+                    </span>
                     <select className={styles.popSelect} value={slot.endTime} onChange={e => updateSlot(i, "endTime", e.target.value)}>
                       <option value="">--</option>
-                        {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                      {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
+                  </div>
+
+                  {(() => {
+                    const total = getTotalHint(slot.startTime, slot.endTime);
+                    const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
+                    const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
+                    if (!total && !hint && !work) return null;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: -4 }}>
+                        {total && (
+                          <div style={{
+                            fontSize: 11, color: "#475569", background: "#f8fafc",
+                            border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px",
+                          }}>
+                            🕐 合計: {total}
+                          </div>
+                        )}
+
+                        {hint && (
+                          <div style={{ position: "relative" }}>
+                            <div
+                              onClick={() => updateSlot(i, "_breakOpen", !slot._breakOpen)}
+                              style={{
+                                fontSize: 11, color: hint.color, background: hint.bg,
+                                border: `1px solid ${hint.border}`, borderRadius: 6,
+                                padding: "4px 8px", cursor: "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "space-between",
+                              }}
+                            >
+                              <span>{hint.text}</span>
+                              <span style={{ fontSize: 10, opacity: 0.6 }}>▼</span>
+                            </div>
+
+                            {slot._breakOpen && (
+                              <div style={{
+                                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                                background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+                                boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden",
+                              }}>
+                                <div
+                                  onClick={() => { updateSlot(i, "breakOverride", 0); updateSlot(i, "_breakOpen", false); }}
+                                  style={{
+                                    padding: "8px 12px", fontSize: 12, cursor: "pointer",
+                                    color: "#64748b",
+                                    background: (slot.breakOverride === 0) ? "#f1f5f9" : "#fff",
+                                  }}
+                                >
+                                  なし（0分）
+                                </div>
+                                {breakRules.map(r => (
+                                  <div
+                                    key={r.id}
+                                    onClick={() => { updateSlot(i, "breakOverride", r.breakMinutes); updateSlot(i, "_breakOpen", false); }}
+                                    style={{
+                                      padding: "8px 12px", fontSize: 12, cursor: "pointer",
+                                      background: (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff",
+                                      color: "#475569",
+                                      borderTop: "1px solid #f1f5f9",
+                                    }}
+                                  >
+                                    {r.name}（{r.breakMinutes}分）
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {work && (
+                          <div style={{
+                            fontSize: 11, color: "#0369a1", background: "#f0f9ff",
+                            border: "1px solid #bae6fd", borderRadius: 6, padding: "4px 8px",
+                          }}>
+                            ⏰ 実働: {work}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <label className={styles.popRow}>
+                    <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i, "last", e.target.checked)} className={styles.popCheck} />
+                    <span className={styles.popRowLabel}>
+                      <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
+                    </span>
+                  </label>
                 </div>
-                <label className={styles.popRow}>
-                  <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i, "last", e.target.checked)} className={styles.popCheck} />
-                  <span className={styles.popRowLabel}>
-                    <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
-                  </span>
-                </label>
-              </div>
-            ))}
+              );
+            })}
             {slots.length < MAX_SLOTS && (
               <button type="button" className={styles.slotAddBtn} onClick={addSlot}>
                 ＋ 勤務場所を追加
@@ -285,7 +477,14 @@ function BulkPopover({ onClose, onSave, workplaces }) {
         )}
         <div className={styles.popActions}>
           <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
-          <button className={styles.popSave} onClick={handleSave} disabled={!off && slots.some(s => !s.startTime || !s.endTime)}>保存</button>
+          <button
+            className={styles.popSave}
+            onClick={handleSave}
+            disabled={saveDisabled}
+            style={{ opacity: saveDisabled ? 0.4 : 1, cursor: saveDisabled ? "not-allowed" : "pointer" }}
+          >
+            保存
+          </button>
         </div>
       </div>
     </div>
@@ -420,85 +619,6 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
     if (slots.length <= 1) return;
     setSlots(prev => prev.filter((_, idx) => idx !== i));
   }
-  function getAutoBreakMinutes(startTime, endTime) {
-    if (!startTime || !endTime) return null;
-    let start = toMinutesLocal(startTime);
-    let end   = toMinutesLocal(endTime);
-    if (end <= start) end += 24 * 60;
-    const duration = end - start;
-    if (duration <= 0) return null;
-    const rule = [...breakRules]
-      .filter(r => duration > r.thresholdMinutes)
-      .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
-    return rule ? rule.breakMinutes : 0;
-  }
-  function getBreakHint(startTime, endTime, breakOverride) {
-    if (!startTime || !endTime) return null;
-    let start = toMinutesLocal(startTime);
-    let end   = toMinutesLocal(endTime);
-    if (end <= start) end += 24 * 60;
-    const duration = end - start;
-    if (duration <= 0) return null;
-  
-    // если выбрано вручную
-    if (breakOverride !== null && breakOverride !== undefined) {
-      if (breakOverride === 0) {
-        return { text: "⏱ 休憩: なし（手動）", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
-      }
-      const rule = breakRules.find(r => r.breakMinutes === breakOverride);
-      return {
-        text: `⏱ 休憩: ${breakOverride}分${rule ? `（${rule.name}・手動）` : "（手動）"}`,
-        color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
-      };
-    }
-  
-    // автоматически
-    const rule = [...breakRules]
-      .filter(r => duration > r.thresholdMinutes)
-      .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
-  
-    if (!rule) return { text: "⏱ 休憩: なし", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
-    return {
-      text: `⏱ 休憩: ${rule.breakMinutes}分（${rule.name}）`,
-      color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
-    };
-  }
-
-  function getWorkHint(startTime, endTime, breakOverride) {
-    if (!startTime || !endTime) return null;
-    let start = toMinutesLocal(startTime);
-    let end   = toMinutesLocal(endTime);
-    if (end <= start) end += 24 * 60;
-    const duration = end - start;
-    if (duration <= 0) return null;
-  
-    const breakMin = breakOverride !== null
-      ? breakOverride
-      : (getAutoBreakMinutes(startTime, endTime) || 0);
-  
-    const workMin = duration - breakMin;
-    const h = Math.floor(workMin / 60);
-    const m = workMin % 60;
-    return m > 0 ? `${h}時間${m}分` : `${h}時間`;
-  }
-
-  function getTotalHint(startTime, endTime) {
-    if (!startTime || !endTime) return null;
-    let start = toMinutesLocal(startTime);
-    let end   = toMinutesLocal(endTime);
-    if (end <= start) end += 24 * 60;
-    const duration = end - start;
-    if (duration <= 0) return null;
-    const h = Math.floor(duration / 60);
-    const m = duration % 60;
-    return m > 0 ? `${h}時間${m}分` : `${h}時間`;
-  }
-  
-  function toMinutesLocal(timeStr) {
-    if (!timeStr) return null;
-    const [h, m] = timeStr.slice(0, 5).split(":").map(Number);
-    return h * 60 + m;
-  }
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
   
@@ -534,6 +654,7 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
 
   return (
     <div ref={popRef} className={styles.popover}
+      onClick={e => e.stopPropagation()}
       style={{ position:"fixed", top:pos.top, left:pos.left, transform:"none" }}>
 
       {/* ── 前日からの引き続き ── */}
@@ -637,9 +758,9 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
 
                 {(() => {
                   const total = getTotalHint(slot.startTime, slot.endTime);
-                  const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride);
-                  const autoBreak = getAutoBreakMinutes(slot.startTime, slot.endTime);
-                  const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride);
+                  const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
+                  const autoBreak = getAutoBreakMinutes(slot.startTime, slot.endTime, breakRules);
+                  const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
                   if (!total && !hint && !work) return null;
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: -4 }}>
@@ -1527,6 +1648,11 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     setVisibleWorkplaces(new Set([...workplaces.map(w => w.name), "__none__", "__off__"]));
   }
 
+  function selectWholeMonth(userId) {
+    setOpenCell(null);
+    setSelectedCells(displayDates.map(date => ({ userId, date })));
+  }
+
   function handleCellClick(e, userId, date, isOpen, isSaving) {
     if (isSaving) return;
     if (e.shiftKey) {
@@ -1822,13 +1948,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
             </div>
           )}
 
-          {/* Excel button */}
-          <button type="button" className={styles.exportBtn}
-            onClick={exportToExcel}
-            disabled={loading || filteredStaff.length === 0 || displayDates.length === 0}>
-            📥 Excel
-          </button>
-
           {/* Report menu */}
           <div ref={reportMenuRef} style={{ position: "relative" }}>
             <button type="button" className={styles.exportBtn}
@@ -1938,7 +2057,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
                   <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
                     style={{ left: nameLeft() }}></th>
-                  
+                  <th className={styles.thNameSub}></th>
+
                   {weekColSpans.map(({ week, count }) => {
                     const wkData  = data[week.weekStart] || { status:"RECEIVING" };
                     const sm      = STATUS_META[wkData.status] || STATUS_META.RECEIVING;
@@ -1967,6 +2087,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     部署
                   </th>
                   <th className={styles.thName} style={{ left: nameLeft() }}>氏名</th>
+                  <th className={styles.thDay} style={{ minWidth: 40 }}></th>
 
                   {displayDates.map(date => {
                     const wd = new Date(date).getDay();
@@ -2018,7 +2139,39 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                             </td>
                             <td className={styles.tdName} rowSpan={maxSlots}
                               style={{ left: nameLeft() }}>
-                              {staff.userName}
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
+                                <span>{staff.userName}</span>
+                                <button
+                                  type="button"
+                                  title="この月全体を選択（一括でシフトを設定できます）"
+                                  onClick={() => selectWholeMonth(staff.userId)}
+                                  style={{
+                                    flexShrink: 0, border: "none", background: "#EBF3FF",
+                                    color: "#2F5496", borderRadius: 5, width: 22, height: 22,
+                                    fontSize: 12, cursor: "pointer", lineHeight: 1,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#DBEAFE"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "#EBF3FF"}
+                                >
+                                  🗓️
+                                </button>
+                              </div>
+                            </td>
+                            <td className={styles.cell} rowSpan={maxSlots} style={{ padding: 0, verticalAlign: "top" }}>
+                              {Array.from({ length: maxSlots }, (_, si) => (
+                                <div key={si} style={{
+                                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                                  minHeight: 35, padding: "4px 3px", gap: 2,
+                                  borderBottom: si < maxSlots - 1 ? "1px dashed #f1f5f9" : "none",
+                                }}>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>出勤</span>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>退勤</span>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0369a1" }}>実働</span>
+                                  <span style={{ fontSize: 10, color: "#6366f1" }}>休憩</span>
+                                  <span style={{ fontSize: 12, color: "#64748b" }}>場所</span>
+                                </div>
+                              ))}
                             </td>
                           </>
                         )}
@@ -2049,7 +2202,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
 
                             return (
                               <td key={date} className={cellCls} rowSpan={maxSlots}
-                                style={{ padding:0, verticalAlign:"top", position:"relative" }}>
+                                style={{
+                                  padding: 0,
+                                  verticalAlign: (day.off || slots.length === 0) ? "middle" : "top",
+                                  position: "relative",
+                                }}
+                                onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
+                                onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
                             
                                 {/* Фиолетовая полоска — ночная смена с предыдущего дня */}
                                 {(() => {
@@ -2069,9 +2228,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                 })()}
                             
                                 <div className={styles.cellAnchor}
-                                  ref={el => { anchorRef.current = el; }}
-                                  onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
-                                  onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
+                                  ref={el => { anchorRef.current = el; }}>
                             
                                   {isSaving ? (
                                     <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
@@ -2086,6 +2243,13 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                         : visibleWorkplaces.has("__none__"))
                                       .map((s, si) => {
                                         const nd = s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime));
+                                        const workStr  = getWorkHint(s.startTime, s.endTime, s.breakOverrideMinutes, breakRules);
+                                        const breakMin = (s.startTime && s.endTime)
+                                          ? (s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined
+                                              ? s.breakOverrideMinutes
+                                              : getAutoBreakMinutes(s.startTime, s.endTime, breakRules))
+                                          : null;
+                                        const breakStr = fmtBreakMinutes(breakMin);
                                         return (
                                           <div key={si} className={styles.slotRow}>
                                             <span className={styles.cellTime}>
@@ -2096,6 +2260,16 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                               }
                                               {s.last && <span className={styles.cellLast}> L</span>}
                                             </span>
+                                            {workStr && (
+                                              <span style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginTop: 2 }}>
+                                                {workStr}
+                                              </span>
+                                            )}
+                                            {breakStr && (
+                                              <span style={{ fontSize: 10, color: "#6366f1", marginTop: 1 }}>
+                                                {breakStr}
+                                              </span>
+                                            )}
                                             {s.workplace && <span className={styles.cellWorkplace}>{s.workplace}</span>}
                                           </div>
                                         );
@@ -2214,6 +2388,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       {bulkOpen && (
         <BulkPopover
           workplaces={workplaces}
+          breakRules={breakRules}
           onClose={() => setBulkOpen(false)}
           onSave={patch => { setBulkOpen(false); saveBulkCells(patch); }}
         />
