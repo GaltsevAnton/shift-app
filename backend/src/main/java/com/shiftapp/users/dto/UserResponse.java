@@ -31,6 +31,10 @@ public class UserResponse {
     public LocalDate birthDate;
     public Gender gender;
 
+    public boolean accountLocked;
+    public int lockLevel;
+    public java.time.Instant lockedUntil;
+
     public static class DeptItem {
         public Long id;
         public String name;
@@ -64,6 +68,10 @@ public class UserResponse {
         r.building       = u.getBuilding();
         r.birthDate      = u.getBirthDate();
         r.gender         = u.getGender();
+
+        r.accountLocked  = u.isAccountLocked();
+        r.lockLevel      = u.getLockLevel();
+        r.lockedUntil    = u.getLockedUntil();
 
         return r;
     }

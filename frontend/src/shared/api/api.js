@@ -171,6 +171,9 @@ export const api = {
   managerEmployeesDelete: (id) =>
     request(`/api/manager/employees/${id}`, { method: "DELETE" }),
 
+  managerEmployeesUnlock: (id) =>
+    request(`/api/manager/employees/${id}/unlock`, { method: "POST" }),
+
   managerMonth: (month) => request(`/api/manager/month?month=${month}`),
 
   managerRange: (from, to) =>

@@ -113,6 +113,9 @@ def build(req: AttendanceSessionsRequest) -> bytes:
         if s.scheduledClockIn and s.scheduledClockOut:
             shift_plan = f"{_fmt_plan_time(s.scheduledClockIn)}〜{_fmt_plan_time(s.scheduledClockOut)}"
 
+        raw_break = _raw_break_minutes(s)
+        break_display = raw_break if raw_break is not None else s.officialBreakMinutes
+
         row = [
             s.userName,
             _fmt_date_wd(s.workDate),
@@ -123,7 +126,7 @@ def build(req: AttendanceSessionsRequest) -> bytes:
             _fmt_time(bs) if bs else "―",
             _fmt_time(be) if be else "―",
             _fmt_hm(s.scheduledBreakMinutes),
-            _fmt_hm(_raw_break_minutes(s)),
+            _fmt_hm(break_display),
             _fmt_hm(s.workMinutes),
             _fmt_hm(_raw_actual_worked_minutes(s)),
             shift_plan,

@@ -50,6 +50,19 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
+    // ── Блокировка при неудачных попытках входа ──
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts = 0;
+
+    @Column(name = "lock_level", nullable = false)
+    private int lockLevel = 0;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(name = "account_locked", nullable = false)
+    private boolean accountLocked = false;
+
     @Column(name = "full_name_kana")
     private String fullNameKana;
 
@@ -115,6 +128,15 @@ public class User {
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public int getFailedLoginAttempts() { return failedLoginAttempts; }
+    public void setFailedLoginAttempts(int failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
+    public int getLockLevel() { return lockLevel; }
+    public void setLockLevel(int lockLevel) { this.lockLevel = lockLevel; }
+    public Instant getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(Instant lockedUntil) { this.lockedUntil = lockedUntil; }
+    public boolean isAccountLocked() { return accountLocked; }
+    public void setAccountLocked(boolean accountLocked) { this.accountLocked = accountLocked; }
     public String getFullNameKana() { return fullNameKana; }
     public void setFullNameKana(String fullNameKana) { this.fullNameKana = fullNameKana; }
 

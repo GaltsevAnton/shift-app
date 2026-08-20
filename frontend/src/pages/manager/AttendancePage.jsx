@@ -1782,8 +1782,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                             return s.breakEnd ? fmtTimeOnly(s.breakEnd) : "―";
                           case "scheduledBreak":
                             return s.slot ? fmtWorkMinutes(plannedSlotBreakMinutes(s.slot, breakRules)) : "―";
-                          case "actualBreakTime":
-                            return fmtWorkMinutes(rawBreakMinutes(s));
+                          case "actualBreakTime": {
+                            const raw = rawBreakMinutes(s);
+                            return fmtWorkMinutes(raw !== null ? raw : (s.info?.officialBreakMinutes ?? null));
+                          }
                           case "workTime":
                             return fmtWorkMinutes(s.info?.workMin ?? null);
                           case "actualWorkTime":

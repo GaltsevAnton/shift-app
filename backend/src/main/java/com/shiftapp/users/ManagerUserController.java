@@ -5,6 +5,7 @@ import com.shiftapp.users.dto.UserCreateRequest;
 import com.shiftapp.users.dto.UserResponse;
 import com.shiftapp.users.dto.UserUpdateRequest;
 import jakarta.validation.Valid;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,9 +15,11 @@ import java.util.List;
 public class ManagerUserController {
 
     private final UserService service;
+    private final UserRepository userRepository;
 
-    public ManagerUserController(UserService service) {
+    public ManagerUserController(UserService service, UserRepository userRepository) {
         this.service = service;
+        this.userRepository = userRepository;
     }
 
     @GetMapping
@@ -41,5 +44,21 @@ public class ManagerUserController {
     public void delete(@PathVariable Long id) {
         var me = CurrentUser.require();
         service.delete(me.getRestaurantId(), id);
+    }
+
+    @Transactional
+    @PostMapping("/{id}/unlock")
+    public UserResponse unlock(@PathVariable Long id) {
+        var me = CurrentUser.require();
+        User user = userRepository.findByIdAndRestaurant_Id(id, me.getRestaurantId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        user.setAccountLocked(false);
+        user.setLockLevel(0);
+        user.setLockedUntil(null);
+        user.setFailedLoginAttempts(0);
+        userRepository.save(user);
+
+        return UserResponse.from(user);
     }
 }

@@ -1,0 +1,5 @@
+-- V15__add_login_lock.sql
+ALTER TABLE users ADD COLUMN failed_login_attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN lock_level INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN locked_until TIMESTAMP NULL;
+ALTER TABLE users ADD COLUMN account_locked BOOLEAN NOT NULL DEFAULT FALSE;

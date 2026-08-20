@@ -20,6 +20,7 @@ const emptyForm = {
   postalCode: "", region: "", municipality: "", blockNumber: "", building: "",
   birthDate: "", gender: "MALE",
   position: "", departmentIds: [], role: "STAFF", active: true,
+  unlockAccount: false,
 };
 
 export default function EmployeesPage({ view, onNavigate, onLogout }) {
@@ -60,6 +61,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   function openCreate() {
     setEditId(null);
     setForm(emptyForm);
+    setEditingLockInfo(null);
     setFormErr("");
     setModalOpen(true);
   }
@@ -86,7 +88,9 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       departmentIds: (emp.departments || []).map(d => d.id),
       role: emp.role || "STAFF",
       active: !!emp.active,
+      unlockAccount: false,
     });
+    setEditingLockInfo({ accountLocked: !!emp.accountLocked, lockLevel: emp.lockLevel || 0 });
     setFormErr("");
     setModalOpen(true);
   }
@@ -95,6 +99,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     setModalOpen(false);
     setEditId(null);
     setForm(emptyForm);
+    setEditingLockInfo(null);
     setFormErr("");
   }
 
@@ -137,6 +142,9 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     try {
       if (editId) {
         await api.managerEmployeesUpdate(editId, { ...payload, active: !!form.active });
+        if (form.unlockAccount) {
+          await api.managerEmployeesUnlock(editId);
+        }
       } else {
         await api.managerEmployeesCreate(payload);
       }
@@ -150,6 +158,21 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   }
 
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [unlocking, setUnlocking] = useState(null);
+  const [editingLockInfo, setEditingLockInfo] = useState(null);
+
+  async function handleUnlock(id) {
+    setUnlocking(id);
+    setErr("");
+    try {
+      await api.managerEmployeesUnlock(id);
+      await load();
+    } catch (e) {
+      setErr(e.message || "Unlock error");
+    } finally {
+      setUnlocking(null);
+    }
+  }
 
   async function handleDeleteConfirmed() {
     if (!deleteConfirm) return;
@@ -270,13 +293,31 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                     </span>
                   </td>
                   <td style={tdStyle}>
-                    <span style={{
-                      display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                      background: emp.active ? "#dcfce7" : "#fee2e2",
-                      color: emp.active ? "#166534" : "#991b1b",
-                    }}>
-                      {emp.active ? "ON" : "OFF"}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                      <span style={{
+                        display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                        background: emp.active ? "#dcfce7" : "#fee2e2",
+                        color: emp.active ? "#166534" : "#991b1b",
+                      }}>
+                        {emp.active ? "ON" : "OFF"}
+                      </span>
+                      {emp.accountLocked && (
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                          background: "#fef3c7", color: "#92400e",
+                        }}>
+                          🔒 ロック中
+                        </span>
+                      )}
+                      {!emp.accountLocked && emp.lockLevel > 0 && (
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                          background: "#f1f5f9", color: "#64748b",
+                        }}>
+                          ⚠ 一時ロック（{lockLevelLabel(emp.lockLevel)}）
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ ...tdStyle, textAlign: "right" }}>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -438,9 +479,16 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
             </div>
 
             {editId && (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 20, cursor: "pointer" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: editingLockInfo && (editingLockInfo.accountLocked || editingLockInfo.lockLevel > 0) ? 8 : 20, cursor: "pointer" }}>
                 <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
                 アクティブ
+              </label>
+            )}
+
+            {editId && editingLockInfo && (editingLockInfo.accountLocked || editingLockInfo.lockLevel > 0) && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 20, cursor: "pointer" }}>
+                <input type="checkbox" checked={form.unlockAccount} onChange={e => setForm({ ...form, unlockAccount: e.target.checked })} />
+                🔓 ロックを解除する（現在：{editingLockInfo.accountLocked ? "永久ロック" : `一時ロック（${lockLevelLabel(editingLockInfo.lockLevel)}）`}）
               </label>
             )}
 
@@ -506,6 +554,15 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       )}
     </ManagerLayout>
   );
+}
+
+function lockLevelLabel(level) {
+  switch (level) {
+    case 1: return "10分";
+    case 2: return "30分";
+    case 3: return "3時間";
+    default: return "";
+  }
 }
 
 function Field({ label, required, children }) {

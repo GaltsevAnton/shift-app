@@ -215,14 +215,14 @@ def build(req: ReportRequest) -> bytes:
         # Строка 5: число
         c = ws.cell(row=5, column=col)
         c.value     = day
-        c.font      = _font(size=8)
+        c.font      = _font(size=10)
         c.alignment = _align()
         c.border    = _thin()
 
         # Строка 6: день недели
         c = ws.cell(row=6, column=col)
         c.value     = WD_JA[wd]
-        c.font      = _font(size=8)
+        c.font      = _font(size=9)
         c.alignment = _align()
         c.border    = _thin()
 
@@ -247,7 +247,7 @@ def build(req: ReportRequest) -> bytes:
         c.value     = s.position or ""
         c.font      = _font(size=8, color="555555")
         c.fill      = _fill(row_bg)
-        c.alignment = _align(h="center")
+        c.alignment = Alignment(horizontal="center", vertical="center", textRotation=255, wrap_text=True)
         c.border    = _thin()
         _apply_outer_border(ws, r, r+2, 1, 1)
 
@@ -255,7 +255,7 @@ def build(req: ReportRequest) -> bytes:
         ws.merge_cells(f"B{r}:B{r+2}")
         c = ws[f"B{r}"]
         c.value     = s.userName
-        c.font      = _font(size=9)
+        c.font      = _font(size=11)
         c.fill      = _fill(row_bg)
         c.alignment = _align(h="center")
         c.border    = _thin()
@@ -270,7 +270,7 @@ def build(req: ReportRequest) -> bytes:
             c.fill      = _fill(C_LABEL_BG)
             c.alignment = _align()
             c.border    = _thin()
-            ws.row_dimensions[r + sub].height = 14
+            ws.row_dimensions[r + sub].height = 20
 
         # Данные по дням
         for i, day in enumerate(days):
@@ -360,8 +360,58 @@ def build(req: ReportRequest) -> bytes:
                         left   = left   if left   != no else existing.left,
                         right  = right  if right  != no else existing.right,
                     )          
-    # ── Внешняя рамка всей таблицы ───────────────────────────────────────
-    last_data_row = base_row + len(staff) * 3 - 1
+# ── Футер: дублируем шкалу дней внизу таблицы ────────────────────────
+    footer_row1 = base_row + len(staff) * 3
+    footer_row2 = footer_row1 + 1
+
+    ws.merge_cells(f"A{footer_row1}:A{footer_row2}")
+    ws.merge_cells(f"B{footer_row1}:B{footer_row2}")
+    _apply_outer_border(ws, footer_row1, footer_row2, 1, 1)
+    _apply_outer_border(ws, footer_row1, footer_row2, 2, 2)
+
+    for cell_addr, label in [(f"A{footer_row1}", "役職"), (f"B{footer_row1}", "氏名")]:
+        c = ws[cell_addr]
+        c.value     = label
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    for r, label in [(footer_row1, "日"), (footer_row2, "曜日")]:
+        c = ws.cell(row=r, column=3)
+        c.value     = label
+        c.font      = _font(size=7)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.row_dimensions[footer_row1].height = 22
+    ws.row_dimensions[footer_row2].height = 20
+
+    for i, day in enumerate(days):
+        col = 4 + i
+        wd  = _weekday(ym, day)
+
+        c = ws.cell(row=footer_row1, column=col)
+        c.value     = day
+        c.font      = _font(size=10)
+        c.alignment = _align()
+        c.border    = _thin()
+
+        c = ws.cell(row=footer_row2, column=col)
+        c.value     = WD_JA[wd]
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.merge_cells(f"{get_column_letter(4 + total)}{footer_row1}:{get_column_letter(4 + total)}{footer_row2}")
+    c = ws.cell(row=footer_row1, column=4 + total)
+    c.value     = "公休\n数"
+    c.font      = _font(size=7)
+    c.alignment = _align()
+    c.border    = _thin()
+    _apply_outer_border(ws, footer_row1, footer_row2, 4 + total, 4 + total)
+
+    # ── Внешняя рамка всей таблицы (включая футер) ───────────────────────
+    last_data_row = footer_row2
     last_data_col = 4 + total
 
     thick = Side(style="medium", color="000000")
