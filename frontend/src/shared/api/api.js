@@ -233,6 +233,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(userIds),
     }),
+
+  reportShiftAllRange: (from, to) =>
+    fetchBlob(`/api/manager/reports/shift/all/range?from=${from}&to=${to}`),
+
+  reportShiftDeptRange: (from, to, department) =>
+    fetchBlob(`/api/manager/reports/shift/dept/range?from=${from}&to=${to}&department=${encodeURIComponent(department)}`),
+
+  reportTimesheetRange: (from, to) =>
+    fetchBlob(`/api/manager/reports/timesheet/range?from=${from}&to=${to}`),
+
+  reportShiftFilteredRange: (from, to, userIds) =>
+    fetchBlob(`/api/manager/reports/shift/filtered/range?from=${from}&to=${to}`, {
+      method: "POST",
+      body: JSON.stringify(userIds),
+    }),
   
   reportAttendanceTimesheet: (ym) =>
     fetchBlob(`/api/manager/reports/attendance/timesheet?ym=${ym}`),
@@ -242,6 +257,12 @@ export const api = {
 
   reportAttendanceSessions: (from, to, userIds) =>
     fetchBlob(`/api/manager/reports/attendance/sessions?from=${from}&to=${to}`, {
+      method: "POST",
+      body: JSON.stringify(userIds || []),
+    }),
+
+  reportAttendanceTimesheetFiltered: (from, to, userIds) =>
+    fetchBlob(`/api/manager/reports/attendance/timesheet/filtered?from=${from}&to=${to}`, {
       method: "POST",
       body: JSON.stringify(userIds || []),
     }),

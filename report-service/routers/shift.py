@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import Response
-from models import ReportRequest
+from models import ReportRequest, ReportRangeRequest
 from builders import shift_dept, shift_all, timesheet
 
 router = APIRouter()
@@ -38,6 +38,37 @@ def generate_timesheet(req: ReportRequest):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
     )
 
+@router.post("/shift/all/range")
+def generate_shift_all_range(req: ReportRangeRequest):
+    data = shift_all.build_range(req)
+    filename = f"シフト_{req.fromDate}_{req.toDate}_全員.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
+    )
+
+
+@router.post("/shift/dept/range")
+def generate_shift_dept_range(req: ReportRangeRequest):
+    data = shift_dept.build_range(req)
+    filename = f"シフト_{req.fromDate}_{req.toDate}_{req.department or 'dept'}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
+    )
+
+
+@router.post("/timesheet/range")
+def generate_timesheet_range(req: ReportRangeRequest):
+    data = timesheet.build_range(req)
+    filename = f"勤怠_{req.fromDate}_{req.toDate}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
+    )
 
 def _encode(filename: str) -> str:
     from urllib.parse import quote

@@ -105,6 +105,68 @@ public class ReportController {
     }
 
     /**
+     * GET /api/manager/reports/shift/all/range?from=&to=
+     */
+    @GetMapping("/shift/all/range")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> shiftAllRange(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        byte[] data = reportService.generateShiftAllRange(user.getRestaurantId(), from, to);
+        String filename = "シフト_" + from + "_" + to + "_全員.xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * GET /api/manager/reports/shift/dept/range?from=&to=&department=
+     */
+    @GetMapping("/shift/dept/range")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> shiftDeptRange(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam String department) {
+
+        byte[] data = reportService.generateShiftDeptRange(user.getRestaurantId(), from, to, department);
+        String filename = "シフト_" + from + "_" + to + "_" + department + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * GET /api/manager/reports/timesheet/range?from=&to=
+     */
+    @GetMapping("/timesheet/range")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> timesheetRange(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        byte[] data = reportService.generateTimesheetRange(user.getRestaurantId(), from, to);
+        String filename = "勤怠_" + from + "_" + to + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * POST /api/manager/reports/shift/filtered/range?from=&to=
+     */
+    @PostMapping("/shift/filtered/range")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> shiftFilteredRange(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestBody List<Long> userIds) {
+
+        byte[] data = reportService.generateShiftFilteredRange(user.getRestaurantId(), from, to, userIds);
+        String filename = "シフト_" + from + "_" + to + "_選択.xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
      * GET /api/manager/reports/attendance/timesheet?ym=2026-07
      * Табель фактического времени (по打刻)
      */
@@ -116,6 +178,23 @@ public class ReportController {
 
         byte[] data = reportService.generateAttendanceTimesheet(user.getRestaurantId(), ym);
         String filename = "勤怠集計_" + ym + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /**
+     * POST /api/manager/reports/attendance/timesheet/filtered?from=&to=
+     * 勤怠集計表（実績）— по отфильтрованным на экране сотрудникам, произвольный диапазон дат
+     */
+    @PostMapping("/attendance/timesheet/filtered")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<byte[]> attendanceTimesheetFiltered(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestBody(required = false) List<Long> userIds) {
+
+        byte[] data = reportService.generateAttendanceTimesheetFiltered(user.getRestaurantId(), from, to, userIds);
+        String filename = "勤怠集計_" + from + "_" + to + ".xlsx";
         return xlsxResponse(data, filename);
     }
 

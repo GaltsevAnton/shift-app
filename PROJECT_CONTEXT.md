@@ -86,6 +86,18 @@
 ### 3.10 Reports
 - `ReportController.java` — прокси к Python FastAPI (порт 8001)
 
+### 3.11 Login Security (段階的アカウントロック)
+ 
+- `AuthController.login()` — при каждой неудачной попытке вызывает `registerFailedAttempt()`
+- Эскалация по **суммарному числу неудачных попыток** (не сбрасывается временем, только успешным входом):
+  - 5 → `lockLevel=1`, `lockedUntil = now+10мин`
+  - 10 → `lockLevel=2`, `lockedUntil = now+30мин`
+  - 15 → `lockLevel=3`, `lockedUntil = now+3ч`
+  - 20 → `lockLevel=4`, `accountLocked=true` (навсегда, снимается только менеджером)
+- Счётчик **по логину**, без привязки к IP (осознанное упрощение — данные некритичные, риск намеренной блокировки чужого аккаунта принят как допустимый)
+- Пока `lockedUntil` не истёк — **любая** попытка (даже с верным паролем) отклоняется, счётчик/таймер не трогается (иначе можно продлевать блокировку бесконечно)
+- Успешный вход → полный сброс (`failedLoginAttempts=0`, `lockLevel=0`, `lockedUntil=null`)
+- Разблокировка менеджером — `POST /api/manager/employees/{id}/unlock`, встроена в `EmployeesPage.jsx` как чекбокс `🔓 ロックを解除する` под `アクティブ` в модалке редактирования (не отдельная кнопка в таблице)
 ---
 
 ## 4) SQL миграции (применены вручную — Flyway отключён на dev)
@@ -99,6 +111,7 @@ V11__add_break_rules.sql        — break_rules таблица
 V12__add_break_override.sql     — break_override_minutes на shift_slots
 V13__add_month_status.sql       — month_status таблица
 V14__add_month_status_half.sql  — half INT + UNIQUE(restaurant_id, year_month, half)
+V15__add_login_lock.sql — failed_login_attempts, lock_level, locked_until, account_locked на users
 ```
 
 **Важно**: Flyway на dev отключён (`flyway.enabled: false`), миграции применяются вручную через SQL-клиент.
@@ -203,3 +216,6 @@ managerEmployees CRUD
 - CSS `border-bottom` на `<tr>` не работает — только на `<td>`
 - `RESTAURANT_ID = 1` захардкожен в KioskPage.jsx
 - Удаление пользователя: shift_slots → preferences → time_records → users
+- `ManagerUserController.unlock()` обязан быть `@Transactional` — `UserResponse.from()` трогает `user.getDepartments()` (lazy), без транзакции падает `LazyInitializationException`
+- В `ReportService.buildDay()` поле `slot.endTime` нужно передавать **всегда** реальным значением, даже если `last=true` — иначе питон-стороне (`shift_dept.py`/`shift_all.py`) нечем считать длительность/休憩 для L-слотов. Флаг `last` использовать только для решения "показать L вместо времени", не для сокрытия самого времени
+- `勤怠管理` リスト/Excel-отчёт (`attendance_sessions.py`) для `休憩時刻`: если нет реальной пробивки `休憩`/`復帰`, нужен fallback на `officialBreakMinutes` (авторасчёт из `computeSessionOfficial()`) — иначе リスト расходится с `カレンダー`, где этот фолбэк уже был

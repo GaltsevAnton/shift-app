@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
 import shellStyles from "../../app/layouts/AppShell.module.css";
@@ -160,6 +160,21 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [unlocking, setUnlocking] = useState(null);
   const [editingLockInfo, setEditingLockInfo] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const [sortConfig, setSortConfig] = useState({ field: null, dir: "asc" });
+  const [openFilterCol, setOpenFilterCol] = useState(null);
+  const [visiblePositions, setVisiblePositions] = useState(null);   // null = すべて表示
+  const [visibleDepartments, setVisibleDepartments] = useState(null);
+  const [visibleRoles, setVisibleRoles] = useState(null);
+  const [visibleStatuses, setVisibleStatuses] = useState(null);
+
+  function handleSort(field) {
+    setSortConfig(prev => ({
+      field,
+      dir: prev.field === field ? (prev.dir === "asc" ? "desc" : "asc") : "asc",
+    }));
+  }
 
   async function handleUnlock(id) {
     setUnlocking(id);
@@ -186,6 +201,53 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       setDeleteConfirm(null);
     }
   }
+
+  const positionOptions = [...new Set(items.map(e => e.position || "").filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .map(p => ({ value: p, label: p }));
+
+  const departmentOptions = [...new Set(items.flatMap(e => (e.departments || []).map(d => d.name)))]
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .map(d => ({ value: d, label: d }));
+
+  const roleOptions = [...new Set(items.map(e => e.role).filter(Boolean))]
+    .map(r => ({ value: r, label: r }));
+
+  const statusOptions = [
+    { value: "ON",  label: "ON" },
+    { value: "OFF", label: "OFF" },
+  ];
+
+  const filteredItems = items
+    .filter(emp => {
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const fullName = `${emp.lastName || ""} ${emp.firstName || ""}`.toLowerCase();
+        const fullNameKana = `${emp.lastNameKana || ""} ${emp.firstNameKana || ""}`.toLowerCase();
+        const login = (emp.login || "").toLowerCase();
+        if (!fullName.includes(q) && !fullNameKana.includes(q) && !login.includes(q)) return false;
+      }
+      if (visiblePositions && !visiblePositions.has(emp.position || "")) return false;
+      if (visibleDepartments) {
+        const names = (emp.departments || []).map(d => d.name);
+        if (!names.some(n => visibleDepartments.has(n))) return false;
+      }
+      if (visibleRoles && !visibleRoles.has(emp.role)) return false;
+      if (visibleStatuses) {
+        const st = emp.active ? "ON" : "OFF";
+        if (!visibleStatuses.has(st)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (!sortConfig.field) return 0;
+      let va, vb;
+      if (sortConfig.field === "id") { va = a.id; vb = b.id; }
+      else if (sortConfig.field === "name")  { va = `${a.lastName || ""}${a.firstName || ""}`; vb = `${b.lastName || ""}${b.firstName || ""}`; }
+      else if (sortConfig.field === "login") { va = a.login || ""; vb = b.login || ""; }
+      if (typeof va === "number") return (sortConfig.dir === "asc" ? 1 : -1) * (va - vb);
+      return (sortConfig.dir === "asc" ? 1 : -1) * String(va).localeCompare(String(vb), "ja");
+    });
 
   /* ── DepartmentCheckboxes ── */
   function DepartmentCheckboxes({ selectedIds, onChange }) {
@@ -224,9 +286,23 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
             <div style={{ fontSize: 26, fontWeight: 800, color: "#1a1d2e" }}>👥 従業員管理</div>
             <div style={{ fontSize: 14, color: "#888", marginTop: 4 }}>アカウントの作成・編集・削除</div>
           </div>
-          <button onClick={openCreate} style={btnPrimaryStyle} type="button">
-            ＋ 新規作成
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="氏名・ログインIDで検索..."
+              style={{
+                padding: "8px 14px", fontSize: 13,
+                border: "1.5px solid #e0e0e8", borderRadius: 8,
+                outline: "none", background: "#fff",
+                width: 200,
+              }}
+            />
+            <button onClick={openCreate} style={btnPrimaryStyle} type="button">
+              ＋ 新規作成
+            </button>
+          </div>
         </div>
 
         {err && (
@@ -239,21 +315,54 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
         <div style={cardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={cardTitleStyle}>スタッフ一覧</div>
-            <button onClick={load} disabled={loading} style={btnSecondaryStyle} type="button">
-              {loading ? "..." : "更新"}
-            </button>
+            <span style={{ fontSize: 13, color: "#64748b", fontWeight: 600 }}>
+              {loading ? "..." : `表示中: ${filteredItems.length} / ${items.length} 人`}
+            </span>
           </div>
 
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
-                {["ID", "氏名", "Login", "職種・役職", "部署", "ロール", "状態", ""].map(h => (
-                  <th key={h} style={thStyle}>{h}</th>
-                ))}
+                <SortableTh label="ID"    field="id"    sortConfig={sortConfig} onSort={handleSort} />
+                <SortableTh label="氏名"  field="name"  sortConfig={sortConfig} onSort={handleSort} />
+                <SortableTh label="Login" field="login" sortConfig={sortConfig} onSort={handleSort} />
+                <FilterTh
+                  label="職種・役職"
+                  options={positionOptions}
+                  visibleSet={visiblePositions}
+                  onChange={setVisiblePositions}
+                  isOpen={openFilterCol === "position"}
+                  onToggleOpen={open => setOpenFilterCol(open ? "position" : null)}
+                />
+                <FilterTh
+                  label="部署"
+                  options={departmentOptions}
+                  visibleSet={visibleDepartments}
+                  onChange={setVisibleDepartments}
+                  isOpen={openFilterCol === "department"}
+                  onToggleOpen={open => setOpenFilterCol(open ? "department" : null)}
+                />
+                <FilterTh
+                  label="ロール"
+                  options={roleOptions}
+                  visibleSet={visibleRoles}
+                  onChange={setVisibleRoles}
+                  isOpen={openFilterCol === "role"}
+                  onToggleOpen={open => setOpenFilterCol(open ? "role" : null)}
+                />
+                <FilterTh
+                  label="状態"
+                  options={statusOptions}
+                  visibleSet={visibleStatuses}
+                  onChange={setVisibleStatuses}
+                  isOpen={openFilterCol === "status"}
+                  onToggleOpen={open => setOpenFilterCol(open ? "status" : null)}
+                />
+                <th style={thStyle}></th>
               </tr>
             </thead>
             <tbody>
-              {items.map(emp => (
+              {filteredItems.map(emp => (
                 <tr key={emp.id} style={{ borderBottom: "1px solid #f0f1f6" }}
                   onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
                   onMouseLeave={e => e.currentTarget.style.background = ""}>
@@ -327,8 +436,10 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && !loading && (
-                <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>スタッフがいません</td></tr>
+              {filteredItems.length === 0 && !loading && (
+                <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
+                  {items.length === 0 ? "スタッフがいません" : "該当するスタッフが見つかりません"}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -603,6 +714,89 @@ function SectionTitle({ children, optional }) {
         </span>
       )}
     </div>
+  );
+}
+
+function SortableTh({ label, field, sortConfig, onSort }) {
+  const isActive = sortConfig.field === field;
+  return (
+    <th style={{ ...thStyle, cursor: "pointer", userSelect: "none" }} onClick={() => onSort(field)}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: isActive ? "#6366f1" : undefined }}>
+        {label}
+        <span style={{ fontSize: 11, color: isActive ? "#6366f1" : "#ccc" }}>
+          {isActive ? (sortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+function FilterTh({ label, options, visibleSet, onChange, isOpen, onToggleOpen }) {
+  const ref = useRef();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function onDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) onToggleOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const allOn = visibleSet === null || (options.length > 0 && options.every(o => visibleSet.has(o.value)));
+  const isFiltered = !allOn;
+
+  function toggleOption(value) {
+    const base = visibleSet === null ? new Set(options.map(o => o.value)) : new Set(visibleSet);
+    base.has(value) ? base.delete(value) : base.add(value);
+    onChange(base.size >= options.length ? null : base);
+  }
+  function toggleAll() {
+    onChange(allOn ? new Set() : null);
+  }
+
+  return (
+    <th style={{ ...thStyle, position: "relative" }}>
+      <span
+        onClick={() => onToggleOpen(!isOpen)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          cursor: "pointer", userSelect: "none",
+          color: isFiltered ? "#6366f1" : undefined,
+        }}
+      >
+        {label}
+        <span style={{ fontSize: 10 }}>{isOpen ? "▲" : "▼"}</span>
+      </span>
+      {isOpen && (
+        <div ref={ref} style={{
+          position: "absolute", top: "100%", left: 0, zIndex: 500, marginTop: 4,
+          background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: "6px 0",
+          minWidth: 160, textAlign: "left", fontWeight: 400, textTransform: "none",
+          letterSpacing: "normal",
+        }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", color: "#334155" }}>
+            <input type="checkbox" checked={allOn} onChange={toggleAll} />
+            すべて
+          </label>
+          <div style={{ height: 1, background: "#f0f1f6", margin: "4px 0" }} />
+          {options.map(o => (
+            <label key={o.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "pointer", color: "#475569" }}>
+              <input
+                type="checkbox"
+                checked={visibleSet === null || visibleSet.has(o.value)}
+                onChange={() => toggleOption(o.value)}
+              />
+              {o.label}
+            </label>
+          ))}
+          {options.length === 0 && (
+            <div style={{ padding: "6px 14px", fontSize: 12, color: "#aaa" }}>候補がありません</div>
+          )}
+        </div>
+      )}
+    </th>
   );
 }
 

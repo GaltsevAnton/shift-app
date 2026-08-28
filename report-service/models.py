@@ -56,6 +56,12 @@ class AttendanceReportRequest(BaseModel):
     ym: str
     hotelName: str = "ホテル・ヘリテイジ飯能sta．"
     staff: list[AttendanceStaffModel] = []
+    
+class AttendanceReportRangeRequest(BaseModel):
+    hotelName: str = "ホテル・ヘリテイジ飯能sta．"
+    fromDate: str                       # "2026-08-01"
+    toDate: str                         # "2026-08-23"
+    staff: list[AttendanceStaffModel] = []
 
 class SessionModel(BaseModel):
     userId: int
@@ -92,5 +98,13 @@ class ReportRequest(BaseModel):
     ym: str                        # "2026-05"
     hotelName: str = "ホテル・ヘリテイジ飯能sta．"
     department: Optional[str] = None   # для отчёта по отделу
+    staff: list[StaffModel] = []
+    breakRules: list[BreakRuleModel] = []
+
+class ReportRangeRequest(BaseModel):
+    fromDate: str                       # "2026-08-01"
+    toDate: str                         # "2026-08-23"
+    hotelName: str = "ホテル・ヘリテイジ飯能sta．"
+    department: Optional[str] = None
     staff: list[StaffModel] = []
     breakRules: list[BreakRuleModel] = []

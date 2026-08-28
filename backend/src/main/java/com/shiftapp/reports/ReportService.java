@@ -87,9 +87,39 @@ public class ReportService {
     }
 
     @Transactional(readOnly = true)
+    public byte[] generateShiftAllRange(Long restaurantId, LocalDate from, LocalDate to) {
+        Map<String, Object> payload = buildPayloadRange(restaurantId, from, to, null);
+        return callPython("/generate/shift/all/range", payload);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] generateShiftDeptRange(Long restaurantId, LocalDate from, LocalDate to, String department) {
+        Map<String, Object> payload = buildPayloadRange(restaurantId, from, to, department);
+        return callPython("/generate/shift/dept/range", payload);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] generateTimesheetRange(Long restaurantId, LocalDate from, LocalDate to) {
+        Map<String, Object> payload = buildPayloadRange(restaurantId, from, to, null);
+        return callPython("/generate/timesheet/range", payload);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] generateShiftFilteredRange(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+        Map<String, Object> payload = buildPayloadForUsersRange(restaurantId, from, to, userIds);
+        return callPython("/generate/shift/all/range", payload);
+    }
+
+    @Transactional(readOnly = true)
     public byte[] generateAttendanceTimesheet(Long restaurantId, String ym) {
         Map<String, Object> payload = buildAttendancePayload(restaurantId, ym);
         return callPython("/generate/attendance/timesheet", payload);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] generateAttendanceTimesheetFiltered(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+        Map<String, Object> payload = buildAttendancePayloadRange(restaurantId, from, to, userIds);
+        return callPython("/generate/attendance/timesheet/filtered", payload);
     }
 
     @Transactional(readOnly = true)
@@ -219,6 +249,103 @@ public class ReportService {
         payload.put("breakRules", buildBreakRulesPayload(restaurantId));
         return payload;
     }
+    
+    private Map<String, Object> buildPayloadRange(Long restaurantId, LocalDate from, LocalDate to, String department) {
+        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+                .stream()
+                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
+                .toList();
+
+        List<User> staffList = department == null ? allStaff : allStaff.stream()
+                .filter(u -> u.getDepartments().stream()
+                        .anyMatch(d -> d.getName().equals(department)))
+                .toList();
+
+        List<Preference> allPrefs = preferenceRepository
+                .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to);
+
+        Map<Long, Map<LocalDate, Preference>> byUser = new HashMap<>();
+        for (Preference p : allPrefs) {
+            byUser.computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
+                  .put(p.getWorkDate(), p);
+        }
+
+        List<Map<String, Object>> staffData = new ArrayList<>();
+        for (User u : staffList) {
+            Map<LocalDate, Preference> prefMap =
+                    byUser.getOrDefault(u.getId(), Collections.emptyMap());
+
+            List<Map<String, Object>> days = new ArrayList<>();
+            for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+                Preference p = prefMap.get(date);
+                days.add(buildDay(date, p));
+            }
+
+            Map<String, Object> staffEntry = new LinkedHashMap<>();
+            staffEntry.put("userId",      u.getId());
+            staffEntry.put("userName",    u.getFullName());
+            staffEntry.put("position",    u.getPosition());
+            staffEntry.put("departments", u.getDepartments().stream()
+                    .map(Department::getName).toList());
+            staffEntry.put("days", days);
+            staffData.add(staffEntry);
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("fromDate",   from.toString());
+        payload.put("toDate",     to.toString());
+        payload.put("hotelName",  hotelName);
+        payload.put("department", department);
+        payload.put("staff",      staffData);
+        payload.put("breakRules", buildBreakRulesPayload(restaurantId));
+        return payload;
+    }
+
+    private Map<String, Object> buildPayloadForUsersRange(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+                .stream()
+                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
+                .filter(u -> userIds.contains(u.getId()))
+                .toList();
+
+        List<Preference> allPrefs = preferenceRepository
+                .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to);
+
+        Map<Long, Map<LocalDate, Preference>> byUser = new HashMap<>();
+        for (Preference p : allPrefs) {
+            byUser.computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
+                  .put(p.getWorkDate(), p);
+        }
+
+        List<Map<String, Object>> staffData = new ArrayList<>();
+        for (User u : allStaff) {
+            Map<LocalDate, Preference> prefMap =
+                    byUser.getOrDefault(u.getId(), Collections.emptyMap());
+
+            List<Map<String, Object>> days = new ArrayList<>();
+            for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+                days.add(buildDay(date, prefMap.get(date)));
+            }
+
+            Map<String, Object> staffEntry = new LinkedHashMap<>();
+            staffEntry.put("userId",      u.getId());
+            staffEntry.put("userName",    u.getFullName());
+            staffEntry.put("position",    u.getPosition());
+            staffEntry.put("departments", u.getDepartments().stream()
+                    .map(Department::getName).toList());
+            staffEntry.put("days", days);
+            staffData.add(staffEntry);
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("fromDate",   from.toString());
+        payload.put("toDate",     to.toString());
+        payload.put("hotelName",  hotelName);
+        payload.put("department", null);
+        payload.put("staff",      staffData);
+        payload.put("breakRules", buildBreakRulesPayload(restaurantId));
+        return payload;
+    }
 
     private Map<String, Object> buildAttendancePayload(Long restaurantId, String ym) {
         YearMonth yearMonth  = YearMonth.parse(ym);
@@ -270,6 +397,59 @@ public class ReportService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("ym",        ym);
+        payload.put("hotelName", hotelName);
+        payload.put("staff",     staffData);
+        return payload;
+    }
+
+    private Map<String, Object> buildAttendancePayloadRange(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+                .stream()
+                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
+                .filter(u -> userIds == null || userIds.isEmpty() || userIds.contains(u.getId()))
+                .toList();
+
+        List<TimeRecord> records = timeRecordRepository.findByRestaurantAndDateRange(restaurantId, from, to);
+        Map<Long, Map<LocalDate, List<TimeRecord>>> byUser = new HashMap<>();
+        for (TimeRecord t : records) {
+            byUser.computeIfAbsent(t.getUser().getId(), k -> new HashMap<>())
+                  .computeIfAbsent(t.getWorkDate(), k -> new ArrayList<>())
+                  .add(t);
+        }
+
+        List<Preference> allPrefs = preferenceRepository
+                .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to);
+        Map<Long, Map<LocalDate, Preference>> prefByUser = new HashMap<>();
+        for (Preference p : allPrefs) {
+            prefByUser.computeIfAbsent(p.getUser().getId(), k -> new HashMap<>())
+                      .put(p.getWorkDate(), p);
+        }
+
+        List<BreakRule> breakRules = breakRuleRepository.findByRestaurant_IdOrderByThresholdMinutesAsc(restaurantId);
+
+        List<Map<String, Object>> staffData = new ArrayList<>();
+        for (User u : allStaff) {
+            Map<LocalDate, List<TimeRecord>> recMap = byUser.getOrDefault(u.getId(), Collections.emptyMap());
+            Map<LocalDate, Preference> prefMap = prefByUser.getOrDefault(u.getId(), Collections.emptyMap());
+
+            List<Map<String, Object>> days = new ArrayList<>();
+            for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+                days.add(buildAttendanceDay(date, recMap.get(date), prefMap.get(date), breakRules));
+            }
+
+            Map<String, Object> staffEntry = new LinkedHashMap<>();
+            staffEntry.put("userId",      u.getId());
+            staffEntry.put("userName",    u.getFullName());
+            staffEntry.put("position",    u.getPosition());
+            staffEntry.put("departments", u.getDepartments().stream()
+                    .map(Department::getName).toList());
+            staffEntry.put("days", days);
+            staffData.add(staffEntry);
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("fromDate",  from.toString());
+        payload.put("toDate",    to.toString());
         payload.put("hotelName", hotelName);
         payload.put("staff",     staffData);
         return payload;

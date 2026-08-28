@@ -5,6 +5,68 @@
 
 ログ変更履歴。
 
+
+## 2026-08-19
+
+### HannoSHIFT — 勤怠管理リスト: 休憩時刻の表示不具合修正
+
+- 予定（シフト）がない日で、休憩ルールにより自動計算された休憩時間が **カレンダー表示** には出るのに **リスト表示** の`休憩時刻`列には出ない不具合を修正
+  - 原因: リスト側は実打刻（`休憩`/`復帰`ボタン）のみを参照しており、自動計算値（`computeSessionOfficial()`の`officialBreakMinutes`）にフォールバックしていなかった
+  - `AttendancePage.jsx`: `休憩時刻`列のレンダリングで実打刻がなければ`s.info.officialBreakMinutes`を表示するよう修正
+- 同様のロジックを Excel レポート（`attendance_sessions.py`）にも適用（`_raw_break_minutes()`が`None`の場合は`s.officialBreakMinutes`にフォールバック）
+
+### HannoSHIFT — ログインセキュリティ: 段階的アカウントロック機能を追加
+
+- **背景**: これまでログイン試行回数に制限がなく、パスワードを無制限に試行できる状態だった
+- **仕様**:
+  - 5回連続失敗 → 10分間ロック
+  - 10回連続失敗 → 30分間ロック
+  - 15回連続失敗 → 3時間ロック
+  - 20回連続失敗 → 永久ロック（管理者による解除が必要）
+  - ログイン成功時は試行回数・ロックレベルを完全リセット
+  - カウントは IP ではなく **ログインID単位**（悪意ある第三者による意図的なロックのリスクは、現状のデータの重要度から許容範囲と判断。将来的に必要であれば IP+ログインID単位に変更予定）
+  - ロック中の再ログイン試行はカウンター・タイマーに影響を与えない（無限にロック延長される脆弱性を回避）
+
+- **Backend**
+  - `V15__add_login_lock.sql`（新規）— `users`テーブルに`failed_login_attempts`, `lock_level`, `locked_until`, `account_locked`を追加
+  - `User.java` — 上記4フィールド + getter/setter追加
+  - `AuthController.java`
+    - `login()`にロック判定ロジックを追加（`accountLocked`→即拒否、`lockedUntil`未経過→拒否、パスワード不一致→`registerFailedAttempt()`）
+    - ロック中のメッセージに具体的な時間を明示（例:「ログイン試行回数が上限に達しました。10分間ロックされます。時間をおいて再度お試しください。」）
+    - `LOCK_THRESHOLDS = {5,10,15,20}`, `LOCK_MINUTES = {10,30,180}`（レベル4は永久ロック）
+  - `ManagerUserController.java`
+    - `POST /api/manager/employees/{id}/unlock`エンドポイント追加
+    - `@Transactional`必須（`departments`の遅延ロード例外に注意 — `UserResponse.from()`がトランザクション外で呼ばれると`LazyInitializationException`が発生する）
+  - `UserResponse.java` — `accountLocked`, `lockLevel`, `lockedUntil`を追加
+
+- **Frontend**
+  - `api.js` — `managerEmployeesUnlock(id)`を追加
+  - `EmployeesPage.jsx`
+    - スタッフ一覧の状態列に`🔒 ロック中`（永久）/`⚠ 一時ロック（10分/30分/3時間）`バッジを追加
+    - 編集モーダル内、`アクティブ`チェックボックスの下に`🔓 ロックを解除する`チェックボックスを追加（ロック中の場合のみ表示、現在のロック状態を表示）
+    - 保存時、チェックが入っていれば通常の更新後に`unlock` APIを呼び出す（一括操作、専用ボタンは廃止）
+
+---
+
+## 2026-07-30
+
+### シフト管理 — 部署別シフト表（shift_dept.py）フォーマット改善
+
+- **職場→休憩に変更**: 3行目のラベルを`職場`から`休憩`に変更し、`休憩ルール`に基づき各スロットの実働時間から自動計算した休憩時間を表示（形式:「1:30」の時:分表記）
+  - `ReportService.java`: `buildPayload()`/`buildPayloadForUsers()`に`breakRules`をpayloadへ追加（`buildBreakRulesPayload()`新設）
+  - `models.py`: `BreakRuleModel`, `ReportRequest.breakRules`を追加
+  - `shift_dept.py`: `_slot_duration_minutes()`, `_auto_break_minutes()`, `_fmt_break()`を追加
+  - **重要な不具合修正**: `ReportService.buildDay()`が`last`（L）スロットの`endTime`を常に`null`で送っていたため、Lが立っているシフトの休憩時間が計算できなかった。`endTime`は`last`に関わらず常に実値を送るよう修正（`last`はPython側で表示上の分岐にのみ使用）
+- **視認性向上**
+  - 日付・曜日の文字サイズを拡大（日: 8→10, 曜日: 8→9）
+  - 出勤/退勤/休憩の行の高さを拡大（14→20）— テキストの詰まりを解消
+  - `役職`セルを縦書き表示に変更（`textRotation=255`）、列幅を5.25→7に拡大
+  - `氏名`の文字サイズを拡大（9→11、太字）
+- **テーブル下部にヘッダー行を複製**（フッター）
+  - 最終行の直後に、シート上部と同じ日付・曜日・`役職`/`氏名`ラベル・`公休数`見出しを再表示
+  - スクロールして上に戻らなくても、下端で日付を参照できるように改善
+  - 外枠の太罫線をフッターまで拡張
+
 ---
 
 ## 2026-07-14

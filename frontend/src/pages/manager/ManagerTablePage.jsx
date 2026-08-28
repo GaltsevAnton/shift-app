@@ -1723,12 +1723,19 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     setReportMenuOpen(false);
     setReportLoading(true);
     try {
+      if (displayDates.length === 0) {
+        setAlertMsg("期間を正しく設定してください");
+        return;
+      }
+      const from = displayDates[0];
+      const to   = displayDates[displayDates.length - 1];
+
       if (type === "all") {
-        await api.reportShiftAll(ym);
+        await api.reportShiftAllRange(from, to);
       } else if (type === "timesheet") {
-        await api.reportTimesheet(ym);
+        await api.reportTimesheetRange(from, to);
       } else if (type === "filtered") {
-        await api.reportShiftFiltered(ym, filteredStaff.map(s => s.userId));
+        await api.reportShiftFilteredRange(from, to, filteredStaff.map(s => s.userId));
       } else if (type === "dept") {
         const selectedDepts = [...visibleDepartments];
         if (selectedDepts.length === 0) {
@@ -1739,7 +1746,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
           setAlertMsg("部署別シフト表は1つの部署のみ選択してください。");
           setReportLoading(false); return;
         }
-        await api.reportShiftDept(ym, selectedDepts[0]);
+        await api.reportShiftDeptRange(from, to, selectedDepts[0]);
       }
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
@@ -1965,7 +1972,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                   { key:"all",       icon:"📋", label:"全員シフト表" },
                   { key:"dept",      icon:"🏢", label:"部署別シフト表" },
                   { key:"timesheet", icon:"🕐", label:"勤怠集計表" },
-                  { key:"filtered",  icon:"🔍", label:"選択中スタッフのシフト表" },
+                  { key:"filtered",  icon:"🔍", label:"選択中のシフト表" },
                 ].map(item => (
                   <button key={item.key} type="button"
                     onClick={() => handleReport(item.key)}
@@ -2075,7 +2082,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                     );
                   })}
 
-                  <th className={styles.thNameSub}></th>
+                  <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
+                  <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
                 </tr>
 
                 {/* Row 2: column headers + day headers */}

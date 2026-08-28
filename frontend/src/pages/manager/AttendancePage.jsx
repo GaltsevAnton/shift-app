@@ -1099,6 +1099,16 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         await api.reportAttendanceTimesheet(ym);
       } else if (type === "list") {
         await api.reportAttendanceList(ym);
+      } else if (type === "timesheet_filtered") {
+        if (displayDates.length === 0) {
+          setAlertMsg("期間を正しく設定してください");
+          return;
+        }
+        await api.reportAttendanceTimesheetFiltered(
+          displayDates[0],
+          displayDates[displayDates.length - 1],
+          filteredStaffByStatus.map(s => s.id)
+        );
       }
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
@@ -1250,6 +1260,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                 {[
                   { key: "timesheet", icon: "🕐", label: "勤怠集計表（実績）" },
                   { key: "list",      icon: "📋", label: "打刻一覧" },
+                  { key: "timesheet_filtered", icon: "🔍", label: "表示中の勤怠集計表" },
                 ].map(item => (
                   <button key={item.key} type="button"
                     onClick={() => handleReport(item.key)}
@@ -1881,7 +1892,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         >
           <div style={{
             background:"#fff", borderRadius:16, padding:24,
-            minWidth:340, maxWidth:440,
+            minWidth:400, maxWidth:480,
             boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
           }}>
             {(() => {
@@ -1973,10 +1984,19 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                           </div>
                           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                             {r.photoPath && (
-                              <button onClick={() => setPhotoPopup(r.photoPath)}
-                                style={{ fontSize:20, background:"none", border:"none", cursor:"pointer", padding:0 }}>
-                                📷
-                              </button>
+                              <img
+                              src={r.photoPath}
+                              alt=""
+                              onClick={() => setPhotoPopup(r.photoPath)}
+                              style={{
+                                width: 130, height: 100,
+                                objectFit: "cover",
+                                borderRadius: 6,
+                                border: "1px solid #e2e8f0",
+                                cursor: "pointer",
+                                flexShrink: 0,
+                              }}
+                            />
                             )}
                             <button onClick={() => setEditRecord({
                               id: r.id,

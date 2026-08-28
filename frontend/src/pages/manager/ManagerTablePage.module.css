@@ -82,7 +82,7 @@
 
 /* ─── Sticky column headers ─────────────────────────────── */
 .thPosition {
-  position: sticky; left: 0; top: 34px; z-index: 40;
+  position: sticky; left: 0; top: 30px; z-index: 40;
   background: #fff;
   border-bottom: 2px solid #e2e8f0;
   border-right: 1px solid #e2e8f0;
@@ -93,7 +93,7 @@
   white-space: normal; word-break: break-all; line-height: 1.3;
 }
 .thDepartment {
-  position: sticky; left: 70px; top: 34px; z-index: 40;
+  position: sticky; left: 70px; top: 30px; z-index: 40;
   background: #fff;
   border-bottom: 2px solid #e2e8f0;
   border-right: 1px solid #e2e8f0;
@@ -104,7 +104,7 @@
   white-space: normal; word-break: break-all; line-height: 1.3;
 }
 .thName {
-  position: sticky; left: 160px; top: 34px; z-index: 40;
+  position: sticky; left: 160px; top: 30px; z-index: 40;
   background: #fff;
   border-bottom: 2px solid #e2e8f0;
   border-right: 1px solid #e2e8f0;
@@ -114,7 +114,7 @@
   font-size: 12px; font-weight: 600; color: #94a3b8; letter-spacing: 0.5px;
 }
 .thDay {
-  position: sticky; top: 34px; z-index: 20;
+  position: sticky; top: 30px; z-index: 20;
   background: #fff;
   border-bottom: 2px solid #e2e8f0;
   border-right: 1px solid #f1f5f9;
@@ -739,7 +739,7 @@ tr[data-staff]:first-of-type td { border-top: 2px solid #e2e8f0; }
 }
 
 .thNumber {
-  position: sticky; left: 0; top: 34px; z-index: 40;
+  position: sticky; left: 0; top: 30px; z-index: 40;
   background: #fff;
   border-bottom: 2px solid #e2e8f0;
   border-right: 1px solid #e2e8f0;

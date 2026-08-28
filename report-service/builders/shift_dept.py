@@ -16,14 +16,14 @@
 
 import io
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import (
     Font, PatternFill, Alignment, Border, Side,
     GradientFill,
 )
 from openpyxl.utils import get_column_letter
-from models import ReportRequest, StaffModel, DayModel, SlotModel, BreakRuleModel
+from models import ReportRequest, ReportRangeRequest, StaffModel, DayModel, SlotModel, BreakRuleModel
 from openpyxl.worksheet.page import PageMargins
 
 # ── Константы ──────────────────────────────────────────────────────────────
@@ -131,6 +131,28 @@ def _apply_outer_border(ws, min_row, max_row, min_col, max_col, color=C_GRID):
 def _medium(color=C_GRID):
     s = Side(style="medium", color=color)
     return Border(left=s, right=s, top=s, bottom=s)
+
+def _date_range(from_str: str, to_str: str) -> list[str]:
+    y1, m1, d1 = map(int, from_str.split("-"))
+    y2, m2, d2 = map(int, to_str.split("-"))
+    cur = date(y1, m1, d1)
+    end = date(y2, m2, d2)
+    out = []
+    while cur <= end:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+def _weekday_from_iso(date_str: str) -> int:
+    y, m, d = map(int, date_str.split("-"))
+    wd = date(y, m, d).weekday()
+    return (wd + 1) % 7
+
+def _day_data_range(staff: StaffModel, date_str: str) -> DayModel:
+    for d in staff.days:
+        if d.date == date_str:
+            return d
+    return DayModel(date=date_str, off=True, slots=[])
 
 def build(req: ReportRequest) -> bytes:
     ym       = req.ym
@@ -455,6 +477,277 @@ def build(req: ReportRequest) -> bytes:
     ws.page_setup.copies = 1
 
     # ── Итоговый буфер ───────────────────────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+def build_range(req: ReportRangeRequest) -> bytes:
+    dates = _date_range(req.fromDate, req.toDate)
+    total = len(dates)
+    staff = req.staff
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{req.fromDate}〜{req.toDate}"[:31]
+
+    ws.column_dimensions["A"].width = 5.25
+    ws.column_dimensions["B"].width = 12
+    ws.column_dimensions["C"].width = 5
+    for i, _ in enumerate(dates):
+        col = get_column_letter(4 + i)
+        ws.column_dimensions[col].width = 6
+    ws.column_dimensions[get_column_letter(4 + total)].width = 5
+
+    ws.row_dimensions[1].height = 6
+
+    last_col = get_column_letter(3 + total)
+    ws.merge_cells(f"A2:{last_col}2")
+    c = ws["A2"]
+    c.value = f"{req.hotelName}シフト表（{req.fromDate}～{req.toDate}）"
+    c.font      = _font(bold=True, size=12)
+    c.alignment = _align(h="center")
+    ws.row_dimensions[2].height = 18
+
+    ws.merge_cells(f"B3:{last_col}3")
+    c = ws["B3"]
+    c.value     = f"【{req.fromDate}～{req.toDate} シフト {req.department or ''}】"
+    c.font      = _font(bold=True, size=12)
+    c.alignment = _align(h="left")
+    ws.row_dimensions[3].height = 16
+
+    ws.row_dimensions[4].height = 5
+
+    ws.merge_cells("A5:A6")
+    ws.merge_cells("B5:B6")
+    _apply_outer_border(ws, 5, 6, 1, 1)
+    _apply_outer_border(ws, 5, 6, 2, 2)
+
+    for cell_addr, label in [("A5", "役職"), ("B5", "氏名")]:
+        c = ws[cell_addr]
+        c.value     = label
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    for r, label in [(5, "日"), (6, "曜日")]:
+        c = ws.cell(row=r, column=3)
+        c.value     = label
+        c.font      = _font(size=7)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.row_dimensions[5].height = 16
+    ws.row_dimensions[6].height = 16
+
+    for i, ds in enumerate(dates):
+        col = 4 + i
+        wd  = _weekday_from_iso(ds)
+        mm, dd = int(ds[5:7]), int(ds[8:10])
+
+        c = ws.cell(row=5, column=col)
+        c.value     = f"{mm}/{dd}"
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+        c = ws.cell(row=6, column=col)
+        c.value     = WD_JA[wd]
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.merge_cells(f"{get_column_letter(4 + total)}5:{get_column_letter(4 + total)}6")
+    c = ws.cell(row=5, column=4 + total)
+    c.value     = "公休\n数"
+    c.font      = _font(size=7)
+    c.alignment = _align()
+    c.border    = _thin()
+    _apply_outer_border(ws, 5, 6, 4 + total, 4 + total)
+
+    base_row = 7
+    for staff_idx, s in enumerate(staff):
+        r = base_row + staff_idx * 3
+        row_bg = C_ROW_ODD
+
+        ws.merge_cells(f"A{r}:A{r+2}")
+        c = ws[f"A{r}"]
+        c.value     = s.position or ""
+        c.font      = _font(size=8, color="555555")
+        c.fill      = _fill(row_bg)
+        c.alignment = Alignment(horizontal="center", vertical="center", textRotation=255, wrap_text=True)
+        c.border    = _thin()
+        _apply_outer_border(ws, r, r+2, 1, 1)
+
+        ws.merge_cells(f"B{r}:B{r+2}")
+        c = ws[f"B{r}"]
+        c.value     = s.userName
+        c.font      = _font(size=11)
+        c.fill      = _fill(row_bg)
+        c.alignment = _align(h="center")
+        c.border    = _thin()
+        _apply_outer_border(ws, r, r+2, 2, 2)
+
+        labels = ["出勤", "退勤", "休憩"]
+        for sub, label in enumerate(labels):
+            c = ws.cell(row=r + sub, column=3)
+            c.value     = label
+            c.font      = _font(size=7, color="333333")
+            c.fill      = _fill(C_LABEL_BG)
+            c.alignment = _align()
+            c.border    = _thin()
+            ws.row_dimensions[r + sub].height = 20
+
+        for i, ds in enumerate(dates):
+            col = 4 + i
+            day_bg = row_bg
+
+            d = _day_data_range(s, ds)
+
+            if d.off or not d.slots:
+                ws.merge_cells(f"{get_column_letter(col)}{r}:{get_column_letter(col)}{r+2}")
+                c = ws.cell(row=r, column=col)
+                c.value     = "休"
+                c.font      = _font(color=C_OFF_FG, bold=True, size=10)
+                c.fill      = _fill(C_OFF_BG)
+                c.alignment = _align()
+                c.border    = _thin()
+                _apply_outer_border(ws, r, r+2, col, col)
+            else:
+                slots = d.slots
+                starts = "\n".join(_format_time(sl.startTime) for sl in slots if sl.startTime)
+                ends   = "\n".join(("L" if sl.last else _format_time(sl.endTime)) for sl in slots)
+                breaks = "\n".join(
+                    _fmt_break(_auto_break_minutes(_slot_duration_minutes(sl), req.breakRules))
+                    for sl in slots
+                )
+
+                for sub, val in enumerate([starts, ends, breaks]):
+                    c = ws.cell(row=r + sub, column=col)
+                    c.value     = val
+                    c.fill      = _fill(day_bg)
+                    c.alignment = _align(h="center", v="center")
+                    c.border    = _thin()
+                    if sub == 2:
+                        c.font = _font(size=8, color="555555")
+                    else:
+                        c.font = _font(size=9)
+
+        off_count = sum(1 for ds in dates if not _day_data_range(s, ds).slots or _day_data_range(s, ds).off)
+        off_col = 4 + total
+        ws.merge_cells(f"{get_column_letter(off_col)}{r}:{get_column_letter(off_col)}{r+2}")
+        c = ws.cell(row=r, column=off_col)
+        c.value     = off_count
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+        _apply_outer_border(ws, r, r+2, off_col, off_col)
+
+        thick = Side(style="medium", color="000000")
+        no    = Side(style=None)
+        is_first = staff_idx == 0
+
+        for sub_row in range(r, r + 3):
+            for col_idx in range(1, 4 + total):
+                c = ws.cell(row=sub_row, column=col_idx)
+                top    = thick if (sub_row == r and is_first) else no
+                bottom = thick if sub_row == r + 2 else no
+                left   = thick if col_idx == 1 else no
+                right  = thick if col_idx == 3 + total else no
+                if any([top != no, bottom != no, left != no, right != no]):
+                    existing = c.border
+                    c.border = Border(
+                        top    = top    if top    != no else existing.top,
+                        bottom = bottom if bottom != no else existing.bottom,
+                        left   = left   if left   != no else existing.left,
+                        right  = right  if right  != no else existing.right,
+                    )
+
+    footer_row1 = base_row + len(staff) * 3
+    footer_row2 = footer_row1 + 1
+
+    ws.merge_cells(f"A{footer_row1}:A{footer_row2}")
+    ws.merge_cells(f"B{footer_row1}:B{footer_row2}")
+    _apply_outer_border(ws, footer_row1, footer_row2, 1, 1)
+    _apply_outer_border(ws, footer_row1, footer_row2, 2, 2)
+
+    for cell_addr, label in [(f"A{footer_row1}", "役職"), (f"B{footer_row1}", "氏名")]:
+        c = ws[cell_addr]
+        c.value     = label
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    for r, label in [(footer_row1, "日"), (footer_row2, "曜日")]:
+        c = ws.cell(row=r, column=3)
+        c.value     = label
+        c.font      = _font(size=7)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.row_dimensions[footer_row1].height = 22
+    ws.row_dimensions[footer_row2].height = 20
+
+    for i, ds in enumerate(dates):
+        col = 4 + i
+        wd  = _weekday_from_iso(ds)
+        mm, dd = int(ds[5:7]), int(ds[8:10])
+
+        c = ws.cell(row=footer_row1, column=col)
+        c.value     = f"{mm}/{dd}"
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+        c = ws.cell(row=footer_row2, column=col)
+        c.value     = WD_JA[wd]
+        c.font      = _font(size=9)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.merge_cells(f"{get_column_letter(4 + total)}{footer_row1}:{get_column_letter(4 + total)}{footer_row2}")
+    c = ws.cell(row=footer_row1, column=4 + total)
+    c.value     = "公休\n数"
+    c.font      = _font(size=7)
+    c.alignment = _align()
+    c.border    = _thin()
+    _apply_outer_border(ws, footer_row1, footer_row2, 4 + total, 4 + total)
+
+    last_data_row = footer_row2
+    last_data_col = 4 + total
+
+    thick = Side(style="medium", color="000000")
+    no    = Side(style=None)
+
+    for row in range(5, last_data_row + 1):
+        for col in range(1, last_data_col + 1):
+            c = ws.cell(row=row, column=col)
+            top    = thick if row == 5             else no
+            bottom = thick if row == last_data_row else no
+            left   = thick if col == 1             else no
+            right  = thick if col == last_data_col else no
+            if any([top, bottom, left, right]):
+                existing = c.border
+                c.border = Border(
+                    top    = top    if top    != no else existing.top,
+                    bottom = bottom if bottom != no else existing.bottom,
+                    left   = left   if left   != no else existing.left,
+                    right  = right  if right  != no else existing.right,
+                )
+
+    ws.freeze_panes = "D7"
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_margins = PageMargins(
+        left=0.25, right=0.25, top=0.75, bottom=0.75, header=0.3, footer=0.3
+    )
+    ws.page_setup.copies = 1
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

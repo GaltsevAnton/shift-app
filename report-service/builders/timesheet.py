@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from models import ReportRequest, StaffModel, DayModel
+from models import ReportRequest, ReportRangeRequest, StaffModel, DayModel
 
 WD_JA     = ["日", "月", "火", "水", "木", "金", "土"]
 FONT_NAME = "メイリオ"
@@ -73,6 +73,26 @@ def _calc_hours(d: DayModel) -> float:
             pass
     return round(total, 2)
 
+def _date_range(from_str: str, to_str: str) -> list[str]:
+    y1, m1, d1 = map(int, from_str.split("-"))
+    y2, m2, d2 = map(int, to_str.split("-"))
+    cur = date(y1, m1, d1)
+    end = date(y2, m2, d2)
+    out = []
+    while cur <= end:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+def _weekday_from_iso(date_str: str) -> int:
+    y, m, d = map(int, date_str.split("-"))
+    return (date(y, m, d).weekday() + 1) % 7
+
+def _day_data_range(staff: StaffModel, date_str: str) -> DayModel:
+    for d in staff.days:
+        if d.date == date_str:
+            return d
+    return DayModel(date=date_str, off=True, slots=[])
 
 def build(req: ReportRequest) -> bytes:
     ym    = req.ym
@@ -219,6 +239,155 @@ def build(req: ReportRequest) -> bytes:
         c.border    = _thin()
 
         # 総労働時間
+        c = ws.cell(row=r, column=col_total_h)
+        c.value       = round(total_hours, 1)
+        c.font        = _font(bold=True, size=9)
+        c.fill        = _fill(C_TOTAL_BG)
+        c.alignment   = _align()
+        c.border      = _thin()
+        c.number_format = "0.0"
+
+        ws.row_dimensions[r].height = 18
+
+    ws.freeze_panes = "D3"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+def build_range(req: ReportRangeRequest) -> bytes:
+    dates = _date_range(req.fromDate, req.toDate)
+    total = len(dates)
+
+    col_work_days = 4 + total
+    col_total_h   = 5 + total
+    last_col      = get_column_letter(col_total_h)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{req.fromDate}〜{req.toDate}_勤怠"[:31]
+
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 12
+    ws.column_dimensions["C"].width = 13
+    for i, ds in enumerate(dates):
+        col = get_column_letter(4 + i)
+        wd  = _weekday_from_iso(ds)
+        ws.column_dimensions[col].width = 6 if wd in (0, 6) else 5.5
+    ws.column_dimensions[get_column_letter(col_work_days)].width = 8
+    ws.column_dimensions[get_column_letter(col_total_h)].width   = 10
+
+    ws.merge_cells(f"A1:{last_col}1")
+    c = ws["A1"]
+    c.value     = f"{req.hotelName}勤怠表（{req.fromDate}～{req.toDate}）"
+    c.font      = _font(bold=True, size=11)
+    c.alignment = _align(h="left")
+    ws.row_dimensions[1].height = 20
+
+    for col_idx, label in enumerate(["職種・役職", "部署", "氏名"], 1):
+        c = ws.cell(row=2, column=col_idx)
+        c.value     = label
+        c.font      = _font(bold=True, color=C_HEADER_FG, size=9)
+        c.fill      = _fill(C_HEADER_BG)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    for i, ds in enumerate(dates):
+        wd     = _weekday_from_iso(ds)
+        is_sat = wd == 6
+        is_sun = wd == 0
+        bg     = C_SAT_BG if is_sat else (C_SUN_BG if is_sun else C_WEEKDAY_BG)
+        col    = 4 + i
+        mm, dd = int(ds[5:7]), int(ds[8:10])
+        c = ws.cell(row=2, column=col)
+        c.value     = f"{mm}/{dd}\n{WD_JA[wd]}"
+        c.font      = _font(
+            bold=True,
+            color=C_OFF_FG if is_sun else ("1F4E79" if is_sat else C_HEADER_FG),
+            size=8,
+        )
+        c.fill      = _fill(bg)
+        c.alignment = _align()
+        c.border    = _thin()
+
+    for col_idx, label in [(col_work_days, "出勤\n日数"), (col_total_h, "総労働\n時間")]:
+        c = ws.cell(row=2, column=col_idx)
+        c.value     = label
+        c.font      = _font(bold=True, color=C_HEADER_FG, size=9)
+        c.fill      = _fill("2E7D32")
+        c.alignment = _align()
+        c.border    = _thin()
+
+    ws.row_dimensions[2].height = 28
+
+    for row_idx, s in enumerate(req.staff):
+        r      = 3 + row_idx
+        row_bg = C_ROW_ODD if row_idx % 2 == 0 else C_ROW_EVEN
+
+        c = ws.cell(row=r, column=1)
+        c.value = s.position or ""
+        c.font = _font(size=8, color="555555")
+        c.fill = _fill(C_META_BG)
+        c.alignment = _align(h="left")
+        c.border = _thin()
+
+        c = ws.cell(row=r, column=2)
+        c.value = "、".join(s.departments)
+        c.font = _font(size=8, color="555555")
+        c.fill = _fill(C_META_BG)
+        c.alignment = _align(h="left")
+        c.border = _thin()
+
+        c = ws.cell(row=r, column=3)
+        c.value = s.userName
+        c.font = _font(bold=True, size=9)
+        c.fill = _fill(C_META_BG)
+        c.alignment = _align(h="left", wrap=False)
+        c.border = _thin()
+
+        work_days = 0
+        total_hours = 0.0
+
+        for i, ds in enumerate(dates):
+            wd     = _weekday_from_iso(ds)
+            is_sat = wd == 6
+            is_sun = wd == 0
+            day_bg = C_SAT_BG if is_sat else (C_SUN_BG if is_sun else row_bg)
+            col    = 4 + i
+
+            d     = _day_data_range(s, ds)
+            hours = _calc_hours(d)
+            c     = ws.cell(row=r, column=col)
+            c.border = _thin()
+
+            if d.off or not d.slots:
+                c.value     = "休"
+                c.font      = _font(bold=True, color=C_OFF_FG, size=8)
+                c.fill      = _fill(C_OFF_BG)
+                c.alignment = _align()
+            elif hours == 0:
+                c.value     = "L"
+                c.font      = _font(size=8, color="1F4E79")
+                c.fill      = _fill(day_bg)
+                c.alignment = _align()
+                work_days  += 1
+            else:
+                c.value     = hours
+                c.font      = _font(size=8)
+                c.fill      = _fill(day_bg)
+                c.alignment = _align()
+                c.number_format = "0.0"
+                work_days  += 1
+                total_hours += hours
+
+        c = ws.cell(row=r, column=col_work_days)
+        c.value     = work_days
+        c.font      = _font(bold=True, size=9)
+        c.fill      = _fill(C_TOTAL_BG)
+        c.alignment = _align()
+        c.border    = _thin()
+
         c = ws.cell(row=r, column=col_total_h)
         c.value       = round(total_hours, 1)
         c.font        = _font(bold=True, size=9)
