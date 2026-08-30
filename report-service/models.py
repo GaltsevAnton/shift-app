@@ -76,6 +76,7 @@ class SessionModel(BaseModel):
     scheduledClockIn: Optional[str] = None
     scheduledClockOut: Optional[str] = None
     scheduledBreakMinutes: Optional[int] = None
+    nextDay: bool = False   # 退勤予定が翌日にまたがるスロットか（退勤日付（予定）の計算に使用）
     # официальные (округлённые по плану) значения — только для 勤務時間
     hasPlan: bool = False
     officialClockIn: Optional[str] = None
@@ -84,12 +85,15 @@ class SessionModel(BaseModel):
     workMinutes: Optional[int] = None
     lateIn: bool = False
     earlyOut: bool = False
+    # 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない/未退勤なら null
+    overtimeMinutes: Optional[int] = None
 
 class AttendanceSessionsRequest(BaseModel):
     hotelName: str = "ホテル・ヘリテイジ飯能sta．"
     fromDate: str
     toDate: str
     sessions: list[SessionModel] = []
+    visibleColumns: list[str] = []   # 空 = 全列表示。画面の表示列トグルと同じキー
 class BreakRuleModel(BaseModel):
     thresholdMinutes: int
     breakMinutes: int

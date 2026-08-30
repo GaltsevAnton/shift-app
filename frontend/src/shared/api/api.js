@@ -255,10 +255,10 @@ export const api = {
   reportAttendanceList: (ym) =>
     fetchBlob(`/api/manager/reports/attendance/list?ym=${ym}`),
 
-  reportAttendanceSessions: (from, to, userIds) =>
+  reportAttendanceSessions: (from, to, userIds, visibleColumns) =>
     fetchBlob(`/api/manager/reports/attendance/sessions?from=${from}&to=${to}`, {
       method: "POST",
-      body: JSON.stringify(userIds || []),
+      body: JSON.stringify({ userIds: userIds || [], visibleColumns: visibleColumns || [] }),
     }),
 
   reportAttendanceTimesheetFiltered: (from, to, userIds) =>

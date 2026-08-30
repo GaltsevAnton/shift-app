@@ -73,7 +73,7 @@ public class ReportController {
     
     /**
          * POST /api/manager/reports/attendance/sessions?from=2026-07-01&to=2026-07-31
-         * Список смен (session-based), фильтр по сотрудникам — соответствует экрану リスト
+         * Список смен (session-based), фильтр по сотрудникам и колонкам — соответствует экрану リスト
          */
     @PostMapping("/attendance/sessions")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
@@ -81,12 +81,17 @@ public class ReportController {
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestBody(required = false) List<Long> userIds) {
+            @RequestBody(required = false) AttendanceSessionsExportRequest body) {
 
-        byte[] data = reportService.generateAttendanceSessions(user.getRestaurantId(), from, to, userIds);
+        List<Long> userIds = body != null ? body.userIds() : null;
+        List<String> visibleColumns = body != null ? body.visibleColumns() : null;
+
+        byte[] data = reportService.generateAttendanceSessions(user.getRestaurantId(), from, to, userIds, visibleColumns);
         String filename = "勤怠リスト_" + from + "_" + to + ".xlsx";
         return xlsxResponse(data, filename);
     }
+
+    public record AttendanceSessionsExportRequest(List<Long> userIds, List<String> visibleColumns) {}
 
     /**
      * POST /api/manager/reports/shift/filtered

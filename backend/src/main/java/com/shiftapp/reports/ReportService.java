@@ -129,8 +129,8 @@ public class ReportService {
     }
 
     @Transactional(readOnly = true)
-    public byte[] generateAttendanceSessions(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
-        Map<String, Object> payload = buildAttendanceSessionsPayload(restaurantId, from, to, userIds);
+    public byte[] generateAttendanceSessions(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds, List<String> visibleColumns) {
+        Map<String, Object> payload = buildAttendanceSessionsPayload(restaurantId, from, to, userIds, visibleColumns);
         return callPython("/generate/attendance/sessions", payload);
     }
     // ── Сборка данных ────────────────────────────────────────────────────
@@ -676,7 +676,7 @@ public class ReportService {
                 .orElse(0);
     }
 
-    private Map<String, Object> buildAttendanceSessionsPayload(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+    private Map<String, Object> buildAttendanceSessionsPayload(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds, List<String> visibleColumns) {
         List<TimeRecord> records = timeRecordRepository.findByRestaurantAndDateRange(restaurantId, from, to);
 
         Map<Long, List<TimeRecord>> byUser = new LinkedHashMap<>();
@@ -762,10 +762,18 @@ public class ReportService {
                         session.put("scheduledClockIn",  slot.getStartTime() != null ? slot.getStartTime().toString() : null);
                         session.put("scheduledClockOut", slot.getEndTime()   != null ? slot.getEndTime().toString()   : null);
                         session.put("scheduledBreakMinutes", plannedSlotBreakMinutes(slot, breakRules));
+                        session.put("overtimeMinutes", computeOvertimeMinutes(session, slot, date, breakRules));
+                        boolean nd = slot.isNextDay();
+                        if (!nd && slot.getStartTime() != null && slot.getEndTime() != null) {
+                            nd = !slot.getEndTime().isAfter(slot.getStartTime());
+                        }
+                        session.put("nextDay", nd);
                     } else {
                         session.put("scheduledClockIn",  null);
                         session.put("scheduledClockOut", null);
                         session.put("scheduledBreakMinutes", null);
+                        session.put("overtimeMinutes", null);
+                        session.put("nextDay", false);
                     }
 
                     sessions.add(session);
@@ -778,9 +786,42 @@ public class ReportService {
         payload.put("fromDate",  from.toString());
         payload.put("toDate",    to.toString());
         payload.put("sessions",  sessions);
+        payload.put("visibleColumns", visibleColumns != null ? visibleColumns : Collections.emptyList());
         return payload;
     }
-    
+
+    // 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない/未退勤なら null
+    private Integer computeOvertimeMinutes(Map<String, Object> session, ShiftSlot slot, LocalDate date, List<BreakRule> breakRules) {
+        if (slot == null) return null;
+
+        Instant clockIn  = parseIsoToInstant((String) session.get("clockIn"));
+        Instant clockOut = parseIsoToInstant((String) session.get("clockOut"));
+        if (clockIn == null || clockOut == null) return null;
+
+        Instant planStart = planTimeToInstant(date, slot.getStartTime());
+        Instant planEnd   = planTimeToInstant(date, slot.getEndTime());
+        if (planStart == null || planEnd == null) return null;
+        if (slot.isNextDay() || !planEnd.isAfter(planStart)) planEnd = planEnd.plus(Duration.ofDays(1));
+
+        long actualGross    = Duration.between(clockIn, clockOut).toMinutes();
+        long scheduledGross = Duration.between(planStart, planEnd).toMinutes();
+
+        Instant breakStart = parseIsoToInstant((String) session.get("breakStart"));
+        Instant breakEnd   = parseIsoToInstant((String) session.get("breakEnd"));
+        int breakMin;
+        if (breakStart != null && breakEnd != null) {
+            long raw = Duration.between(breakStart, breakEnd).toMinutes();
+            breakMin = (int) Math.max(raw, 0);
+        } else {
+            breakMin = plannedSlotBreakMinutes(slot, breakRules);
+        }
+
+        long actualNet    = Math.max(actualGross - breakMin, 0);
+        long scheduledNet = Math.max(scheduledGross - breakMin, 0);
+
+        return (int) (actualNet - scheduledNet);
+    }
+
     private String toJstIso(Instant instant) {
         if (instant == null) return null;
         return instant.atZone(ZoneId.of("Asia/Tokyo")).toOffsetDateTime().toString();

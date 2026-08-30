@@ -502,18 +502,24 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [listPageSize, setListPageSize] = useState(20);
   const [listPage, setListPage]         = useState(1);
   const [listShiftMap, setListShiftMap] = useState({});
+  
   const LIST_COLUMNS = [
-    { key: "scheduledIn",    value: "scheduledIn",    label: "出勤予定" },
-    { key: "actualIn",       value: "actualIn",       label: "出勤時刻" },
-    { key: "scheduledOut",   value: "scheduledOut",   label: "退勤予定" },
-    { key: "actualOut",      value: "actualOut",      label: "退勤時刻" },
-    { key: "breakStart",     value: "breakStart",     label: "休憩開始" },
-    { key: "breakEnd",       value: "breakEnd",       label: "休憩終了" },
-    { key: "scheduledBreak", value: "scheduledBreak", label: "予定休憩" },
-    { key: "actualBreakTime", value: "actualBreakTime", label: "休憩時刻" },
-    { key: "workTime",       value: "workTime",       label: "勤務時間" },
-    { key: "actualWorkTime", value: "actualWorkTime", label: "実際に働いた時間" },
-    { key: "shiftPlan",      value: "shiftPlan",      label: "シフト予定" },
+    { key: "scheduledInDate",  value: "scheduledInDate",  label: "出勤日付（予定）" },
+    { key: "scheduledIn",      value: "scheduledIn",      label: "出勤時間（予定）" },
+    { key: "actualInDate",     value: "actualInDate",     label: "出勤日付（実際）" },
+    { key: "actualIn",         value: "actualIn",         label: "出勤時間（実際）" },
+    { key: "scheduledOutDate", value: "scheduledOutDate", label: "退勤日付（予定）" },
+    { key: "scheduledOut",     value: "scheduledOut",     label: "退勤時間（予定）" },
+    { key: "actualOutDate",    value: "actualOutDate",    label: "退勤日付（実際）" },
+    { key: "actualOut",        value: "actualOut",        label: "退勤時間（実際）" },
+    { key: "breakStart",       value: "breakStart",       label: "休憩開始" },
+    { key: "breakEnd",         value: "breakEnd",         label: "休憩終了" },
+    { key: "scheduledBreak",   value: "scheduledBreak",   label: "休憩時間（予定）" },
+    { key: "actualBreakTime",  value: "actualBreakTime",  label: "休憩時間（実際）" },
+    { key: "workTime",         value: "workTime",         label: "勤務時間（予定）" },
+    { key: "actualWorkTime",   value: "actualWorkTime",   label: "勤務時間（実際）" },
+    { key: "overtimeTime",     value: "overtimeTime",     label: "残業時間" },
+    { key: "shiftPlan",        value: "shiftPlan",        label: "シフト（予定）" },
   ];
   const [visibleListCols, setVisibleListCols] = useState(
     () => loadFilterSet("attListCols") || new Set(LIST_COLUMNS.map(c => c.key))
@@ -803,22 +809,64 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     }
     return mins > 0 ? mins : 0;
   }
+  // 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない、または未退勤なら null
+  function calcOvertimeMinutes(session, rules) {
+    if (!session.slot || !session.clockIn || !session.clockOut) return null;
+
+    const schedStart = toMinutesOfDay(session.slot.startTime);
+    let   schedEnd    = toMinutesOfDay(session.slot.endTime);
+    if (schedStart === null || schedEnd === null) return null;
+    if (schedEnd <= schedStart) schedEnd += 24 * 60;
+    const scheduledGross = schedEnd - schedStart;
+
+    const actualGross = Math.round((new Date(session.clockOut) - new Date(session.clockIn)) / 60000);
+
+    // 休憩: 実打刻があればそちらを優先、なければ予定スロットの自動計算値
+    const raw = rawBreakMinutes(session);
+    const breakMin = raw !== null ? raw : plannedSlotBreakMinutes(session.slot, rules);
+
+    const actualNet    = Math.max(actualGross - breakMin, 0);
+    const scheduledNet = Math.max(scheduledGross - breakMin, 0);
+
+    return actualNet - scheduledNet;
+  }
+  function fmtOvertimeMinutes(mins) {
+    if (mins === null) return "―";
+    const sign = mins > 0 ? "+" : mins < 0 ? "-" : "";
+    const abs  = Math.abs(mins);
+    const h = Math.floor(abs / 60), m = abs % 60;
+    return `${sign}${h}時間${m}分`;
+  }
   function formatShiftTime(t) {
     if (!t) return "--:--";
     return typeof t === "string" ? t.slice(0, 5) : t;
   }
+
   function fmtDateWithWd(dateStr) {
     if (!dateStr) return "";
     const [y, m, d] = dateStr.split("-").map(Number);
     const wd = WD_JA[new Date(y, m - 1, d).getDay()];
     return `${dateStr}（${wd}）`;
   }
+  // 実打刻のJST日付（YYYY-MM-DD）を取得 — 日付跨ぎのパンチも正しい日付になる
+  function jstDateStr(iso) {
+    if (!iso) return null;
+    return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  }
+  // 退勤予定の日付 — nextDayフラグ、または終了時刻が開始時刻以前なら翌日扱い
+  function scheduledOutDateStr(workDate, slot) {
+    if (!slot || !slot.startTime || !slot.endTime) return null;
+    const startMin = toMinutesOfDay(slot.startTime);
+    const endMin   = toMinutesOfDay(slot.endTime);
+    const nd = slot.nextDay || (startMin !== null && endMin !== null && endMin <= startMin);
+    return nd ? addDays(workDate, 1) : workDate;
+  }
 
   async function handleListExport() {
     if (!listRange.from || !listRange.to) return;
     setReportLoading(true);
     try {
-      await api.reportAttendanceSessions(listRange.from, listRange.to, [...listSelectedStaff]);
+      await api.reportAttendanceSessions(listRange.from, listRange.to, [...listSelectedStaff], [...visibleListCols]);
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
     } finally {
@@ -1766,7 +1814,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   <thead>
                       <tr style={{ background: "#f0f4ff" }}>
                         <th style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>申請者</th>
-                        <th style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>日付</th>
                         {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
                           <th key={c.key} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
                             {c.label}
@@ -1775,16 +1822,27 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                       </tr>
                     </thead>
                   <tbody>
-                    {listPagedSessions.map((s, i) => {
+                  {listPagedSessions.map((s, i) => {
                       const cellStyle = { padding: "8px 14px", whiteSpace: "nowrap" };
+                      const overtimeMin = calcOvertimeMinutes(s, breakRules);
                       const renderCell = (key) => {
                         switch (key) {
+                          case "scheduledInDate":
+                            return s.slot ? fmtDateWithWd(s.workDate) : "―";
                           case "scheduledIn":
                             return s.slot ? formatShiftTime(s.slot.startTime) : "―";
+                          case "actualInDate":
+                            return s.clockIn ? fmtDateWithWd(jstDateStr(s.clockIn)) : "―";
                           case "actualIn":
                             return fmtTimeOnly(s.clockIn);
+                          case "scheduledOutDate": {
+                            const ds = scheduledOutDateStr(s.workDate, s.slot);
+                            return ds ? fmtDateWithWd(ds) : "―";
+                          }
                           case "scheduledOut":
                             return s.slot ? formatShiftTime(s.slot.endTime) : "―";
+                          case "actualOutDate":
+                            return s.clockOut ? fmtDateWithWd(jstDateStr(s.clockOut)) : "―";
                           case "actualOut":
                             return fmtTimeOnly(s.clockOut);
                           case "breakStart":
@@ -1801,6 +1859,8 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                             return fmtWorkMinutes(s.info?.workMin ?? null);
                           case "actualWorkTime":
                             return fmtWorkMinutes(rawActualWorkedMinutes(s));
+                          case "overtimeTime":
+                            return fmtOvertimeMinutes(overtimeMin);
                           case "shiftPlan":
                             return s.slot ? `${formatShiftTime(s.slot.startTime)}〜${formatShiftTime(s.slot.endTime)}` : "―";
                           default:
@@ -1811,20 +1871,17 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                         <tr key={`${s.userId}_${s.workDate}_${s.clockIn}`}
                           style={{ background: i % 2 === 1 ? "#f8fafc" : "#fff", borderBottom: "1px solid #f1f5f9" }}>
                           <td style={cellStyle}>👤 {s.userName}</td>
-                          <td style={{ ...cellStyle, color: "#2563eb" }}>{fmtDateWithWd(s.workDate)}</td>
                           {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
                             <td key={c.key} style={{
                               ...cellStyle,
                               fontFamily: ["actualIn","actualOut","breakStart","breakEnd","scheduledIn","scheduledOut"].includes(c.key) ? "monospace" : undefined,
                               color:
-                                c.key === "breakStart" || c.key === "breakEnd" ? "#94a3b8" :
-                                c.key === "workTime" ? "#0f172a" :
-                                c.key === "actualWorkTime" ? "#0369a1" :
-                                c.key === "shiftPlan" ? "#0369a1" :
-                                c.key === "scheduledIn" || c.key === "scheduledOut" || c.key === "scheduledBreak" ? "#64748b" :
-                                c.key === "actualBreakTime" ? "#94a3b8" :
-                                undefined,
-                              fontWeight: c.key === "workTime" ? 700 : undefined,
+                                c.key === "overtimeTime"
+                                  ? (overtimeMin === null ? "#cbd5e1" : overtimeMin > 0 ? "#dc2626" : overtimeMin < 0 ? "#2563eb" : "#64748b")
+                                  : ["actualInDate", "actualIn", "actualOutDate", "actualOut", "actualBreakTime", "actualWorkTime"].includes(c.key)
+                                    ? "rgb(0, 155, 240)"
+                                    : "rgb(137, 137, 137)",
+                              fontWeight: c.key === "workTime" || c.key === "overtimeTime" ? 700 : undefined,
                             }}>
                               {renderCell(c.key)}
                             </td>
