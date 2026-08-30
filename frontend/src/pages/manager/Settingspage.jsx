@@ -559,12 +559,156 @@ function BreakRulesTab() {
   );
 }
 
+/* ─── Notifications tab ─────────────────────────────────── */
+const NOTIFICATION_TYPES = [
+  { key: "LATE_ARRIVAL",    label: "遅刻通知",   hint: "スタッフが出勤予定時刻に遅刻した場合に通知します。" },
+  { key: "EARLY_DEPARTURE", label: "早退通知",   hint: "スタッフが退勤予定時刻より早く退勤した場合に通知します。" },
+  { key: "FORGOT_CLOCKOUT", label: "退勤忘れ通知", hint: "退勤の打刻がされないままシフトが終了した場合に通知します。" },
+];
+
+function NotificationsTab() {
+  const [prefs, setPrefs]     = useState({});
+  const [checkTime, setCheckTime] = useState("00:00");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [err, setErr]         = useState("");
+  const [savedMsg, setSavedMsg] = useState("");
+
+  async function load() {
+    setLoading(true); setErr("");
+    try {
+      const [p, s] = await Promise.all([
+        api.notificationPreferencesGet(),
+        api.notificationSettingsGet(),
+      ]);
+      setPrefs(p || {});
+      setCheckTime((s?.forgotClockoutCheckTime || "00:00:00").slice(0, 5));
+    } catch (e) {
+      setErr(e.message || "読み込みエラー");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function togglePref(key) {
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    setErr(""); setSavedMsg("");
+    try {
+      await api.notificationPreferencesSet({ [key]: next[key] });
+      setSavedMsg("保存しました");
+      setTimeout(() => setSavedMsg(""), 2000);
+    } catch (e) {
+      setErr(e.message || "保存エラー");
+      setPrefs(prefs); // revert
+    }
+  }
+
+  async function saveCheckTime() {
+    setSaving(true); setErr(""); setSavedMsg("");
+    try {
+      await api.notificationSettingsSet(checkTime);
+      setSavedMsg("保存しました");
+      setTimeout(() => setSavedMsg(""), 2000);
+    } catch (e) {
+      setErr(e.message || "保存エラー");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>;
+  }
+
+  return (
+    <div>
+      {err && (
+        <div style={{
+          background: "#ffe5e5", color: "#c0392b", padding: "10px 14px",
+          borderRadius: 10, marginBottom: 16, fontSize: 13,
+        }}>
+          {err}
+        </div>
+      )}
+      {savedMsg && (
+        <div style={{
+          background: "#dcfce7", color: "#166534", padding: "8px 14px",
+          borderRadius: 10, marginBottom: 16, fontSize: 13, fontWeight: 600,
+        }}>
+          ✓ {savedMsg}
+        </div>
+      )}
+
+      {/* 自分が受け取る通知 */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>受け取る通知（自分用）</div>
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 14 }}>
+          ここでの設定はあなた自身のメールアドレスへの通知にのみ適用されます。他のマネージャーには影響しません。
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {NOTIFICATION_TYPES.map(t => (
+            <label key={t.key} style={{
+              display: "flex", alignItems: "flex-start", gap: 12,
+              padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+              border: "1px solid #f0f1f6",
+            }}>
+              <input
+                type="checkbox"
+                checked={prefs[t.key] !== false}
+                onChange={() => togglePref(t.key)}
+                style={{ width: 18, height: 18, marginTop: 2, accentColor: "#6366f1", cursor: "pointer" }}
+              />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d2e" }}>{t.label}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{t.hint}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* 退勤忘れチェック時刻（全体設定） */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>退勤忘れチェック時刻</div>
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 14 }}>
+          毎日この時刻に、前日分の未退勤（打刻忘れ）をチェックします。この設定は全マネージャー共通です。
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+              チェック時刻
+            </label>
+            <input
+              type="time"
+              value={checkTime}
+              onChange={e => setCheckTime(e.target.value)}
+              style={{ ...inputStyle, width: 140 }}
+            />
+          </div>
+          <button
+            style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }}
+            type="button"
+            disabled={saving}
+            onClick={saveCheckTime}
+          >
+            {saving ? "保存中..." : "保存"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main page ─────────────────────────────────────────── */
 const TABS = [
-  { key: "workplaces",  label: "勤務場所" },
-  { key: "positions",   label: "職種・役職" },
-  { key: "departments", label: "部署" },
-  { key: "breakrules",  label: "休憩ルール" },
+  { key: "workplaces",     label: "勤務場所" },
+  { key: "positions",      label: "職種・役職" },
+  { key: "departments",    label: "部署" },
+  { key: "breakrules",     label: "休憩ルール" },
+  { key: "notifications",  label: "通知設定" },
 ];
 
 export default function SettingsPage({ view, onNavigate, onLogout }) {
@@ -613,10 +757,11 @@ export default function SettingsPage({ view, onNavigate, onLogout }) {
         </div>
 
         {/* Tab content */}
-        {tab === "workplaces"  && <WorkplacesTab />}
-        {tab === "positions"   && <PositionsTab />}
-        {tab === "departments" && <DepartmentsTab />}
-        {tab === "breakrules"  && <BreakRulesTab />}
+        {tab === "workplaces"    && <WorkplacesTab />}
+        {tab === "positions"     && <PositionsTab />}
+        {tab === "departments"   && <DepartmentsTab />}
+        {tab === "breakrules"    && <BreakRulesTab />}
+        {tab === "notifications" && <NotificationsTab />}
       </div>
       </div>
     </ManagerLayout>

@@ -300,4 +300,17 @@ export const api = {
   
   managerMonthStatusSet: (month, status, half) =>
     request(`/api/manager/month-status?month=${month}&status=${status}&half=${half}`, { method: "POST" }),
+
+  // ===== NOTIFICATIONS =====
+  notificationPreferencesGet: () =>
+    request("/api/manager/notifications/preferences"),
+
+  notificationPreferencesSet: (prefs) =>
+    request("/api/manager/notifications/preferences", { method: "POST", body: prefs }),
+
+  notificationSettingsGet: () =>
+    request("/api/manager/notifications/settings"),
+
+  notificationSettingsSet: (time) =>
+    request(`/api/manager/notifications/settings?time=${time}`, { method: "POST" }),
 };

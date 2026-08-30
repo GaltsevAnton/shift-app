@@ -5,10 +5,12 @@
             "name": "Spring Boot-ShiftsAppApplication<shifts_app>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
-            "mainClass": "com.hanno.shifts_app.ShiftsAppApplication",
+            "mainClass": "com.shiftapp.ShiftAppApplication",
             "projectName": "shifts_app",
             "args": "",
-            "envFile": "${workspaceFolder}/.env"
+            "env": {
+                "MAIL_APP_PASSWORD": "crnnptdrdgxdodxq"
+            }
         }
     ]
 }

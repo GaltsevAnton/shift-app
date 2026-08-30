@@ -3,6 +3,14 @@ package com.shiftapp.kiosk;
 import com.shiftapp.kiosk.dto.PunchRequest;
 import com.shiftapp.kiosk.dto.PunchResponse;
 import com.shiftapp.kiosk.dto.StaffStatusResponse;
+import com.shiftapp.notifications.NotificationMailService;
+import com.shiftapp.preferences.Preference;
+import com.shiftapp.preferences.PreferenceRepository;
+import com.shiftapp.preferences.ShiftSlot;
+import com.shiftapp.notifications.NotificationMailService;
+import com.shiftapp.preferences.Preference;
+import com.shiftapp.preferences.PreferenceRepository;
+import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.restaurants.RestaurantRepository;
 import com.shiftapp.users.User;
 import com.shiftapp.users.UserRepository;
@@ -16,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.*;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -28,13 +37,19 @@ public class KioskService {
     private final TimeRecordRepository timeRecordRepository;
     private final UserRepository       userRepository;
     private final RestaurantRepository restaurantRepository;
+    private final PreferenceRepository preferenceRepository;
+    private final NotificationMailService notificationMailService;
 
     public KioskService(TimeRecordRepository timeRecordRepository,
                         UserRepository userRepository,
-                        RestaurantRepository restaurantRepository) {
+                        RestaurantRepository restaurantRepository,
+                        PreferenceRepository preferenceRepository,
+                        NotificationMailService notificationMailService) {
         this.timeRecordRepository = timeRecordRepository;
         this.userRepository       = userRepository;
         this.restaurantRepository = restaurantRepository;
+        this.preferenceRepository = preferenceRepository;
+        this.notificationMailService = notificationMailService;
     }
 
     // ── Текущий статус сотрудника за сегодня ──
@@ -151,6 +166,8 @@ public class KioskService {
 
         TimeRecord saved = timeRecordRepository.save(record);
 
+        checkAndNotify(user, type, workDate, now);
+
         return new PunchResponse(
             saved.getId(),
             saved.getRecordType().name(),
@@ -158,6 +175,63 @@ public class KioskService {
             user.getFullName(),
             photoPath
         );
+    }
+
+    // ── 遅刻/早退の判定と通知 ─────────────────────────────────────────────
+    private void checkAndNotify(User user, TimeRecordType type, LocalDate workDate, Instant recordedAt) {
+        if (type != TimeRecordType.CLOCK_IN && type != TimeRecordType.CLOCK_OUT) return;
+
+        Preference pref = preferenceRepository
+                .findByRestaurant_IdAndWorkDateBetweenWithSlots(user.getRestaurant().getId(), workDate, workDate)
+                .stream()
+                .filter(p -> p.getUser().getId().equals(user.getId()))
+                .findFirst()
+                .orElse(null);
+        if (pref == null || pref.isOff() || pref.getSlots().isEmpty()) return;
+
+        // このシフトの何番目のセッションか（同日複数シフト対応）を数え、対応するスロットを取得
+        List<ShiftSlot> sortedSlots = pref.getSlots().stream()
+                .filter(sl -> sl.getStartTime() != null)
+                .sorted(Comparator.comparing(ShiftSlot::getStartTime))
+                .toList();
+        if (sortedSlots.isEmpty()) return;
+
+        List<TimeRecord> dayRecords = timeRecordRepository.findByUser_IdOrderByRecordedAtAsc(user.getId())
+                .stream()
+                .filter(r -> r.getWorkDate().equals(workDate))
+                .toList();
+
+        int clockInCount = 0;
+        for (TimeRecord r : dayRecords) {
+            if (r.getRecordType() == TimeRecordType.CLOCK_IN) clockInCount++;
+        }
+        int sessionIndex = Math.max(clockInCount - 1, 0); // 今回のCLOCK_INが何番目のセッションか
+        if (sessionIndex >= sortedSlots.size()) return;
+        ShiftSlot slot = sortedSlots.get(sessionIndex);
+
+        ZonedDateTime nowJst = recordedAt.atZone(ZONE);
+
+        if (type == TimeRecordType.CLOCK_IN && slot.getStartTime() != null) {
+            ZonedDateTime planStart = workDate.atTime(slot.getStartTime()).atZone(ZONE);
+            if (nowJst.isAfter(planStart)) {
+                notificationMailService.notifyLateArrival(
+                        user.getRestaurant().getId(), user.getFullName(), workDate,
+                        slot.getStartTime(), nowJst.toLocalTime().withNano(0));
+            }
+        }
+
+        if (type == TimeRecordType.CLOCK_OUT && slot.getEndTime() != null) {
+            ZonedDateTime planEnd = workDate.atTime(slot.getEndTime()).atZone(ZONE);
+            boolean nextDay = slot.isNextDay() ||
+                    (slot.getStartTime() != null && !slot.getEndTime().isAfter(slot.getStartTime()));
+            if (nextDay) planEnd = planEnd.plusDays(1);
+
+            if (nowJst.isBefore(planEnd)) {
+                notificationMailService.notifyEarlyDeparture(
+                        user.getRestaurant().getId(), user.getFullName(), workDate,
+                        slot.getEndTime(), nowJst.toLocalTime().withNano(0));
+            }
+        }
     }
 
     // ── Валидация допустимых действий ──
