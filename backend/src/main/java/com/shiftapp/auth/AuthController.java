@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.shiftapp.auth.dto.LoginRequest;
 import com.shiftapp.auth.dto.LoginResponse;
 import com.shiftapp.auth.security.CustomUserDetails;
+import com.shiftapp.notifications.NotificationMailService;
 
 import jakarta.validation.Valid;
 import java.time.Instant;
@@ -19,13 +20,16 @@ public class AuthController {
     private final com.shiftapp.users.UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final NotificationMailService notificationMailService;
 
     public AuthController(com.shiftapp.users.UserRepository userRepository,
                           PasswordEncoder passwordEncoder,
-                          JwtService jwtService) {
+                          JwtService jwtService,
+                          NotificationMailService notificationMailService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.notificationMailService = notificationMailService;
     }
 
     private static final int[] LOCK_THRESHOLDS = { 5, 10, 15, 20 };
@@ -91,6 +95,8 @@ public class AuthController {
                     user.setLockedUntil(Instant.now().plusSeconds(LOCK_MINUTES[newLevel - 1] * 60));
                 } else {
                     user.setAccountLocked(true);
+                    notificationMailService.notifyAccountLocked(
+                            user.getRestaurant().getId(), user.getFullName());
                 }
                 break;
             }

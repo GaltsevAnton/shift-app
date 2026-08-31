@@ -1,5 +1,5 @@
 CREATE TABLE notification_preferences (
-    id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id            BIGINT NOT NULL,
     notification_type  VARCHAR(50) NOT NULL,
     enabled            BOOLEAN NOT NULL DEFAULT TRUE,
@@ -8,7 +8,7 @@ CREATE TABLE notification_preferences (
 );
 
 CREATE TABLE notification_settings (
-    id                            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id                            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     restaurant_id                 BIGINT NOT NULL UNIQUE,
     forgot_clockout_check_time    TIME NOT NULL DEFAULT '00:00:00',
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE

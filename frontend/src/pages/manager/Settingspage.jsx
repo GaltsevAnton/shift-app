@@ -561,9 +561,14 @@ function BreakRulesTab() {
 
 /* ─── Notifications tab ─────────────────────────────────── */
 const NOTIFICATION_TYPES = [
-  { key: "LATE_ARRIVAL",    label: "遅刻通知",   hint: "スタッフが出勤予定時刻に遅刻した場合に通知します。" },
-  { key: "EARLY_DEPARTURE", label: "早退通知",   hint: "スタッフが退勤予定時刻より早く退勤した場合に通知します。" },
-  { key: "FORGOT_CLOCKOUT", label: "退勤忘れ通知", hint: "退勤の打刻がされないままシフトが終了した場合に通知します。" },
+  { key: "LATE_ARRIVAL",        label: "遅刻通知",         hint: "スタッフが出勤予定時刻に遅刻した場合に通知します。" },
+  { key: "EARLY_DEPARTURE",     label: "早退通知",         hint: "スタッフが退勤予定時刻より早く退勤した場合に通知します。" },
+  { key: "FORGOT_CLOCKOUT",     label: "退勤忘れ通知",     hint: "退勤の打刻がされないままシフトが終了した場合に通知します。" },
+  { key: "UNSCHEDULED_ARRIVAL", label: "シフトなし出勤通知", hint: "シフトの予定がない日に出勤の打刻があった場合に通知します。" },
+  { key: "ACCOUNT_LOCKED",      label: "アカウントロック通知", hint: "ログイン試行回数の上限に達し、アカウントが永久ロックされた場合に通知します。" },
+  { key: "EMPLOYEE_CREATED",    label: "新規従業員登録通知", hint: "新しい従業員が登録された場合に通知します。" },
+  { key: "EMPLOYEE_DELETED",    label: "従業員削除通知",   hint: "従業員が削除された場合に通知します。" },
+  { key: "PASSWORD_CHANGED",    label: "パスワード変更通知", hint: "従業員（自分以外）のパスワードが変更された場合に通知します。" },
 ];
 
 function NotificationsTab() {

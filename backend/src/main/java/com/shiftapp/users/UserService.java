@@ -1,5 +1,7 @@
 package com.shiftapp.users;
 
+import com.shiftapp.common.CurrentUser;
+import com.shiftapp.notifications.NotificationMailService;
 import com.shiftapp.restaurants.Restaurant;
 import com.shiftapp.settings.department.Department;
 import com.shiftapp.settings.department.DepartmentRepository;
@@ -28,6 +30,7 @@ public class UserService {
     private final PreferenceRepository preferenceRepo;
     private final ShiftSlotRepository  slotRepo;
     private final TimeRecordRepository timeRecordRepo;
+    private final NotificationMailService notificationMailService;
 
     @PersistenceContext
     private EntityManager em;
@@ -37,13 +40,15 @@ public class UserService {
             PasswordEncoder passwordEncoder,
             PreferenceRepository preferenceRepo,
             ShiftSlotRepository slotRepo,
-            TimeRecordRepository timeRecordRepo) {
+            TimeRecordRepository timeRecordRepo,
+            NotificationMailService notificationMailService) {
     this.repo           = repo;
     this.departmentRepo = departmentRepo;
     this.passwordEncoder = passwordEncoder;
     this.preferenceRepo = preferenceRepo;
     this.slotRepo       = slotRepo;
     this.timeRecordRepo = timeRecordRepo;
+    this.notificationMailService = notificationMailService;
     }
 
     public List<UserResponse> list(Long restaurantId) {
@@ -86,6 +91,10 @@ public class UserService {
         u.setGender(req.gender);
 
         repo.save(u);
+
+        String createdBy = CurrentUser.require().getFullName();
+        notificationMailService.notifyEmployeeCreated(restaurantId, u.getFullName(), createdBy);
+
         return UserResponse.from(u);
     }
 
@@ -113,6 +122,10 @@ public class UserService {
 
         if (req.password != null && !req.password.isBlank()) {
             u.setPasswordHash(passwordEncoder.encode(req.password));
+
+            var actor = CurrentUser.require();
+            notificationMailService.notifyPasswordChanged(
+                    restaurantId, u.getFullName(), actor.getFullName(), actor.getUserId());
         }
 
         u.setEmail(req.email);
@@ -132,7 +145,10 @@ public class UserService {
     public void delete(Long restaurantId, Long id) {
         User u = repo.findByIdAndRestaurant_Id(id, restaurantId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-    
+
+        String userName = u.getFullName();
+        String deletedBy = CurrentUser.require().getFullName();
+
         List<Long> prefIds = preferenceRepo.findByUser_Id(id)
                 .stream().map(p -> p.getId()).toList();
         if (!prefIds.isEmpty()) {
@@ -143,6 +159,8 @@ public class UserService {
         timeRecordRepo.deleteByUserId(id);
     
         repo.delete(u);
+
+        notificationMailService.notifyEmployeeDeleted(restaurantId, userName, deletedBy);
     }
 
     // ── helpers ──

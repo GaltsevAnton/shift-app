@@ -16,6 +16,33 @@ function clearKioskToken() {
 }
 
 /* ─── API ───────────────────────────────────────────────── */
+const CONNECTION_RETRY_COUNT    = 3;
+const CONNECTION_RETRY_DELAY_MS = 5000;
+const FETCH_TIMEOUT_MS          = 8000;
+const PUNCH_TIMEOUT_MS          = 10000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const bustedUrl = url + (url.includes("?") ? "&" : "?") + "_ts=" + Date.now();
+  try {
+    return await fetch(bustedUrl, { ...options, cache: "no-store", signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isNetworkError(e) {
+  return e instanceof TypeError || e.name === "AbortError";
+}
+
+function friendlyPunchError(e) {
+  if (isNetworkError(e)) {
+    return "ネットワークに接続できません。時間をおいてもう一度お試しください。改善しない場合は担当者にご連絡ください。";
+  }
+  return e.message;
+}
+
 async function loginKiosk(login, password) {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
@@ -35,7 +62,7 @@ function authHeaders() {
 }
 
 async function fetchStaff() {
-  const res = await fetch(`${API_BASE}/api/kiosk/staff?restaurantId=${RESTAURANT_ID}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/kiosk/staff?restaurantId=${RESTAURANT_ID}`, {
     headers: authHeaders(),
   });
   if (res.status === 401 || res.status === 403) throw new Error("UNAUTHORIZED");
@@ -46,7 +73,7 @@ async function fetchStaff() {
 async function fetchAllStatuses(staffList) {
   const results = await Promise.all(
     staffList.map(s =>
-      fetch(`${API_BASE}/api/kiosk/status/${s.id}`, { headers: authHeaders() })
+      fetchWithTimeout(`${API_BASE}/api/kiosk/status/${s.id}`, { headers: authHeaders() })
         .then(r => {
           if (r.status === 401 || r.status === 403) throw new Error("UNAUTHORIZED");
           return r.json();
@@ -61,11 +88,11 @@ async function fetchAllStatuses(staffList) {
 }
 
 async function punchApi(userId, recordType, photoBase64) {
-  const res = await fetch(`${API_BASE}/api/kiosk/punch`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/kiosk/punch`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ userId, recordType, photoBase64 }),
-  });
+  }, PUNCH_TIMEOUT_MS);
   if (res.status === 401 || res.status === 403) throw new Error("UNAUTHORIZED");
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -128,6 +155,20 @@ function getActionLabel(type) {
     case "BREAK_END":   return "復帰";
     default:            return type;
   }
+}
+
+function WifiIcon({ ok, size = 22 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="#fff" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+      <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+      <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+      <line x1="12" y1="20" x2="12.01" y2="20" />
+      {!ok && <line x1="1" y1="1" x2="23" y2="23" stroke="#fff" strokeWidth="2" />}
+    </svg>
+  );
 }
 
 function getActionBg(type, available) {
@@ -324,7 +365,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
       onSuccess(result);
     } catch (e) {
       if (e.message === "UNAUTHORIZED") { onUnauthorized(); return; }
-      setError(e.message);
+      setError(friendlyPunchError(e));
       setConfirming(null); // возврат на экран кнопок
     } finally {
       setLoading(false);
@@ -667,21 +708,38 @@ function KioskApp({ onLogout }) {
   const [activeGroup, setActiveGroup]     = useState("All");
   const [menuOpen, setMenuOpen]           = useState(false);
   const [now, setNow]                     = useState(new Date());
+  const [connectionOk, setConnectionOk]   = useState(true);
+  const [connectionMsg, setConnectionMsg] = useState(null);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (isManualRetry = false) => {
+    if (isManualRetry) {
+      retryCountRef.current = 0;
+      if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+    }
     try {
       const s  = await fetchStaff();
       setStaff(s);
       const sm = await fetchAllStatuses(s);
       setStatusMap(sm);
+      retryCountRef.current = 0;
+      if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+      setConnectionOk(true);
     } catch (e) {
       if (e.message === "UNAUTHORIZED") { onLogout(); return; }
       console.error(e);
+      if (retryCountRef.current < CONNECTION_RETRY_COUNT) {
+        retryCountRef.current += 1;
+        retryTimerRef.current = setTimeout(() => { loadData(); }, CONNECTION_RETRY_DELAY_MS);
+      } else {
+        setConnectionOk(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -690,9 +748,20 @@ function KioskApp({ onLogout }) {
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
-    const t = setInterval(() => { if (!selectedStaff) loadData(); }, 30000);
+    const t = setInterval(() => { if (!selectedStaff) loadData(true); }, 30000);
     return () => clearInterval(t);
   }, [selectedStaff, loadData]);
+
+  // ブラウザがネットワーク復旧を検知したら即座に再試行
+  useEffect(() => {
+    function handleOnline() { loadData(true); }
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [loadData]);
+
+  useEffect(() => {
+    return () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); };
+  }, []);
 
   const groups = [
     { key: "All", count: staff.length },
@@ -792,10 +861,19 @@ function KioskApp({ onLogout }) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={loadData} style={{
+        <button onClick={() => loadData(true)} style={{
             background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
             color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px",
           }}>↻</button>
+          <button
+            onClick={() => setConnectionMsg(connectionOk ? "接続あり" : "接続なし")}
+            style={{
+              background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+              padding: "6px 10px", display: "flex", alignItems: "center", cursor: "pointer",
+            }}
+          >
+            <WifiIcon ok={connectionOk} size={20} />
+          </button>
           <div style={{
             background: "rgba(255,255,255,0.15)", borderRadius: 20,
             padding: "6px 18px", color: "#fff", fontSize: 14, fontWeight: 700,
@@ -835,6 +913,15 @@ function KioskApp({ onLogout }) {
         }}>
           {loading ? (
             <div style={{ color: "rgba(0,0,0,0.5)", fontSize: 16, padding: 40 }}>読み込み中...</div>
+          ) : !connectionOk ? (
+            <div style={{
+              width: "100%", display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", padding: 60, gap: 16,
+            }}>
+              <WifiIcon ok={false} size={72} />
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#475569" }}>接続に問題があります</div>
+              <div style={{ fontSize: 14, color: "#94a3b8" }}>サポートにお問い合わせください</div>
+            </div>
           ) : filteredStaff.length === 0 ? (
             <div style={{ color: "rgba(0,0,0,0.4)", fontSize: 15, padding: 40 }}>
               該当するスタッフがいません
@@ -861,6 +948,42 @@ function KioskApp({ onLogout }) {
           onSuccess={handlePunchSuccess}
           onUnauthorized={() => { setSelectedStaff(null); onLogout(); }}
         />
+      )}
+
+      {connectionMsg && (
+        <div
+          onClick={() => setConnectionMsg(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 2000,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff", borderRadius: 16, padding: "28px 36px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+              minWidth: 220,
+            }}
+          >
+            <WifiIcon ok={connectionOk} size={40} />
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>
+              {connectionMsg}
+            </div>
+            <button
+              onClick={() => setConnectionMsg(null)}
+              style={{
+                marginTop: 4, padding: "8px 24px",
+                background: "#2F5496", color: "#fff", border: "none",
+                borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -177,7 +177,7 @@ public class KioskService {
         );
     }
 
-    // ── 遅刻/早退の判定と通知 ─────────────────────────────────────────────
+    // ── 遅刻/早退/シフトなし出勤の判定と通知 ────────────────────────────────
     private void checkAndNotify(User user, TimeRecordType type, LocalDate workDate, Instant recordedAt) {
         if (type != TimeRecordType.CLOCK_IN && type != TimeRecordType.CLOCK_OUT) return;
 
@@ -187,7 +187,17 @@ public class KioskService {
                 .filter(p -> p.getUser().getId().equals(user.getId()))
                 .findFirst()
                 .orElse(null);
-        if (pref == null || pref.isOff() || pref.getSlots().isEmpty()) return;
+
+        boolean hasPlan = pref != null && !pref.isOff() && !pref.getSlots().isEmpty();
+
+        if (!hasPlan) {
+            if (type == TimeRecordType.CLOCK_IN) {
+                ZonedDateTime nowJst = recordedAt.atZone(ZONE);
+                notificationMailService.notifyUnscheduledArrival(
+                        user.getRestaurant().getId(), user.getFullName(), workDate, nowJst.toLocalTime().withNano(0));
+            }
+            return;
+        }
 
         // このシフトの何番目のセッションか（同日複数シフト対応）を数え、対応するスロットを取得
         List<ShiftSlot> sortedSlots = pref.getSlots().stream()
