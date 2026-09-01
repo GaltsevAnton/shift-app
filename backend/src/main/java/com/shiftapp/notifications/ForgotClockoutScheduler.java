@@ -78,10 +78,12 @@ public class ForgotClockoutScheduler implements SchedulingConfigurer {
 
     private void checkRestaurant(Restaurant restaurant) {
         LocalDate today = LocalDate.now(ZONE);
-        LocalDate yesterday = today.minusDays(1);
+        LocalDate twoDaysAgo = today.minusDays(2);
+        Instant now = Instant.now();
 
-        // Открытые сессии (CLOCK_IN без CLOCK_OUT) за вчерашний рабочий день
-        List<TimeRecord> records = timeRecordRepository.findByRestaurantAndDateRange(restaurant.getId(), yesterday, yesterday);
+        // チェック時刻が何時に設定されていても対応できるよう、直近2日分の記録から
+        // まだ閉じられていないセッションを探す（日付境界のズレを吸収するため）
+        List<TimeRecord> records = timeRecordRepository.findByRestaurantAndDateRange(restaurant.getId(), twoDaysAgo, today);
 
         records.stream()
                 .collect(java.util.stream.Collectors.groupingBy(r -> r.getUser().getId()))
@@ -90,8 +92,10 @@ public class ForgotClockoutScheduler implements SchedulingConfigurer {
                     TimeRecord openClockIn = findUnclosedClockIn(userRecords);
                     if (openClockIn == null) return;
 
+                    LocalDate workDate = openClockIn.getWorkDate();
+
                     Preference pref = preferenceRepository
-                            .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurant.getId(), yesterday, yesterday)
+                            .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurant.getId(), workDate, workDate)
                             .stream()
                             .filter(p -> p.getUser().getId().equals(userId))
                             .findFirst()
@@ -110,10 +114,14 @@ public class ForgotClockoutScheduler implements SchedulingConfigurer {
                             (slot.getStartTime() != null && !slot.getEndTime().isAfter(slot.getStartTime()));
                     if (nextDay) return;
 
+                    // 予定終了時刻をまだ過ぎていない場合は対象外（同日チェックの場合に必要）
+                    Instant plannedEnd = workDate.atTime(slot.getEndTime()).atZone(ZONE).toInstant();
+                    if (now.isBefore(plannedEnd)) return;
+
                     mailService.notifyForgotClockout(
                             restaurant.getId(),
                             openClockIn.getUser().getFullName(),
-                            yesterday,
+                            workDate,
                             slot.getEndTime()
                     );
                 });
