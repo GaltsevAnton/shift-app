@@ -35,6 +35,7 @@ public class SecurityConfig {
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:5173",
                 "http://localhost:4173",
+                "http://localhost:8888",        // Docker frontend (dev-тест)
                 "http://192.168.1.19:5173",     //npm run dev -- --host
                 "http://192.168.1.19:4173",     //npm run preview -- --host
                 "https://hanno-shift.duckdns.org"

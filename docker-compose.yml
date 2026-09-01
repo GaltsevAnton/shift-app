@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: hannoshift-postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: 12qwasZX
+    ports:
+      - "5432:5432"
+    volumes:
+      - hannoshift-pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    container_name: hannoshift-backend
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shiftapp
+      SPRING_DATASOURCE_USERNAME: shiftuser
+      SPRING_DATASOURCE_PASSWORD: 12qwasZX
+      MAIL_APP_PASSWORD: ${MAIL_APP_PASSWORD}
+      APP_JWT_SECRET: local_dev_secret_not_used_in_prod
+      REPORT_SERVICE_URL: http://report-service:8001
+    ports:
+      - "8080:8080"
+
+  report-service:
+    build: ./report-service
+    container_name: hannoshift-report
+    restart: always
+    ports:
+      - "8001:8001"
+
+  frontend:
+    build: ./frontend
+    container_name: hannoshift-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "8888:80"
+
+volumes:
+  hannoshift-pgdata:
+    external: true
+    name: hannoshift-pgdata

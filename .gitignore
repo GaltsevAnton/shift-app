@@ -1,4 +1,18 @@
+.env
+
 # report-service
 report-service/venv/
 report-service/__pycache__/
 report-service/**/__pycache__/
+
+# backend
+backend/target/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.iml
