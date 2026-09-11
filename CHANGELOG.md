@@ -5,6 +5,143 @@
 
 ログ変更履歴。
 
+## 2026-09-09
+ 
+### キオスク — スマートフォン対応の続き（スタッフ一覧・打刻画面）
+ 
+- **左サイドバー（カタカナフィルター）** — 幅を`isMobile ? 48 : 68`pxに（タブレットは変更なし）
+- **スタッフ一覧グリッド** — `display: flex` → `display: grid`（mobile時）、`repeat(auto-fill, minmax(100px, 1fr))`、gap 2px（縦横とも）
+  - `StaffCard`に`isMobile`propを追加：写真100×100px、氏名フォント12px（`white-space: nowrap` + `text-overflow: ellipsis`で1行固定）
+- **出勤時刻バッジ**（カードの写真上部）
+  - 秒を非表示に（`formatTimeShort()`新設、`hour/minute`のみ）
+  - `top: 5px` → `top: 0`（上端に密着）
+  - フォントサイズ`isMobile ? 12 : 14`
+- **PunchPopup（打刻画面）モーダル**
+  - サイズを`calc(100vw - 24px)` × `calc(100dvh - 24px)`に（ほぼ全画面、上下左右に小さい余白）
+  - カメラエリアを`flex: 1`に変更し、モーダルが大きくなった分の余白を自動でカメラ表示に充てるように
+  - 出勤/退勤/休憩/復帰ボタンの高さは変更なし（200px）
+  - スマートフォンでは画面外タップで閉じられないため、ボタン群の下に高さ40px・フォント14pxの「キャンセル」バーを追加（ユーザー自身で微調整）
+- **確認画面（写真＋確定/キャンセル）**
+  - 日付・時刻表示（`PopupClock`）を再度表示するよう修正（誤って削除していたものを復元）
+  - ボタンをスマートフォンでは縦並びに変更、確定ボタンを上・キャンセルを下に配置
+  - モーダルの高さいっぱいに引き伸ばさず、内容に応じて中央表示に調整
+- 上記対応はすべてタブレット表示に影響なし（`useIsMobile()`フック、breakpoint 768px、常に条件分岐で分離）
+- ⚠️ スマートフォン対応は継続中、今後も細部の調整予定
+---
+ 
+## 2026-09-06
+ 
+### キオスク — スマートフォン対応デザインの開始
+ 
+- **背景**: 出張中・退勤時間帯に事務所へ戻れないマネージャー等が、スマートフォンから出退勤を打刻できるようにするため。タブレット表示はこれまで通り変更なし。
+- `useIsMobile()`フック新設（`window.innerWidth <= 768`で判定、リサイズ監視）
+- **ヘッダー**（mobile）: 3カラムgrid（☰ 左 / HannoSHIFT 中央 / 📶 右）、日付（26px）・時刻（18px）を別行で左寄せ表示、更新ボタン非表示、出勤中カウントを☰メニュー内に移動
+- **スタッフ一覧**: カードを中央揃えに（`justifyContent: center`）
+- （このコミット時点でのバグ：後日09/09にサイドバー幅の条件分岐漏れを修正）
+---
+ 
+## 2026-09-01
+ 
+### 退勤忘れ通知 — タイミングのずれを修正
+ 
+- **不具合**: `ForgotClockoutScheduler`が常に「昨日」のレコードのみを対象にしていたため、チェック時刻の設定によっては通知が1日遅れて届く場合があった
+- **修正**: 直近2日分のレコードから未クローズのセッションを検索し、`workDate`はそのセッション自体から取得。予定終了時刻をまだ過ぎていない場合は通知しないよう判定を追加
+- ナイトシフト（`nextDay=true`）は引き続き対象外（意図的な仕様）
+### キオスク — ネットワーク断への対応強化
+ 
+- `fetchWithTimeout()` — AbortController + タイムアウト（通常8秒、打刻10秒）、cache-busting
+- 接続リトライ: 3回×5秒間隔、`window.addEventListener("online")`で復旧検知時に即再試行
+- 待機画面に接続状態インジケーター（WifiIcon、シンプルな白アイコン、タップで「接続あり/なし」ポップアップ）
+- リトライ上限到達時：「接続に問題があります」画面表示
+- 復旧しない場合、20秒後に自動で`window.location.reload()`（ブラウザの内部ネットワークスタックのリセット目的）
+- 打刻時のエラーメッセージを日本語の分かりやすい文言に変更（`friendlyPunchError()`）
+- **設計判断**: ネットワーク切断時に打刻時刻を端末側に一時保存する方式は採用せず。データの信頼性を優先し、切断時は保存しない（スタッフからの申告で対応）
+### メール通知 — 4種類追加
+ 
+- `NotificationType`に追加: `UNSCHEDULED_ARRIVAL`（シフトなし出勤）, `ACCOUNT_LOCKED`（永久ロック）, `EMPLOYEE_CREATED`, `EMPLOYEE_DELETED`
+- `KioskService.checkAndNotify()` — プランがない日の出勤打刻を検知して通知
+- `AuthController.registerFailedAttempt()` — lockLevel=4到達時に通知
+- `UserService.create()`/`delete()` — `CurrentUser.require()`で実行者名を取得して通知
+### サーバー — バックアップ体制の強化
+ 
+- 既存の日次バックアップ（`/opt/shift-app/backup.sh`、毎日03:00）を調査・確認 — DB dumpは`/mnt/backup-shift/`（別サーバー192.168.1.11のネットワーク共有）に正常保存されていたことを確認
+- **オフサイトバックアップ追加**: `rclone` + Google Drive（`hannoshift.notify@gmail.com`）
+  - DB dump → `hannoshift-backups`フォルダ、90日保持
+  - 写真（`/var/www/shift-app/photos/`）→ ローカルのみ`rsync -a --delete`で`/mnt/backup-shift/photo/`に同期
+  - 設定ファイル（application.yml, systemdユニット, nginx設定）→ ローカル10世代 + Google Drive最新版のみ（`hannoshift-backups-config`）
+- Google Drive APIのレート制限（`RATE_LIMIT_EXCEEDED`）に対応 — `sleep 3`をアップロード間に挿入
+- テスト環境でDB・写真の復元を実施、正常動作を確認
+- `SERVER_INFO.md`（RU/JP）新規作成 — サーバー構成・バックアップ・障害復旧手順を文書化
+### 開発環境 — Docker移行
+ 
+- report-service, backend（multi-stage: Maven→JRE21）, frontend（multi-stage: Node20→nginx）をDocker化
+- PostgreSQL 17をDockerコンテナに移行、既存3データベース（shiftapp, hanno_banquets, wordcards）を個別ユーザーで再構築、ローカルWindows版PostgreSQLは削除
+- `docker-compose.yml`で4サービスを統合、内部ネットワークでサービス名により相互通信（`postgres`, `backend`, `report-service`）
+- `application.yml`を`${VAR:default}`形式に統一 — dev/Docker/本番で同一ファイルを使用可能に
+- 開発環境のみ完了。本番サーバーは今後の対応予定
+### シフト管理 — 開始時刻の選択範囲拡大
+ 
+- `START_TIME_OPTS`: `06:00`〜 → `03:00`〜（早朝勤務に対応）
+---
+ 
+## 2026-08-30
+ 
+### メール通知機能 — 新規実装（LATE_ARRIVAL / EARLY_DEPARTURE / FORGOT_CLOCKOUT / PASSWORD_CHANGED）
+ 
+- 新規パッケージ`com.shiftapp.notifications`
+  - `NotificationType`, `NotificationPreference`(+Repository), `NotificationSettings`(+Repository)
+  - `NotificationMailService` — `@Async`、Gmail SMTP、マネージャーごとのopt-out設定、同一メールアドレスへの重複送信防止（`distinctByKey`）
+  - `ForgotClockoutScheduler` — `SchedulingConfigurer`で動的に再スケジュール、DBから毎回チェック時刻を読み込み
+  - `V16__add_notifications.sql`（PostgreSQL構文：`GENERATED ALWAYS AS IDENTITY`）
+- `KioskService.checkAndNotify()` — 出勤/退勤打刻時に遅刻・早退を判定
+- `AuthController` — アカウントロック時の通知
+- `UserService` — パスワード変更時の通知（変更者以外に送信、`excludeUserId`）
+- `application.yml`にGmail SMTP設定追加、`MAIL_APP_PASSWORD`環境変数
+- `SettingsPage.jsx` — 新タブ「通知設定」（8種類の通知タイプのON/OFF + 退勤忘れチェック時刻設定）
+- `ShiftAppApplication.java` — `@EnableAsync`, `@EnableScheduling`追加
+### 勤怠管理リスト — 残業時間列を追加
+ 
+- 出退勤の実績・予定を比較し、休憩時間（実打刻優先、なければ自動計算）を差し引いた超過/不足時間を算出
+- 画面（`AttendancePage.jsx`）とExcelレポート（`attendance_sessions.py`）の両方に反映
+- Excelレポートの列を`visibleColumns`パラメータで動的化 — 画面の「表示列」設定がそのままレポートに反映されるように変更
+### 従業員管理画面 — 検索・ソート・フィルター機能追加
+ 
+- 氏名・フリガナ・ログインIDでの検索欄を追加
+- 列見出し（ID/氏名/Login）クリックでソート
+- 列見出し（職種・役職/部署/ロール/状態）クリックでチェックボックス絞り込みドロップダウン
+- 使用されていなかった「更新」ボタンを廃止、「表示中：N/M人」の件数表示に変更
+---
+ 
+## 2026-08-28
+ 
+### シフト管理・勤怠管理 — レポートを期間指定に対応
+ 
+- これまで月単位（`ym`）固定だった各種Excelレポート（全員シフト表・部署別シフト表・勤怠集計表・選択中スタッフ）を、画面で選択中の期間（月/週/期間モード）に応じて出力できるよう変更
+- Python側（`shift_all.py`, `shift_dept.py`, `timesheet.py`）に`build_range()`関数を追加（既存の`build()`は温存、月次レポートは従来通り動作）
+- Java側（`ReportService`/`ReportController`）に`*Range`系メソッド・エンドポイントを追加
+### シフト管理 — 勤務時間列のsticky表示不具合修正
+ 
+- テーブルヘッダーの1行目（週ステータス行）と2行目（列見出し行）でセル数が一致しておらず、最後列（勤務時間）がスクロール時にsticky固定されない不具合を修正
+- 1行目に不足していたダミーセルを追加
+---
+ 
+## 2026-08-23
+ 
+### 勤怠管理 — フィルター中のスタッフの勤怠集計表エクスポート機能を追加
+ 
+- 「表示中の勤怠集計表」— 画面上でフィルタリングされているスタッフのみを対象に、任意の期間でExcel出力（月/週/期間モードいずれにも対応）
+- Python側に`attendance_timesheet.py`の`build_range()`関数を新設（日付範囲ベース、月単位に依存しない構造）
+- Java側に`generateAttendanceTimesheetFiltered()`, `buildAttendancePayloadRange()`を追加
+### 勤怠管理レポート — 遅刻/早退の色分け表示
+ 
+- `勤怠集計表（実績）`・`表示中の勤怠集計表`のExcelで、出勤・退勤セルを画面と同じ色分けで表示（緑=時間通り、赤=遅刻、黄=早退、灰=シフトなし）
+- 従来は「ブロック全体」を赤くしていたのを、出勤行・退勤行それぞれ個別に判定して色分けするよう変更
+### 勤怠管理 — 打刻詳細ポップアップの写真表示改善
+ 
+- 「写真を見る」ボタン（📷アイコン）を廃止し、130×100pxの写真プレビューをその場に表示するよう変更
+- プレビューをクリックすると従来通り拡大表示（`photoPopup`）
+- ポップアップ全体の幅も拡大（maxWidth 440→480）
+---
 
 ## 2026-08-19
 

@@ -15,7 +15,7 @@ const STATUS_META = {
 };
 
 const START_TIME_OPTS = [];
-for (let h = 6; h < 24; h++)
+for (let h = 3; h < 24; h++)
   for (let m of [0, 30])
     START_TIME_OPTS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 

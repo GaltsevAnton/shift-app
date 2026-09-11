@@ -108,6 +108,12 @@ function formatTime(instant) {
     hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Tokyo",
   });
 }
+function formatTimeShort(instant) {
+  if (!instant) return "--:--";
+  return new Date(instant).toLocaleTimeString("ja-JP", {
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
+  });
+}
 
 const KANA_GROUPS = [
   { key: "ア", chars: "アイウエオ" },
@@ -180,6 +186,41 @@ function getActionBg(type, available) {
     case "BREAK_END":   return "#43a047";
     default:            return "#3b6fd4";
   }
+}
+
+const MOBILE_BREAKPOINT = 768;
+function useIsMobile() {
+  const query = `(max-width: ${MOBILE_BREAKPOINT}px)`;
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    function sync() { setIsMobile(mql.matches); }
+
+    // matchMedia сам корректно реагирует на изменение размеров экрана —
+    // надёжнее, чем ручное чтение window.innerWidth на resize
+    mql.addEventListener("change", sync);
+
+    // iOS/iPadOS: при возврате приложения из фона возможен кратковременный
+    // некорректный расчёт размеров экрана сразу после возобновления —
+    // перепроверяем состояние явно, когда вкладка/приложение снова видимо
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        // небольшая задержка, чтобы система успела стабилизировать layout
+        setTimeout(sync, 50);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+
+    return () => {
+      mql.removeEventListener("change", sync);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+    };
+  }, []);
+
+  return isMobile;
 }
 
 /* ─── KioskLogin ────────────────────────────────────────── */
@@ -312,6 +353,7 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
   const [confirming, setConfirming]   = useState(null); // { recordType, photoBase64 }
+  const isMobile = useIsMobile();
 
   const availableActions = getAvailableActions(statusInfo?.status || "NOT_STARTED");
 
@@ -382,7 +424,17 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
         backdropFilter: "blur(4px)",
       }}
     >
-      <div style={{
+      <div style={isMobile ? {
+        width: "calc(100vw - 24px)",
+        height: "calc(100dvh - 24px)",
+        background: "#1e3a5f",
+        borderRadius: 20,
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+      } : {
         width: 900, height: 610,
         background: "#1e3a5f",
         borderRadius: 24,
@@ -394,7 +446,13 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
 
         {/* ── Экран подтверждения (поверх, абсолютный) ── */}
         {confirming && (
-          <div style={{
+          <div style={isMobile ? {
+            position: "absolute", inset: 0, zIndex: 10,
+            background: "#1e3a5f",
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 14,
+            padding: "20px 16px", overflowY: "auto",
+          } : {
             position: "absolute", inset: 0, zIndex: 10,
             background: "#1e3a5f",
             display: "flex", flexDirection: "column",
@@ -406,26 +464,30 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
                 src={confirming.photoBase64}
                 alt="photo"
                 style={{
-                  width: 320, height: 320, objectFit: "cover",
+                  width: isMobile ? "min(320px, 70vw)" : 320,
+                  height: isMobile ? "min(320px, 70vw)" : 320,
+                  objectFit: "cover",
                   borderRadius: 16,
                   boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
                 }}
               />
             ) : (
               <div style={{
-                width: 320, height: 320, borderRadius: 16,
+                width: isMobile ? "min(320px, 70vw)" : 320,
+                height: isMobile ? "min(320px, 70vw)" : 320,
+                borderRadius: 16,
                 background: "rgba(255,255,255,0.1)",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 64,
               }}>📷</div>
             )}
 
-            <div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>
+            <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#fff" }}>
               {staff.fullName}
             </div>
 
             <PopupClock />
-            <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>
+            <div style={{ fontSize: isMobile ? 15 : 16, color: "rgba(255,255,255,0.6)", marginTop: isMobile ? 0 : 4 }}>
               {getActionLabel(confirming.recordType)}
             </div>
 
@@ -439,39 +501,81 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 16, width: "100%", maxWidth: 440 }}>
-              <button
-                onClick={() => { setConfirming(null); setError(null); }}
-                disabled={loading}
-                style={{
-                  flex: 1, padding: "18px 0",
-                  background: "rgba(255,255,255,0.15)",
-                  border: "2px solid rgba(255,255,255,0.3)",
-                  borderRadius: 14, color: "#fff",
-                  fontSize: 22, fontWeight: 700, cursor: "pointer",
-                }}
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={loading}
-                style={{
-                  flex: 1, padding: "18px 0",
-                  background: getActionBg(confirming.recordType, [confirming.recordType]),
-                  border: "none", borderRadius: 14, color: "#fff",
-                  fontSize: 22, fontWeight: 700, cursor: "pointer",
-                  opacity: loading ? 0.6 : 1,
-                }}
-              >
-                {loading ? "..." : getActionLabel(confirming.recordType)}
-              </button>
+            <div style={{
+              display: "flex", flexDirection: isMobile ? "column" : "row",
+              gap: isMobile ? 10 : 16,
+              width: "100%", maxWidth: isMobile ? "100%" : 440,
+              flexShrink: 0,
+            }}>
+              {isMobile ? (
+                <>
+                  <button
+                    onClick={handleConfirm}
+                    disabled={loading}
+                    style={{
+                      flex: 1, padding: "14px 0",
+                      background: getActionBg(confirming.recordType, [confirming.recordType]),
+                      border: "none", borderRadius: 14, color: "#fff",
+                      fontSize: 16, fontWeight: 700, cursor: "pointer",
+                      opacity: loading ? 0.6 : 1,
+                    }}
+                  >
+                    {loading ? "..." : getActionLabel(confirming.recordType)}
+                  </button>
+                  <button
+                    onClick={() => { setConfirming(null); setError(null); }}
+                    disabled={loading}
+                    style={{
+                      flex: 1, padding: "14px 0",
+                      background: "rgba(255,255,255,0.15)",
+                      border: "2px solid rgba(255,255,255,0.3)",
+                      borderRadius: 14, color: "#fff",
+                      fontSize: 16, fontWeight: 700, cursor: "pointer",
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => { setConfirming(null); setError(null); }}
+                    disabled={loading}
+                    style={{
+                      flex: 1, padding: "18px 0",
+                      background: "rgba(255,255,255,0.15)",
+                      border: "2px solid rgba(255,255,255,0.3)",
+                      borderRadius: 14, color: "#fff",
+                      fontSize: 22, fontWeight: 700, cursor: "pointer",
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={handleConfirm}
+                    disabled={loading}
+                    style={{
+                      flex: 1, padding: "18px 0",
+                      background: getActionBg(confirming.recordType, [confirming.recordType]),
+                      border: "none", borderRadius: 14, color: "#fff",
+                      fontSize: 22, fontWeight: 700, cursor: "pointer",
+                      opacity: loading ? 0.6 : 1,
+                    }}
+                  >
+                    {loading ? "..." : getActionLabel(confirming.recordType)}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
 
         {/* ── Камера (всегда в DOM, скрыта при подтверждении) ── */}
-        <div style={{
+        <div style={isMobile ? {
+          width: "100%", flex: 1, minHeight: 0, position: "relative",
+          background: "#000", overflow: "hidden",
+          display: confirming ? "none" : "block",
+        } : {
           width: 560, flexShrink: 0, position: "relative",
           background: "#000", overflow: "hidden",
           visibility: confirming ? "hidden" : "visible",
@@ -524,7 +628,10 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
         </div>
 
         {/* ── Панель кнопок (всегда в DOM, скрыта при подтверждении) ── */}
-        <div style={{
+        <div style={isMobile ? {
+          flexShrink: 0, display: confirming ? "none" : "flex", flexDirection: "column",
+          background: "#1e3a5f", minWidth: 0,
+        } : {
           flex: 1, display: "flex", flexDirection: "column",
           background: "#1e3a5f",
           visibility: confirming ? "hidden" : "visible",
@@ -584,9 +691,9 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
             </div>
           )}
 
-          <div style={{ flex: 1 }} />
+          {!isMobile && <div style={{ flex: 1 }} />}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: 260, flexShrink: 0, gap: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", height: isMobile ? 200 : 260, flexShrink: 0, gap: 1 }}>
             {["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END"].map(action => {
               const isAvail = availableActions.includes(action);
               return (
@@ -618,6 +725,22 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
               本日の退勤打刻は完了しています
             </div>
           )}
+
+          {isMobile && !confirming && (
+            <button
+              onClick={onClose}
+              style={{
+                width: "100%", height: 40, flexShrink: 0,
+                background: "rgba(255,255,255,0.1)",
+                border: "none", borderTop: "1px solid rgba(255,255,255,0.15)",
+                color: "rgba(255,255,255,0.6)",
+                fontSize: 14, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              キャンセル
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -625,20 +748,25 @@ function PunchPopup({ staff, statusInfo, onClose, onSuccess, onUnauthorized }) {
 }
 
 /* ─── Staff Card ────────────────────────────────────────── */
-function StaffCard({ staff, statusInfo, onClick, isSelected }) {
+function StaffCard({ staff, statusInfo, onClick, isSelected, isMobile }) {
   const clockIn    = statusInfo?.clockInAt;
   const isActive   = statusInfo?.status === "WORKING" || statusInfo?.status === "ON_BREAK";
   const isFinished = statusInfo?.status === "FINISHED";
   const isBreak    = statusInfo?.status === "ON_BREAK";
+  const photoSize  = isMobile ? 100 : 172;
 
   return (
-    <div onClick={onClick} style={{
+    <div onClick={onClick} style={isMobile ? {
+      display: "flex", flexDirection: "column", alignItems: "center",
+      cursor: "pointer", width: "100%",
+      opacity: isFinished ? 0.55 : 1,
+    } : {
       display: "flex", flexDirection: "column", alignItems: "center",
       cursor: "pointer", width: 192,
       opacity: isFinished ? 0.55 : 1,
     }}>
       <div style={{
-        width: 172, height: 172, borderRadius: 6,
+        width: photoSize, height: photoSize, borderRadius: 6,
         overflow: "hidden", position: "relative",
         background: "#d0dff0",
         border: isSelected ? "3px solid #2F5496" : "3px solid rgba(0,0,0,0.1)",
@@ -678,20 +806,22 @@ function StaffCard({ staff, statusInfo, onClick, isSelected }) {
 
         {clockIn && (
           <div style={{
-            position: "absolute", top: 5, left: 0, right: 0,
-            textAlign: "center", fontSize: 14, fontWeight: 700, color: "#fff",
+            position: "absolute", top: 0, left: 0, right: 0,
+            textAlign: "center", fontSize: isMobile ? 12 : 14, fontWeight: 700, color: "#fff",
             textShadow: "0 1px 3px rgba(0,0,0,0.6)",
             background: "rgba(0,0,0,0.3)", padding: "2px 0",
           }}>
-            {formatTime(clockIn)}
+            {formatTimeShort(clockIn)}
           </div>
         )}
       </div>
 
       <div style={{
-        marginTop: 6, fontSize: 18, fontWeight: 600,
+        marginTop: isMobile ? 2 : 6, fontSize: isMobile ? 12 : 18, fontWeight: 600,
         color: "#1e293b", textAlign: "center", lineHeight: 1.3,
-        maxWidth: 150, overflow: "hidden",
+        maxWidth: isMobile ? photoSize : 150, overflow: "hidden",
+        whiteSpace: isMobile ? "nowrap" : "normal",
+        textOverflow: isMobile ? "ellipsis" : "clip",
       }}>
         {staff.fullName}
       </div>
@@ -712,6 +842,7 @@ function KioskApp({ onLogout }) {
   const [connectionMsg, setConnectionMsg] = useState(null);
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -806,88 +937,161 @@ function KioskApp({ onLogout }) {
     }}>
 
       {/* ── Header ── */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 20px", background: "#1e3a5f", flexShrink: 0,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ position: "relative" }}>
-            <button onClick={() => setMenuOpen(v => !v)} style={{
-              background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
-              color: "#fff", fontSize: 20, cursor: "pointer", padding: "6px 12px",
-            }}>☰</button>
-            {menuOpen && (
-              <>
-                <div onClick={() => setMenuOpen(false)} style={{
-                  position: "fixed", inset: 0, zIndex: 998,
-                }} />
-                <div style={{
-                  position: "absolute", top: "calc(100% + 6px)", left: 0,
-                  background: "#fff", borderRadius: 10, overflow: "hidden",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)", zIndex: 999,
-                  minWidth: 160,
-                }}>
-                  <button onClick={() => { setMenuOpen(false); onLogout(); }} style={{
-                    display: "block", width: "100%", padding: "12px 18px",
-                    textAlign: "left", border: "none", background: "none",
-                    color: "#dc2626", fontSize: 14, fontWeight: 600, cursor: "pointer",
+      {isMobile ? (
+        <div style={{
+          background: "#1e3a5f", flexShrink: 0,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative",
+          padding: "10px 16px",
+        }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center" }}>
+            <div style={{ justifySelf: "start", position: "relative" }}>
+              <button onClick={() => setMenuOpen(v => !v)} style={{
+                background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+                color: "#fff", fontSize: 20, cursor: "pointer", padding: "6px 12px",
+              }}>☰</button>
+              {menuOpen && (
+                <>
+                  <div onClick={() => setMenuOpen(false)} style={{
+                    position: "fixed", inset: 0, zIndex: 998,
+                  }} />
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", left: 0,
+                    background: "#fff", borderRadius: 10, overflow: "hidden",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.25)", zIndex: 999,
+                    minWidth: 180,
                   }}>
-                    🚪 ログアウト
-                  </button>
-                </div>
-              </>
-            )}
+                    <div style={{
+                      padding: "12px 18px", fontSize: 14, fontWeight: 700, color: "#334155",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}>
+                      出勤中 {workingCount}人
+                    </div>
+                    <button onClick={() => { setMenuOpen(false); onLogout(); }} style={{
+                      display: "block", width: "100%", padding: "12px 18px",
+                      textAlign: "left", border: "none", background: "none",
+                      color: "#dc2626", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                    }}>
+                      🚪 ログアウト
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ justifySelf: "center", fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
+              HannoSHIFT
+            </div>
+
+            <div style={{ justifySelf: "end" }}>
+              <button
+                onClick={() => setConnectionMsg(connectionOk ? "接続あり" : "接続なし")}
+                style={{
+                  background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+                  padding: "6px 10px", display: "flex", alignItems: "center", cursor: "pointer",
+                }}
+              >
+                <WifiIcon ok={connectionOk} size={20} />
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 22, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
-              {(() => {
-                const WD = ["日","月","火","水","木","金","土"];
-                const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-                const m  = String(t.getMonth() + 1).padStart(2, "0");
-                const d  = String(t.getDate()).padStart(2, "0");
-                return `${m}月${d}日（${WD[t.getDay()]}）`;
-              })()}
-            </span>
-            <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>
-              {timeStr}:{secStr}
-            </span>
+          <div style={{ marginTop: 6, fontSize: 26, color: "rgba(255,255,255,0.85)", fontWeight: 600, textAlign: "left" }}>
+            {(() => {
+              const WD = ["日","月","火","水","木","金","土"];
+              const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+              const m  = String(t.getMonth() + 1).padStart(2, "0");
+              const d  = String(t.getDate()).padStart(2, "0");
+              return `${m}月${d}日（${WD[t.getDay()]}）`;
+            })()}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "monospace", textAlign: "left" }}>
+            {timeStr}:{secStr}
           </div>
         </div>
+      ) : (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 20px", background: "#1e3a5f", flexShrink: 0,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setMenuOpen(v => !v)} style={{
+                background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+                color: "#fff", fontSize: 20, cursor: "pointer", padding: "6px 12px",
+              }}>☰</button>
+              {menuOpen && (
+                <>
+                  <div onClick={() => setMenuOpen(false)} style={{
+                    position: "fixed", inset: 0, zIndex: 998,
+                  }} />
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", left: 0,
+                    background: "#fff", borderRadius: 10, overflow: "hidden",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.25)", zIndex: 999,
+                    minWidth: 160,
+                  }}>
+                    <button onClick={() => { setMenuOpen(false); onLogout(); }} style={{
+                      display: "block", width: "100%", padding: "12px 18px",
+                      textAlign: "left", border: "none", background: "none",
+                      color: "#dc2626", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                    }}>
+                      🚪 ログアウト
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
 
-        <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
-          HannoSHIFT
-        </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontSize: 22, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+                {(() => {
+                  const WD = ["日","月","火","水","木","金","土"];
+                  const t = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+                  const m  = String(t.getMonth() + 1).padStart(2, "0");
+                  const d  = String(t.getDate()).padStart(2, "0");
+                  return `${m}月${d}日（${WD[t.getDay()]}）`;
+                })()}
+              </span>
+              <span style={{ fontSize: 34, fontWeight: 700, color: "#fff", fontFamily: "monospace", lineHeight: 1 }}>
+                {timeStr}:{secStr}
+              </span>
+            </div>
+          </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button onClick={() => loadData(true)} style={{
-            background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
-            color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px",
-          }}>↻</button>
-          <button
-            onClick={() => setConnectionMsg(connectionOk ? "接続あり" : "接続なし")}
-            style={{
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
+            HannoSHIFT
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => loadData(true)} style={{
               background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
-              padding: "6px 10px", display: "flex", alignItems: "center", cursor: "pointer",
-            }}
-          >
-            <WifiIcon ok={connectionOk} size={20} />
-          </button>
-          <div style={{
-            background: "rgba(255,255,255,0.15)", borderRadius: 20,
-            padding: "6px 18px", color: "#fff", fontSize: 14, fontWeight: 700,
-            border: "1px solid rgba(255,255,255,0.2)",
-          }}>
-            出勤中 {workingCount}人
+              color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px",
+            }}>↻</button>
+            <button
+              onClick={() => setConnectionMsg(connectionOk ? "接続あり" : "接続なし")}
+              style={{
+                background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8,
+                padding: "6px 10px", display: "flex", alignItems: "center", cursor: "pointer",
+              }}
+            >
+              <WifiIcon ok={connectionOk} size={20} />
+            </button>
+            <div style={{
+              background: "rgba(255,255,255,0.15)", borderRadius: 20,
+              padding: "6px 18px", color: "#fff", fontSize: 14, fontWeight: 700,
+              border: "1px solid rgba(255,255,255,0.2)",
+            }}>
+              出勤中 {workingCount}人
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div style={{
-          width: 68, flexShrink: 0, background: "#1a2f45",
+          width: isMobile ? 48 : 68, flexShrink: 0, background: "#1a2f45",
           display: "flex", flexDirection: "column", overflowY: "auto",
           boxShadow: "2px 0 8px rgba(0,0,0,0.2)",
         }}>
@@ -906,10 +1110,16 @@ function KioskApp({ onLogout }) {
           ))}
         </div>
 
-        <div style={{
+        <div style={isMobile ? {
+          flex: 1, overflowY: "auto", padding: "2px",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+          gap: 2,
+          alignContent: "flex-start",
+        } : {
           flex: 1, overflowY: "auto", padding: "16px 16px",
           display: "flex", flexWrap: "wrap",
-          alignContent: "flex-start", gap: 14,
+          alignContent: "flex-start", justifyContent: "flex-start", gap: 14,
         }}>
           {loading ? (
             <div style={{ color: "rgba(0,0,0,0.5)", fontSize: 16, padding: 40 }}>読み込み中...</div>
@@ -934,6 +1144,7 @@ function KioskApp({ onLogout }) {
                 statusInfo={statusMap[s.id]}
                 isSelected={selectedStaff?.id === s.id}
                 onClick={() => setSelectedStaff(s)}
+                isMobile={isMobile}
               />
             ))
           )}
