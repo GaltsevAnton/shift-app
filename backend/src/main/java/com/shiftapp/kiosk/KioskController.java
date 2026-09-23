@@ -3,8 +3,6 @@ package com.shiftapp.kiosk;
 import com.shiftapp.kiosk.dto.PunchRequest;
 import com.shiftapp.kiosk.dto.PunchResponse;
 import com.shiftapp.kiosk.dto.StaffStatusResponse;
-import com.shiftapp.users.UserRepository;
-import com.shiftapp.users.UserRole;
 import com.shiftapp.users.dto.UserResponse;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,25 +12,18 @@ import java.util.List;
 @RequestMapping("/api/kiosk")
 public class KioskController {
 
-    private final KioskService    kioskService;
-    private final UserRepository  userRepository;
+    private final KioskService kioskService;
 
-    public KioskController(KioskService kioskService,
-                           UserRepository userRepository) {
-        this.kioskService   = kioskService;
-        this.userRepository = userRepository;
+    public KioskController(KioskService kioskService) {
+        this.kioskService = kioskService;
     }
 
     // Список всех активных сотрудников ресторана (без JWT — для киоска)
     // restaurantId передаётся как параметр — планшет настроен на конкретный ресторан
+    // Сортировка: по минимальному sortOrder среди отделов сотрудника (см. KioskService)
     @GetMapping("/staff")
     public List<UserResponse> getStaffList(@RequestParam Long restaurantId) {
-        return userRepository
-            .findAllByRestaurant_IdOrderByIdDesc(restaurantId)
-            .stream()
-            .filter(u -> u.isActive() && (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER))
-            .map(UserResponse::from)
-            .toList();
+        return kioskService.getStaffList(restaurantId);
     }
 
     // Текущий статус сотрудника за сегодня

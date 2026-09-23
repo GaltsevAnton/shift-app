@@ -18,6 +18,9 @@ public class Department {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Column(name = "sort_order", nullable = false)
+    private int sortOrder;
+
     public Department() {}
 
     public Long getId() { return id; }
@@ -25,4 +28,6 @@ public class Department {
     public void setRestaurant(Restaurant restaurant) { this.restaurant = restaurant; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public int getSortOrder() { return sortOrder; }
+    public void setSortOrder(int sortOrder) { this.sortOrder = sortOrder; }
 }

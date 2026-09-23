@@ -218,6 +218,9 @@ export const api = {
   settingsDepartmentsDelete: (id) =>
     request(`/api/manager/settings/departments/${id}`, { method: "DELETE" }),
 
+  settingsDepartmentsReorder: (orderedIds) =>
+    request("/api/manager/settings/departments/reorder", { method: "PUT", body: orderedIds }),
+
   // ===== REPORTS =====
   reportShiftAll: (ym) =>
     fetchBlob(`/api/manager/reports/shift/all?ym=${ym}`),
@@ -273,6 +276,9 @@ export const api = {
 
   attendanceEdit: (id, payload) =>
     request(`/api/manager/attendance/${id}`, { method: "PUT", body: payload }),
+
+  attendanceDelete: (id) =>
+    request(`/api/manager/attendance/${id}`, { method: "DELETE" }),
 
   // ===== SETTINGS: BREAK RULES =====
   settingsBreakRulesList: () =>

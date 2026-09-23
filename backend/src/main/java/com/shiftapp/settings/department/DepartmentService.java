@@ -21,7 +21,7 @@ public class DepartmentService {
     }
 
     public List<DepartmentResponse> list(Long restaurantId) {
-        return repo.findAllByRestaurant_IdOrderByIdAsc(restaurantId)
+        return repo.findAllByRestaurant_IdOrderBySortOrderAsc(restaurantId)
                 .stream()
                 .map(DepartmentResponse::from)
                 .toList();
@@ -35,6 +35,7 @@ public class DepartmentService {
         Department d = new Department();
         d.setRestaurant(em.getReference(Restaurant.class, restaurantId));
         d.setName(req.name.trim());
+        d.setSortOrder(repo.countByRestaurant_Id(restaurantId));
         repo.save(d);
         return DepartmentResponse.from(d);
     }
@@ -54,5 +55,20 @@ public class DepartmentService {
                 .filter(x -> x.getRestaurant().getId().equals(restaurantId))
                 .orElseThrow(() -> new RuntimeException("Not found"));
         repo.delete(d);
+    }
+
+    @Transactional
+    public void reorder(Long restaurantId, List<Long> orderedIds) {
+        List<Department> all = repo.findAllByRestaurant_IdOrderBySortOrderAsc(restaurantId);
+        java.util.Map<Long, Department> byId = new java.util.HashMap<>();
+        for (Department d : all) byId.put(d.getId(), d);
+
+        for (int i = 0; i < orderedIds.size(); i++) {
+            Department d = byId.get(orderedIds.get(i));
+            if (d == null) {
+                throw new RuntimeException("Invalid department id: " + orderedIds.get(i));
+            }
+            d.setSortOrder(i);
+        }
     }
 }

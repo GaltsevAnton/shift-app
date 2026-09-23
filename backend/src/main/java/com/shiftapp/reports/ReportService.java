@@ -588,33 +588,23 @@ public class ReportService {
             }
         }
 
+        // 出勤/退勤は常に実際の打刻を丸めた値を使用（予定に関わらず）。
+        // 予定との比較は lateIn/earlyOut（色分け用）にのみ使う。
         Instant officialIn = clockIn;
         boolean lateIn = false;
         if (clockIn != null) {
+            officialIn = roundUpHalfHour(clockIn);
             if (hasPlan && planStart != null) {
-                if (clockIn.isBefore(planStart)) {
-                    officialIn = planStart;
-                } else {
-                    officialIn = roundUpHalfHour(clockIn);
-                    lateIn = true;
-                }
-            } else {
-                officialIn = roundUpHalfHour(clockIn);
+                lateIn = !clockIn.isBefore(planStart);
             }
         }
 
         Instant officialOut = clockOut;
         boolean earlyOut = false;
         if (clockOut != null) {
+            officialOut = roundDownHalfHour(clockOut);
             if (hasPlan && planEnd != null) {
-                if (clockOut.isAfter(planEnd)) {
-                    officialOut = planEnd;
-                } else {
-                    officialOut = roundDownHalfHour(clockOut);
-                    earlyOut = true;
-                }
-            } else {
-                officialOut = roundDownHalfHour(clockOut);
+                earlyOut = !clockOut.isAfter(planEnd);
             }
         }
 
@@ -750,34 +740,51 @@ public class ReportService {
                             .toList()
                         : Collections.emptyList();
 
-                for (int i = 0; i < daySessions.size(); i++) {
-                    Map<String, Object> session = daySessions.get(i);
-                    ShiftSlot slot = i < sortedSlots.size() ? sortedSlots.get(i) : null;
-
-                    // Официальные (округлённые по плану) значения — та же логика, что в календаре/табеле
-                    computeSessionOfficial(session, slot, date, breakRules);
-
-                    // Сырые плановые значения слота — для 出勤予定/退勤予定/予定休憩
-                    if (slot != null) {
-                        session.put("scheduledClockIn",  slot.getStartTime() != null ? slot.getStartTime().toString() : null);
-                        session.put("scheduledClockOut", slot.getEndTime()   != null ? slot.getEndTime().toString()   : null);
-                        session.put("scheduledBreakMinutes", plannedSlotBreakMinutes(slot, breakRules));
-                        session.put("overtimeMinutes", computeOvertimeMinutes(session, slot, date, breakRules));
-                        boolean nd = slot.isNextDay();
-                        if (!nd && slot.getStartTime() != null && slot.getEndTime() != null) {
-                            nd = !slot.getEndTime().isAfter(slot.getStartTime());
+                        for (int i = 0; i < daySessions.size(); i++) {
+                            Map<String, Object> session = daySessions.get(i);
+                            ShiftSlot slot = i < sortedSlots.size() ? sortedSlots.get(i) : null;
+        
+                            // Официальные (округлённые по плану) значения — та же логика, что в календаре/табеле
+                            computeSessionOfficial(session, slot, date, breakRules);
+        
+                            // 出勤時間/退勤時間 — факт, округлённый (приход вверх, уход вниз), независимо от наличия плана
+                            Instant rawClockIn  = parseIsoToInstant((String) session.get("clockIn"));
+                            Instant rawClockOut = parseIsoToInstant((String) session.get("clockOut"));
+                            Instant roundedIn   = rawClockIn  != null ? roundUpHalfHour(rawClockIn)   : null;
+                            Instant roundedOut  = rawClockOut != null ? roundDownHalfHour(rawClockOut) : null;
+                            session.put("roundedClockIn",  roundedIn  != null ? toJstIso(roundedIn)  : null);
+                            session.put("roundedClockOut", roundedOut != null ? toJstIso(roundedOut) : null);
+        
+                            // Сырые плановые значения слота — для 出勤予定/退勤予定/予定休憩
+                            if (slot != null) {
+                                session.put("scheduledClockIn",  slot.getStartTime() != null ? slot.getStartTime().toString() : null);
+                                session.put("scheduledClockOut", slot.getEndTime()   != null ? slot.getEndTime().toString()   : null);
+                                session.put("scheduledBreakMinutes", plannedSlotBreakMinutes(slot, breakRules));
+        
+                                Instant[] planInstants = computePlanInstants(slot, date);
+                                Integer inOvertime  = computeInOvertimeMinutes(roundedIn, planInstants[0]);
+                                Integer outOvertime = computeOutOvertimeMinutes(roundedOut, planInstants[1]);
+                                session.put("inOvertimeMinutes",  inOvertime);
+                                session.put("outOvertimeMinutes", outOvertime);
+                                session.put("overtimeMinutes", (inOvertime != null && outOvertime != null) ? inOvertime + outOvertime : null);
+        
+                                boolean nd = slot.isNextDay();
+                                if (!nd && slot.getStartTime() != null && slot.getEndTime() != null) {
+                                    nd = !slot.getEndTime().isAfter(slot.getStartTime());
+                                }
+                                session.put("nextDay", nd);
+                            } else {
+                                session.put("scheduledClockIn",  null);
+                                session.put("scheduledClockOut", null);
+                                session.put("scheduledBreakMinutes", null);
+                                session.put("inOvertimeMinutes",  null);
+                                session.put("outOvertimeMinutes", null);
+                                session.put("overtimeMinutes", null);
+                                session.put("nextDay", false);
+                            }
+        
+                            sessions.add(session);
                         }
-                        session.put("nextDay", nd);
-                    } else {
-                        session.put("scheduledClockIn",  null);
-                        session.put("scheduledClockOut", null);
-                        session.put("scheduledBreakMinutes", null);
-                        session.put("overtimeMinutes", null);
-                        session.put("nextDay", false);
-                    }
-
-                    sessions.add(session);
-                }
             }
         }
 
@@ -790,36 +797,28 @@ public class ReportService {
         return payload;
     }
 
-    // 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない/未退勤なら null
-    private Integer computeOvertimeMinutes(Map<String, Object> session, ShiftSlot slot, LocalDate date, List<BreakRule> breakRules) {
-        if (slot == null) return null;
-
-        Instant clockIn  = parseIsoToInstant((String) session.get("clockIn"));
-        Instant clockOut = parseIsoToInstant((String) session.get("clockOut"));
-        if (clockIn == null || clockOut == null) return null;
-
+    // 予定の出退勤時刻（Instant, nextDay跨ぎ考慮）を返す。plan無しなら {null, null}
+    private Instant[] computePlanInstants(ShiftSlot slot, LocalDate date) {
+        if (slot == null) return new Instant[]{null, null};
         Instant planStart = planTimeToInstant(date, slot.getStartTime());
         Instant planEnd   = planTimeToInstant(date, slot.getEndTime());
-        if (planStart == null || planEnd == null) return null;
-        if (slot.isNextDay() || !planEnd.isAfter(planStart)) planEnd = planEnd.plus(Duration.ofDays(1));
-
-        long actualGross    = Duration.between(clockIn, clockOut).toMinutes();
-        long scheduledGross = Duration.between(planStart, planEnd).toMinutes();
-
-        Instant breakStart = parseIsoToInstant((String) session.get("breakStart"));
-        Instant breakEnd   = parseIsoToInstant((String) session.get("breakEnd"));
-        int breakMin;
-        if (breakStart != null && breakEnd != null) {
-            long raw = Duration.between(breakStart, breakEnd).toMinutes();
-            breakMin = (int) Math.max(raw, 0);
-        } else {
-            breakMin = plannedSlotBreakMinutes(slot, breakRules);
+        if (planStart != null && planEnd != null) {
+            boolean nextDay = slot.isNextDay() || !planEnd.isAfter(planStart);
+            if (nextDay) planEnd = planEnd.plus(Duration.ofDays(1));
         }
+        return new Instant[]{planStart, planEnd};
+    }
 
-        long actualNet    = Math.max(actualGross - breakMin, 0);
-        long scheduledNet = Math.max(scheduledGross - breakMin, 0);
+    // 出勤残業時間 = 予定出勤 − 出勤時間（丸め後）。早く来たら＋、遅刻なら−
+    private Integer computeInOvertimeMinutes(Instant roundedIn, Instant planStart) {
+        if (roundedIn == null || planStart == null) return null;
+        return (int) Duration.between(roundedIn, planStart).toMinutes();
+    }
 
-        return (int) (actualNet - scheduledNet);
+    // 退勤残業時間 = 退勤時間（丸め後） − 予定退勤。遅くまで残れば＋、早退なら−
+    private Integer computeOutOvertimeMinutes(Instant roundedOut, Instant planEnd) {
+        if (roundedOut == null || planEnd == null) return null;
+        return (int) Duration.between(planEnd, roundedOut).toMinutes();
     }
 
     private String toJstIso(Instant instant) {

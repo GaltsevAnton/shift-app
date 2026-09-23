@@ -35,4 +35,9 @@ public class DepartmentController {
     public void delete(@PathVariable Long id) {
         service.delete(CurrentUser.require().getRestaurantId(), id);
     }
+
+    @PutMapping("/reorder")
+    public void reorder(@RequestBody List<Long> orderedIds) {
+        service.reorder(CurrentUser.require().getRestaurantId(), orderedIds);
+    }
 }

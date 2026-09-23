@@ -72,12 +72,15 @@ class SessionModel(BaseModel):
     clockOut: Optional[str] = None
     breakStart: Optional[str] = None
     breakEnd: Optional[str] = None
+    # факт, округлённый (出勤時間: вверх, 退勤時間: вниз) — не зависит от наличия плана
+    roundedClockIn: Optional[str] = None
+    roundedClockOut: Optional[str] = None
     # план (сырые значения слота, без округления)
     scheduledClockIn: Optional[str] = None
     scheduledClockOut: Optional[str] = None
     scheduledBreakMinutes: Optional[int] = None
     nextDay: bool = False   # 退勤予定が翌日にまたがるスロットか（退勤日付（予定）の計算に使用）
-    # официальные (округлённые по плану) значения — только для 勤務時間
+    # официальные (округлённые по плану) значения — только для 拘束時間/実働時間
     hasPlan: bool = False
     officialClockIn: Optional[str] = None
     officialClockOut: Optional[str] = None
@@ -85,7 +88,10 @@ class SessionModel(BaseModel):
     workMinutes: Optional[int] = None
     lateIn: bool = False
     earlyOut: bool = False
-    # 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない/未退勤なら null
+    # 出勤残業時間 = 予定出勤 − 出勤時間（丸め後）。退勤残業時間 = 退勤時間（丸め後） − 予定退勤
+    inOvertimeMinutes: Optional[int] = None
+    outOvertimeMinutes: Optional[int] = None
+    # 残業時間（合計） = inOvertimeMinutes + outOvertimeMinutes。予定がない/未退勤なら null
     overtimeMinutes: Optional[int] = None
 
 class AttendanceSessionsRequest(BaseModel):

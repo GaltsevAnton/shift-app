@@ -40,7 +40,7 @@ const thStyle = {
 const tdStyle = { padding: "10px 10px", verticalAlign: "middle" };
 
 /* ─── Generic CRUD panel ────────────────────────────────── */
-function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onDelete }) {
+function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onDelete, onMove }) {
   const [newName, setNewName]   = useState("");
   const [editId, setEditId]     = useState(null);
   const [editName, setEditName] = useState("");
@@ -108,16 +108,18 @@ function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onD
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
-              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
+            <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
+                {onMove && <th style={{ ...thStyle, width: 60 }}></th>}
                 <th style={thStyle}>ID</th>
                 <th style={thStyle}>名前</th>
                 <th style={{ ...thStyle, textAlign: "right" }}></th>
               </tr>
             </thead>
             <tbody>
-              {items.map(item => (
+              {items.map((item, index) => (
                 editId === item.id ? (
                   <tr key={item.id} style={{ background: "#f8f8ff", borderBottom: "1px solid #f0f1f6" }}>
+                    {onMove && <td style={tdStyle}></td>}
                     <td style={tdStyle}>
                       <span style={{ color: "#aaa", fontSize: 12 }}>#{item.id}</span>
                     </td>
@@ -157,6 +159,24 @@ function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onD
                     onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
                     onMouseLeave={e => e.currentTarget.style.background = ""}
                   >
+                    {onMove && (
+                      <td style={tdStyle}>
+                        <div style={{ display: "flex", gap: 2 }}>
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => onMove(index, -1)}
+                            style={{ ...btnSecondaryStyle, padding: "2px 8px", opacity: index === 0 ? 0.3 : 1 }}
+                          >↑</button>
+                          <button
+                            type="button"
+                            disabled={index === items.length - 1}
+                            onClick={() => onMove(index, 1)}
+                            style={{ ...btnSecondaryStyle, padding: "2px 8px", opacity: index === items.length - 1 ? 0.3 : 1 }}
+                          >↓</button>
+                        </div>
+                      </td>
+                    )}
                     <td style={tdStyle}>
                       <span style={{ color: "#aaa", fontSize: 12 }}>#{item.id}</span>
                     </td>
@@ -183,7 +203,7 @@ function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onD
               ))}
               {items.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={3} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
+                  <td colSpan={onMove ? 4 : 3} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
                     まだ登録されていません
                   </td>
                 </tr>
@@ -299,6 +319,7 @@ function DepartmentsTab() {
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState("");
+  const [reordering, setReordering] = useState(false);
 
   async function load() {
     setLoading(true); setErr("");
@@ -326,13 +347,36 @@ function DepartmentsTab() {
     catch (e) { setErr(e.message || "削除エラー"); }
   }
 
+  async function onMove(index, dir) {
+    const swapIdx = index + dir;
+    if (swapIdx < 0 || swapIdx >= items.length || reordering) return;
+    const next = [...items];
+    [next[index], next[swapIdx]] = [next[swapIdx], next[index]];
+    setItems(next); // оптимистично, для мгновенного отклика
+    setReordering(true); setErr("");
+    try {
+      await api.settingsDepartmentsReorder(next.map(d => d.id));
+    } catch (e) {
+      setErr(e.message || "並び替えエラー");
+      await load(); // откат к серверному состоянию при ошибке
+    } finally {
+      setReordering(false);
+    }
+  }
+
   return (
-    <MasterPanel
-      title="部署"
-      hint="例：フロント、調理、事務所..."
-      items={items} loading={loading} err={err}
-      onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete}
-    />
+    <div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
+        矢印でキオスク画面に表示される部署の順序を変更できます（部署の非表示・除外はできません）。
+      </div>
+      <MasterPanel
+        title="部署"
+        hint="例：フロント、調理、事務所..."
+        items={items} loading={loading} err={err}
+        onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete}
+        onMove={onMove}
+      />
+    </div>
   );
 }
 

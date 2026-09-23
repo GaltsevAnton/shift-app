@@ -59,6 +59,14 @@ public class AttendanceController {
         if (!record.getRestaurant().getId().equals(me.getRestaurantId()))
             throw new IllegalArgumentException("Access denied");
 
+        if (req.getRecordType() != null) {
+            try {
+                record.setRecordType(TimeRecordType.valueOf(req.getRecordType()));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Invalid record type: " + req.getRecordType());
+            }
+        }
+
         if (req.getRecordedAt() != null) {
             if (record.getRecordType() == TimeRecordType.CLOCK_IN) {
                 // CLOCK_IN определяет ячейку всей смены — двигаем всю сессию целиком
@@ -81,6 +89,19 @@ public class AttendanceController {
         record.setEditedAt(Instant.now());
 
         return toResponse(timeRecordRepository.save(record));
+    }
+
+    @Transactional
+    @DeleteMapping("/{id}")
+    public void deleteRecord(@PathVariable Long id) {
+        var me = CurrentUser.require();
+        TimeRecord record = timeRecordRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Record not found"));
+
+        if (!record.getRestaurant().getId().equals(me.getRestaurantId()))
+            throw new IllegalArgumentException("Access denied");
+
+        timeRecordRepository.delete(record);
     }
 
     // Собираем все записи одной смены: от данного CLOCK_IN до ближайшего

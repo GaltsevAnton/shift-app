@@ -12,11 +12,24 @@ const VIEW_MODES = [
   { value: "period", label: "期間" },
 ];
 
+// リスト専用: 日単位の検索に対応するため「日」を追加（カレンダー側のVIEW_MODESは変更しない）
+const LIST_VIEW_MODES = [
+  { value: "month",  label: "月" },
+  { value: "week",   label: "週" },
+  { value: "day",    label: "日" },
+  { value: "period", label: "期間" },
+];
+
 const SORT_FIELDS = [
   { value: "name",       label: "氏名" },
   { value: "position",   label: "職種・役職" },
   { value: "department", label: "部署" },
 ];
+
+const SORTABLE_LIST_KEYS = new Set([
+  "scheduledInDate", "actualInDate", "inOvertimeTime",
+  "scheduledOutDate", "actualOutDate", "outOvertimeTime", "overtimeTime",
+]);
 
 const STATUS_FILTER_ITEMS = [
   { value: "working",  label: "出勤中" },
@@ -361,8 +374,9 @@ function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
 }
 
 /* ─── CheckDropdown ─────────────────────────────────────── */
-function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight }) {
+function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight, panelWidth, panelHeight, searchable }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef();
 
   useEffect(() => {
@@ -377,10 +391,22 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
     return () => clearTimeout(t);
   }, [open]);
 
+  useEffect(() => { if (!open) setSearch(""); }, [open]);
+
   const allKeys = [...items.map(i => i.value), ...(extraItems||[]).map(i => i.value)];
   const allOn   = allKeys.length > 0 && allKeys.every(k => visibleSet.has(k));
   const someOn  = allKeys.some(k => visibleSet.has(k));
   const isFiltered = !allOn;
+
+  const q = search.trim().toLowerCase();
+  const displayItems = q ? items.filter(i => (i.label || "").toLowerCase().includes(q)) : items;
+
+  const panelStyle = {
+    ...(panelWidth ? { width: panelWidth } : {}),
+    ...(panelHeight
+      ? { height: panelHeight, overflowY: "auto" }
+      : (panelMaxHeight ? { maxHeight: panelMaxHeight, overflowY: "auto" } : {})),
+  };
 
   return (
     <div ref={ref} className={styles.wpDropdownWrap}>
@@ -391,8 +417,23 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
         <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className={styles.wpDropdownPanel}
-          style={panelMaxHeight ? { maxHeight: panelMaxHeight, overflowY: "auto" } : undefined}>
+        <div className={styles.wpDropdownPanel} style={panelStyle}>
+          {searchable && (
+            <div style={{ padding: "6px 8px" }}>
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="氏名で検索..."
+                autoFocus
+                style={{
+                  width: "100%", padding: "5px 8px", fontSize: 13,
+                  border: "1px solid #e2e8f0", borderRadius: 6,
+                  outline: "none", boxSizing: "border-box",
+                }}
+              />
+            </div>
+          )}
           <label className={styles.wpDropdownAll}>
             <input type="checkbox" className={styles.colToggleCheck}
               checked={allOn}
@@ -402,7 +443,7 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
             <span>すべて</span>
           </label>
           <div className={styles.wpDropdownDivider} />
-          {items.map(item => (
+          {displayItems.map(item => (
             <label key={item.value} className={styles.wpDropdownItem}>
               <input type="checkbox" className={styles.colToggleCheck}
                 checked={visibleSet.has(item.value)}
@@ -411,6 +452,11 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
               <span>{item.label}</span>
             </label>
           ))}
+          {displayItems.length === 0 && (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "#94a3b8" }}>
+              該当するスタッフがいません
+            </div>
+          )}
           {extraItems && extraItems.length > 0 && (
             <>
               <div className={styles.wpDropdownDivider} />
@@ -482,43 +528,48 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [editRecord,  setEditRecord]  = useState(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editErr,     setEditErr]     = useState(null);
+  const [deletingId,  setDeletingId]  = useState(null);
+  const [deleteErr,   setDeleteErr]   = useState(null);
   const [photoPopup, setPhotoPopup] = useState(null);
-  const [reportMenuOpen, setReportMenuOpen] = useState(false);
   const [reportLoading, setReportLoading]   = useState(false);
   const [alertMsg, setAlertMsg]             = useState(null);
-  const reportMenuRef = useRef();
   const [pageMode, setPageMode]     = useState(() => localStorage.getItem("attPageMode") || "calendar");
   const [listMode, setListMode]     = useState(() => localStorage.getItem("attListMode") || "month");
+  const [listDay, setListDay]       = useState(() => localStorage.getItem("attListDay") || new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }));
   const [listYm, setListYm]         = useState(() => localStorage.getItem("attListYm") || currentYM());
   const [listWeek, setListWeek]     = useState(() => localStorage.getItem("attListWeek") || currentMondayLocal());
   const [listPeriodFrom, setListPeriodFrom] = useState(() => localStorage.getItem("attListPeriodFrom") || "");
   const [listPeriodTo, setListPeriodTo]     = useState(() => localStorage.getItem("attListPeriodTo") || "");
-  const [listSelectedStaff, setListSelectedStaff] = useState(() => new Set());
+  const [listSelectedStaff, setListSelectedStaff] = useState(() => loadFilterSet("attListFilterStaff") || new Set());
   const [listRecords, setListRecords] = useState([]);
   const [listLoading, setListLoading] = useState(false);
   const [listErr, setListErr]         = useState(null);
   const [listSearched, setListSearched] = useState(false);
-  const [listSortConfig, setListSortConfig] = useState({ field: "date", dir: "desc" });
+  const [listSortConfig, setListSortConfig] = useState({ field: "actualInDate", dir: "desc" });
   const [listPageSize, setListPageSize] = useState(20);
   const [listPage, setListPage]         = useState(1);
   const [listShiftMap, setListShiftMap] = useState({});
   
   const LIST_COLUMNS = [
-    { key: "scheduledInDate",  value: "scheduledInDate",  label: "出勤日付（予定）" },
-    { key: "scheduledIn",      value: "scheduledIn",      label: "出勤時間（予定）" },
-    { key: "actualInDate",     value: "actualInDate",     label: "出勤日付（実際）" },
-    { key: "actualIn",         value: "actualIn",         label: "出勤時間（実際）" },
-    { key: "scheduledOutDate", value: "scheduledOutDate", label: "退勤日付（予定）" },
-    { key: "scheduledOut",     value: "scheduledOut",     label: "退勤時間（予定）" },
-    { key: "actualOutDate",    value: "actualOutDate",    label: "退勤日付（実際）" },
-    { key: "actualOut",        value: "actualOut",        label: "退勤時間（実際）" },
-    { key: "breakStart",       value: "breakStart",       label: "休憩開始" },
-    { key: "breakEnd",         value: "breakEnd",         label: "休憩終了" },
+    { key: "scheduledInDate",  value: "scheduledInDate",  label: "出勤日（予定）" },
+    { key: "actualInDate",     value: "actualInDate",     label: "出勤日（実績）" },
+    { key: "scheduledIn",      value: "scheduledIn",      label: "出勤時刻（予定）" },
+    { key: "actualIn",         value: "actualIn",         label: "出勤時刻（実績）" },
+    { key: "actualInRounded",  value: "actualInRounded",  label: "出勤時刻" },
+    { key: "inOvertimeTime",   value: "inOvertimeTime",   label: "出勤前残業時間" },
+    { key: "scheduledOutDate", value: "scheduledOutDate", label: "退勤日（予定）" },
+    { key: "actualOutDate",    value: "actualOutDate",    label: "退勤日（実績）" },
+    { key: "scheduledOut",     value: "scheduledOut",     label: "退勤時刻（予定）" },
+    { key: "actualOut",        value: "actualOut",        label: "退勤時刻（実績）" },
+    { key: "actualOutRounded", value: "actualOutRounded", label: "退勤時刻" },
+    { key: "outOvertimeTime",  value: "outOvertimeTime",  label: "退勤後残業時間" },
+    { key: "actualWorkTime",   value: "actualWorkTime",   label: "拘束時間" },
+    { key: "breakStart",       value: "breakStart",       label: "休憩開始時刻" },
+    { key: "breakEnd",         value: "breakEnd",         label: "休憩終了時刻" },
     { key: "scheduledBreak",   value: "scheduledBreak",   label: "休憩時間（予定）" },
-    { key: "actualBreakTime",  value: "actualBreakTime",  label: "休憩時間（実際）" },
-    { key: "workTime",         value: "workTime",         label: "勤務時間（予定）" },
-    { key: "actualWorkTime",   value: "actualWorkTime",   label: "勤務時間（実際）" },
-    { key: "overtimeTime",     value: "overtimeTime",     label: "残業時間" },
+    { key: "actualBreakTime",  value: "actualBreakTime",  label: "休憩時間（実績）" },
+    { key: "workTime",         value: "workTime",         label: "実働時間" },
+    { key: "overtimeTime",     value: "overtimeTime",     label: "残業時間（合計）" },
     { key: "shiftPlan",        value: "shiftPlan",        label: "シフト（予定）" },
   ];
   const [visibleListCols, setVisibleListCols] = useState(
@@ -528,11 +579,13 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   /* ── persist ── */
   useEffect(() => { localStorage.setItem("attPageMode", pageMode); }, [pageMode]);
   useEffect(() => { localStorage.setItem("attListMode", listMode); }, [listMode]);
+  useEffect(() => { localStorage.setItem("attListDay",  listDay);  }, [listDay]);
   useEffect(() => { localStorage.setItem("attListYm",   listYm);   }, [listYm]);
   useEffect(() => { localStorage.setItem("attListWeek", listWeek); }, [listWeek]);
   useEffect(() => { if (listPeriodFrom) localStorage.setItem("attListPeriodFrom", listPeriodFrom); }, [listPeriodFrom]);
   useEffect(() => { if (listPeriodTo)   localStorage.setItem("attListPeriodTo",   listPeriodTo);   }, [listPeriodTo]);
   useEffect(() => { saveFilterSet("attListCols", visibleListCols); }, [visibleListCols]);
+  useEffect(() => { saveFilterSet("attListFilterStaff", listSelectedStaff); }, [listSelectedStaff]);
 
   function handleListColToggle(key) {
     setVisibleListCols(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -661,17 +714,20 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     ? (listPDays < 1 ? "期間を正しく指定してください" : "90日以内を指定してください")
     : null;
 
-  const listRange = useMemo(() => {
-    if (listMode === "week") {
-      return { from: listWeek, to: addDays(listWeek, 6) };
-    }
-    if (listMode === "period") {
-      if (!listPeriodFrom || !listPeriodTo || !listPOk) return { from: "", to: "" };
-      return { from: listPeriodFrom, to: listPeriodTo };
-    }
-    const total = daysInMonth(listYm);
-    return { from: dateStr(listYm, 1), to: dateStr(listYm, total) };
-  }, [listMode, listYm, listWeek, listPeriodFrom, listPeriodTo, listPOk]);
+    const listRange = useMemo(() => {
+      if (listMode === "day") {
+        return { from: listDay, to: listDay };
+      }
+      if (listMode === "week") {
+        return { from: listWeek, to: addDays(listWeek, 6) };
+      }
+      if (listMode === "period") {
+        if (!listPeriodFrom || !listPeriodTo || !listPOk) return { from: "", to: "" };
+        return { from: listPeriodFrom, to: listPeriodTo };
+      }
+      const total = daysInMonth(listYm);
+      return { from: dateStr(listYm, 1), to: dateStr(listYm, total) };
+    }, [listMode, listDay, listYm, listWeek, listPeriodFrom, listPeriodTo, listPOk]);
 
   async function loadListData() {
     if (!listRange.from || !listRange.to) return;
@@ -713,13 +769,35 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     if (pageMode !== "list") return;
     if (listMode === "period") return;
     loadListData();
-  }, [pageMode, listMode, listYm, listWeek]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pageMode, listMode, listDay, listYm, listWeek]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  function listSortValue(fieldKey, s) {
+    switch (fieldKey) {
+      case "userName":         return s.userName || null;
+      case "scheduledInDate":  return s.slot ? s.workDate : null;
+      case "actualInDate":     return s.clockIn ? jstDateStr(s.clockIn) : null;
+      case "inOvertimeTime":   return calcInOvertimeMinutes(s, s.slot, s.workDate);
+      case "scheduledOutDate": return scheduledOutDateStr(s.workDate, s.slot);
+      case "actualOutDate":    return s.clockOut ? jstDateStr(s.clockOut) : null;
+      case "outOvertimeTime":  return calcOutOvertimeMinutes(s, s.slot, s.workDate);
+      case "overtimeTime":     return calcTotalOvertimeMinutes(
+                                  calcInOvertimeMinutes(s, s.slot, s.workDate),
+                                  calcOutOvertimeMinutes(s, s.slot, s.workDate)
+                                );
+      default:                 return null;
+    }
+  }
   function listSortFn(a, b) {
-    let va, vb;
-    if (listSortConfig.field === "date") { va = a.workDate; vb = b.workDate; }
-    else                                 { va = a.userName; vb = b.userName; }
-    const cmp = va.localeCompare(vb, "ja");
+    const va = listSortValue(listSortConfig.field, a);
+    const vb = listSortValue(listSortConfig.field, b);
+    const aNull = va === null || va === undefined;
+    const bNull = vb === null || vb === undefined;
+    let cmp;
+    if (aNull && bNull) cmp = 0;
+    else if (aNull) cmp = 1;
+    else if (bNull) cmp = -1;
+    else if (typeof va === "number" && typeof vb === "number") cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb), "ja");
     return listSortConfig.dir === "asc" ? cmp : -cmp;
   }
 
@@ -800,42 +878,73 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     const mins = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
     return mins > 0 ? mins : 0;
   }
-  function rawActualWorkedMinutes(session) {
+  // 拘束時間 = 出勤時刻（丸め後）から退勤時刻（丸め後）までの時間（休憩を含む、差し引かない）
+  function rawActualGrossMinutes(session) {
     if (!session.clockIn || !session.clockOut) return null;
-    let mins = Math.round((new Date(session.clockOut) - new Date(session.clockIn)) / 60000);
-    if (session.breakStart && session.breakEnd) {
-      const brk = Math.round((new Date(session.breakEnd) - new Date(session.breakStart)) / 60000);
-      mins -= Math.max(brk, 0);
-    }
+    const roundedIn  = roundUpHalfHour(session.clockIn);
+    const roundedOut = roundDownHalfHour(session.clockOut);
+    const mins = Math.round((roundedOut - roundedIn) / 60000);
     return mins > 0 ? mins : 0;
   }
-  // 残業時間 = (実際の正味労働時間) − (予定の正味労働時間)。予定がない、または未退勤なら null
-  function calcOvertimeMinutes(session, rules) {
-    if (!session.slot || !session.clockIn || !session.clockOut) return null;
-
-    const schedStart = toMinutesOfDay(session.slot.startTime);
-    let   schedEnd    = toMinutesOfDay(session.slot.endTime);
-    if (schedStart === null || schedEnd === null) return null;
-    if (schedEnd <= schedStart) schedEnd += 24 * 60;
-    const scheduledGross = schedEnd - schedStart;
-
-    const actualGross = Math.round((new Date(session.clockOut) - new Date(session.clockIn)) / 60000);
-
-    // 休憩: 実打刻があればそちらを優先、なければ予定スロットの自動計算値
+  // 実働時間 = 拘束時間 − 休憩時間（実績）
+  function rawActualWorkedMinutes(session) {
+    const gross = rawActualGrossMinutes(session);
+    if (gross === null) return null;
     const raw = rawBreakMinutes(session);
-    const breakMin = raw !== null ? raw : plannedSlotBreakMinutes(session.slot, rules);
-
-    const actualNet    = Math.max(actualGross - breakMin, 0);
-    const scheduledNet = Math.max(scheduledGross - breakMin, 0);
-
-    return actualNet - scheduledNet;
+    const brk = raw !== null ? raw : (session.info?.officialBreakMinutes ?? 0);
+    const mins = gross - brk;
+    return mins > 0 ? mins : 0;
   }
+  // 予定の出退勤時刻（Date, nextDay跨ぎ考慮）を返す。planなしなら {planStart:null, planEnd:null}
+  function computePlanBounds(slot, workDate) {
+    if (!slot) return { planStart: null, planEnd: null };
+    let planStart = planTimeToDate(workDate, slot.startTime);
+    let planEnd   = planTimeToDate(workDate, slot.endTime);
+    if (planStart && planEnd && (slot.nextDay || planEnd <= planStart)) {
+      planEnd = new Date(planEnd.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return { planStart, planEnd };
+  }
+
+  // 出勤残業時間 = 予定出勤 − 出勤時間（丸め後）。早く来たら＋、遅刻なら−
+  function calcInOvertimeMinutes(session, slot, workDate) {
+    if (!slot || !session.clockIn) return null;
+    const { planStart } = computePlanBounds(slot, workDate);
+    if (!planStart) return null;
+    const roundedIn = roundUpHalfHour(session.clockIn);
+    return Math.round((planStart - roundedIn) / 60000);
+  }
+
+  // 退勤残業時間 = 退勤時間（丸め後） − 予定退勤。遅くまで残れば＋、早退なら−
+  function calcOutOvertimeMinutes(session, slot, workDate) {
+    if (!slot || !session.clockOut) return null;
+    const { planEnd } = computePlanBounds(slot, workDate);
+    if (!planEnd) return null;
+    const roundedOut = roundDownHalfHour(session.clockOut);
+    return Math.round((roundedOut - planEnd) / 60000);
+  }
+
+  function calcTotalOvertimeMinutes(inMin, outMin) {
+    if (inMin === null || outMin === null) return null;
+    return inMin + outMin;
+  }
+
+  function overtimeColorFor(mins) {
+    return mins === null || mins === undefined ? "#cbd5e1" : mins > 0 ? "#dc2626" : mins < 0 ? "#2563eb" : "#64748b";
+  }
+
   function fmtOvertimeMinutes(mins) {
-    if (mins === null) return "―";
-    const sign = mins > 0 ? "+" : mins < 0 ? "-" : "";
+    if (mins === null || mins === undefined || mins === 0) return "-";
+    const sign = mins > 0 ? "+" : "-";
     const abs  = Math.abs(mins);
     const h = Math.floor(abs / 60), m = abs % 60;
-    return `${sign}${h}時間${m}分`;
+    return `${sign}${h}時間${String(m).padStart(2, "0")}分`;
+  }
+
+  function fmtOvertimeMinutesPlain(mins) {
+    if (mins === null || mins === undefined || mins === 0) return "-";
+    const sign = mins > 0 ? "+" : "-";
+    return `${sign}${Math.abs(mins)}分`;
   }
   function formatShiftTime(t) {
     if (!t) return "--:--";
@@ -852,6 +961,17 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   function jstDateStr(iso) {
     if (!iso) return null;
     return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  }
+  // Instant(ISO) → datetime-local入力用の "YYYY-MM-DDTHH:mm"（JST基準、ブラウザのタイムゾーンに依存しない）
+  function toJstDatetimeLocal(iso) {
+    if (!iso) return "";
+    const s = new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" });
+    return s.slice(0, 16).replace(" ", "T");
+  }
+  // datetime-local入力値 "YYYY-MM-DDTHH:mm"（JST基準として明示的に解釈）→ ISO(UTC)文字列
+  function fromJstDatetimeLocal(value) {
+    if (!value) return null;
+    return new Date(`${value}:00+09:00`).toISOString();
   }
   // 退勤予定の日付 — nextDayフラグ、または終了時刻が開始時刻以前なら翌日扱い
   function scheduledOutDateStr(workDate, slot) {
@@ -873,16 +993,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       setReportLoading(false);
     }
   }
-
-  useEffect(() => {
-    if (!reportMenuOpen) return;
-    function onDown(e) {
-      if (reportMenuRef.current && !reportMenuRef.current.contains(e.target))
-        setReportMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [reportMenuOpen]);
 
   /* ── options ── */
   const monthOptions = useMemo(() => {
@@ -965,7 +1075,11 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       matched.forEach(({ session, slot }) => {
         if (!session.clockOut) return;
         const info = computeSessionOfficial(session, slot, date, breakRules);
-        if (info.workMin) total += info.workMin;
+        const grossMin = rawActualGrossMinutes(session);
+        if (grossMin === null) return;
+        const rawBrk = rawBreakMinutes(session);
+        const brkMin = rawBrk !== null ? rawBrk : (info?.officialBreakMinutes ?? 0);
+        total += Math.max(grossMin - brkMin, 0);
       });
     });
     return total;
@@ -1139,29 +1253,40 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     return "green";
   }
 
-  async function handleReport(type) {
-    setReportMenuOpen(false);
+  async function handleReport() {
+    if (displayDates.length === 0) {
+      setAlertMsg("期間を正しく設定してください");
+      return;
+    }
     setReportLoading(true);
     try {
-      if (type === "timesheet") {
-        await api.reportAttendanceTimesheet(ym);
-      } else if (type === "list") {
-        await api.reportAttendanceList(ym);
-      } else if (type === "timesheet_filtered") {
-        if (displayDates.length === 0) {
-          setAlertMsg("期間を正しく設定してください");
-          return;
-        }
-        await api.reportAttendanceTimesheetFiltered(
-          displayDates[0],
-          displayDates[displayDates.length - 1],
-          filteredStaffByStatus.map(s => s.id)
-        );
-      }
+      await api.reportAttendanceTimesheetFiltered(
+        displayDates[0],
+        displayDates[displayDates.length - 1],
+        filteredStaffByStatus.map(s => s.id)
+      );
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
     } finally {
       setReportLoading(false);
+    }
+  }
+
+  /* ── delete ── */
+  async function handleDeleteRecord(record) {
+    if (!window.confirm(`この打刻記録を削除しますか？\n${getTypeLabel(record.recordType)} ${fmtTime(record.recordedAt)}\n\nこの操作は取り消せません。`)) return;
+    setDeletingId(record.id); setDeleteErr(null);
+    try {
+      await api.attendanceDelete(record.id);
+      await load(true);
+      setDetailPopup(prev => prev ? {
+        ...prev,
+        dayRecords: prev.dayRecords.filter(r => r.id !== record.id),
+      } : prev);
+    } catch (e) {
+      setDeleteErr(e.message);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -1170,17 +1295,44 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     if (!editRecord) return;
     setEditLoading(true); setEditErr(null);
     try {
-      await api.attendanceEdit(editRecord.id, {
-        recordedAt: new Date(editRecord.recordedAt).toISOString(),
+      const updated = await api.attendanceEdit(editRecord.id, {
+        recordType: editRecord.recordType || null,
+        recordedAt: fromJstDatetimeLocal(editRecord.recordedAt),
         note:       editRecord.note || null,
       });
       await load(true);
+      setDetailPopup(prev => prev ? {
+        ...prev,
+        dayRecords: prev.dayRecords.map(r => r.id === updated.id ? { ...r, ...updated } : r),
+      } : prev);
       setEditRecord(null);
     } catch (e) {
       setEditErr(e.message);
     } finally {
       setEditLoading(false);
     }
+  }
+
+  function renderListTh(fieldKey, label) {
+    const isActive = listSortConfig.field === fieldKey;
+    return (
+      <th key={fieldKey}
+        onClick={() => setListSortConfig({
+          field: fieldKey,
+          dir: isActive ? (listSortConfig.dir === "asc" ? "desc" : "asc") : "asc",
+        })}
+        style={{
+          padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5",
+          color: "#334155", fontWeight: 700, whiteSpace: "nowrap",
+          cursor: "pointer", userSelect: "none",
+        }}
+      >
+        {label}
+        <span style={{ marginLeft: 4, fontSize: 11, color: isActive ? "#2F5496" : "#94a3b8" }}>
+          {isActive ? (listSortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </th>
+    );
   }
 
   const weekColSpans = useMemo(() => {
@@ -1293,36 +1445,11 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             </div>
           )}
 
-          <div ref={reportMenuRef} style={{ position: "relative" }}>
-            <button type="button" className={styles.exportBtn}
-              onClick={() => setReportMenuOpen(v => !v)}
-              disabled={loading || reportLoading}>
-              {reportLoading ? "..." : "📊 レポート▼"}
-            </button>
-            {reportMenuOpen && (
-              <div style={{
-                position: "absolute", top: "100%", left: 0, zIndex: 1000,
-                background: "#fff", border: "1px solid #ccc", borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: 220, marginTop: 4,
-              }}>
-                {[
-                  { key: "timesheet", icon: "🕐", label: "勤怠集計表（実績）" },
-                  { key: "list",      icon: "📋", label: "打刻一覧" },
-                  { key: "timesheet_filtered", icon: "🔍", label: "表示中の勤怠集計表" },
-                ].map(item => (
-                  <button key={item.key} type="button"
-                    onClick={() => handleReport(item.key)}
-                    style={{ display: "block", width: "100%", padding: "10px 16px",
-                      textAlign: "left", border: "none", background: "none",
-                      cursor: "pointer", fontSize: 13 }}
-                    onMouseEnter={e => e.target.style.background = "#f5f5f5"}
-                    onMouseLeave={e => e.target.style.background = "none"}>
-                    {item.icon} {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <button type="button" className={styles.exportBtn}
+            onClick={handleReport}
+            disabled={loading || reportLoading}>
+            {reportLoading ? "..." : "📥 Excel"}
+          </button>
 
           <span className={styles.topHint}>🕐 勤怠管理</span>
         </div>
@@ -1527,7 +1654,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                           <td className={styles.cell} style={{ padding: 0, verticalAlign: "top" }}>
                             {Array.from({ length: sessionRows }, (_, si) => (
                               <div key={si} style={{ borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none" }}>
-                                {["出勤", "退勤", "実働", "休憩"].map(label => (
+                                {["出勤", "退勤", "拘束", "休憩", "実働"].map(label => (
                                   <div key={label} style={{
                                     minHeight: 22, padding: "2px 6px",
                                     display: "flex", alignItems: "center",
@@ -1574,6 +1701,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               const slot       = pair?.slot || null;
                               const info       = session ? computeSessionOfficial(session, slot, date, breakRules) : null;
                               const outNextDay = session?.clockOut && isNextDayJst(session.clockOut, date);
+                              // 表示用: 実際の打刻を30分単位で丸めた値（出勤は切り上げ、退勤は切り下げ）— リストと同じロジック
+                              const displayIn  = session?.clockIn  ? roundUpHalfHour(session.clockIn)   : null;
+                              const displayOut = session?.clockOut ? roundDownHalfHour(session.clockOut) : null;
+                              // 拘束/休憩/実働 — リストと同じ計算（丸めた実打刻ベース）
+                              const grossMin = session ? rawActualGrossMinutes(session) : null;
+                              const rawBrk   = session ? rawBreakMinutes(session) : null;
+                              const brkMin   = session ? (rawBrk !== null ? rawBrk : (info?.officialBreakMinutes ?? 0)) : null;
+                              const netMin   = grossMin !== null ? Math.max(grossMin - brkMin, 0) : null;
 
                               return (
                                 <div key={si} style={{
@@ -1594,8 +1729,8 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                                     display: "flex", alignItems: "center", justifyContent: "center",
                                     borderBottom: "1px solid rgba(0,0,0,0.04)",
                                   }}>
-                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: info?.officialIn ? "#1e293b" : "#cbd5e1" }}>
-                                      {info?.officialIn ? fmtTime(info.officialIn) : "--:--"}
+                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: displayIn ? "#1e293b" : "#cbd5e1" }}>
+                                      {displayIn ? fmtTime(displayIn) : "--:--"}
                                     </span>
                                   </div>
 
@@ -1608,9 +1743,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                                   }}>
                                     <span style={{
                                       fontSize: 12, fontWeight: 600, fontFamily: "monospace",
-                                      color: !info?.officialOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
+                                      color: !displayOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
                                     }}>
-                                      {info?.officialOut ? fmtTime(info.officialOut) : "--:--"}
+                                      {displayOut ? fmtTime(displayOut) : "--:--"}
                                     </span>
                                     {outNextDay && (
                                       <span style={{
@@ -1620,14 +1755,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                                     )}
                                   </div>
 
-                                  {/* 実働 */}
+                                  {/* 拘束 */}
                                   <div style={{
                                     minHeight: 22, padding: "2px 6px",
                                     display: "flex", alignItems: "center", justifyContent: "center",
                                     borderBottom: "1px solid rgba(0,0,0,0.04)",
                                   }}>
-                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
-                                      {!session ? "--:--" : (info?.workMin === null ? "―" : fmtHM(info.workMin))}
+                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: session ? "#475569" : "#cbd5e1" }}>
+                                      {!session ? "--:--" : (grossMin === null ? "―" : fmtHM(grossMin))}
                                     </span>
                                   </div>
 
@@ -1635,9 +1770,20 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                                   <div style={{
                                     minHeight: 22, padding: "2px 6px",
                                     display: "flex", alignItems: "center", justifyContent: "center",
+                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
                                   }}>
                                     <span style={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8" }}>
-                                      {session ? fmtHM(info?.officialBreakMinutes) : "--:--"}
+                                      {session ? fmtHM(brkMin) : "--:--"}
+                                    </span>
+                                  </div>
+
+                                  {/* 実働 */}
+                                  <div style={{
+                                    minHeight: 22, padding: "2px 6px",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                  }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
+                                      {!session ? "--:--" : (netMin === null ? "―" : fmtHM(netMin))}
                                     </span>
                                   </div>
                                 </div>
@@ -1665,15 +1811,15 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
             {/* ── フィルターバー ── */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ccc", flexShrink: 0 }}>
-                {VIEW_MODES.map((m, idx) => (
+            <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ccc", flexShrink: 0 }}>
+                {LIST_VIEW_MODES.map((m, idx) => (
                   <button key={m.value} type="button"
                     onClick={() => setListMode(m.value)}
                     style={{
                       padding: "5px 14px", fontSize: 13, border: "none", cursor: "pointer",
                       background: listMode === m.value ? "#2F5496" : "#fff",
                       color:      listMode === m.value ? "#fff"    : "#333",
-                      borderRight: idx < VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
+                      borderRight: idx < LIST_VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
                       fontWeight:  listMode === m.value ? "600" : "normal",
                     }}
                   >
@@ -1681,6 +1827,13 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   </button>
                 ))}
               </div>
+
+              {listMode === "day" && (
+                <input type="date" value={listDay}
+                  onChange={e => setListDay(e.target.value)}
+                  style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #ccc", borderRadius: 6 }}
+                />
+              )}
 
               {listMode === "month" && (
                 <>
@@ -1739,7 +1892,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   visibleSet={listSelectedStaff}
                   onToggle={handleListStaffToggle}
                   onToggleAll={handleListStaffToggleAll}
-                  panelMaxHeight={240}
+                  panelWidth={250}
+                  panelHeight={500}
+                  searchable
                 />
               )}
 
@@ -1762,26 +1917,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                 disabled={!listRange.from || !listRange.to || reportLoading || listSessions.length === 0}>
                 {reportLoading ? "..." : "📥 Excel"}
               </button>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <span className={styles.sortBarLabel}>並び替え：</span>
-              {SORT_FIELDS.map(f => {
-                const isActive = sortConfig.field === f.value;
-                return (
-                  <button key={f.value} type="button"
-                    className={`${styles.sortBtn} ${isActive ? styles.sortBtnActive : ""}`}
-                    onClick={() => setSortConfig({
-                      field: f.value,
-                      dir: isActive ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
-                    })}>
-                    {f.label}
-                    <span className={styles.sortArrow}>
-                      {isActive ? (sortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
-                );
-              })}
             </div>
 
             {listSearched && !listLoading && listSessions.length > 0 && (
@@ -1811,20 +1946,26 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             ) : (
               <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
+                <thead>
                       <tr style={{ background: "#f0f4ff" }}>
-                        <th style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>申請者</th>
+                        {renderListTh("userName", "申請者")}
                         {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
-                          <th key={c.key} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
-                            {c.label}
-                          </th>
+                          SORTABLE_LIST_KEYS.has(c.key)
+                            ? renderListTh(c.key, c.label)
+                            : (
+                              <th key={c.key} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "2px solid #dbe4f5", color: "#334155", fontWeight: 700, whiteSpace: "nowrap" }}>
+                                {c.label}
+                              </th>
+                            )
                         ))}
                       </tr>
                     </thead>
                   <tbody>
                   {listPagedSessions.map((s, i) => {
                       const cellStyle = { padding: "8px 14px", whiteSpace: "nowrap" };
-                      const overtimeMin = calcOvertimeMinutes(s, breakRules);
+                      const inOvertimeMin  = calcInOvertimeMinutes(s, s.slot, s.workDate);
+                      const outOvertimeMin = calcOutOvertimeMinutes(s, s.slot, s.workDate);
+                      const overtimeMin    = calcTotalOvertimeMinutes(inOvertimeMin, outOvertimeMin);
                       const renderCell = (key) => {
                         switch (key) {
                           case "scheduledInDate":
@@ -1835,6 +1976,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                             return s.clockIn ? fmtDateWithWd(jstDateStr(s.clockIn)) : "―";
                           case "actualIn":
                             return fmtTimeOnly(s.clockIn);
+                          case "actualInRounded":
+                            return s.clockIn ? fmtTimeOnly(roundUpHalfHour(s.clockIn)) : "―";
+                          case "inOvertimeTime":
+                            return fmtOvertimeMinutesPlain(inOvertimeMin);
                           case "scheduledOutDate": {
                             const ds = scheduledOutDateStr(s.workDate, s.slot);
                             return ds ? fmtDateWithWd(ds) : "―";
@@ -1845,6 +1990,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                             return s.clockOut ? fmtDateWithWd(jstDateStr(s.clockOut)) : "―";
                           case "actualOut":
                             return fmtTimeOnly(s.clockOut);
+                          case "actualOutRounded":
+                            return s.clockOut ? fmtTimeOnly(roundDownHalfHour(s.clockOut)) : "―";
+                          case "outOvertimeTime":
+                            return fmtOvertimeMinutesPlain(outOvertimeMin);
                           case "breakStart":
                             return s.breakStart ? fmtTimeOnly(s.breakStart) : "―";
                           case "breakEnd":
@@ -1855,9 +2004,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                             const raw = rawBreakMinutes(s);
                             return fmtWorkMinutes(raw !== null ? raw : (s.info?.officialBreakMinutes ?? null));
                           }
-                          case "workTime":
-                            return fmtWorkMinutes(s.info?.workMin ?? null);
                           case "actualWorkTime":
+                            return fmtWorkMinutes(rawActualGrossMinutes(s));
+                          case "workTime":
                             return fmtWorkMinutes(rawActualWorkedMinutes(s));
                           case "overtimeTime":
                             return fmtOvertimeMinutes(overtimeMin);
@@ -1874,13 +2023,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                           {LIST_COLUMNS.filter(c => visibleListCols.has(c.key)).map(c => (
                             <td key={c.key} style={{
                               ...cellStyle,
-                              fontFamily: ["actualIn","actualOut","breakStart","breakEnd","scheduledIn","scheduledOut"].includes(c.key) ? "monospace" : undefined,
+                              fontFamily: ["actualIn","actualOut","breakStart","breakEnd","scheduledIn","scheduledOut","actualInRounded","actualOutRounded"].includes(c.key) ? "monospace" : undefined,
                               color:
-                                c.key === "overtimeTime"
-                                  ? (overtimeMin === null ? "#cbd5e1" : overtimeMin > 0 ? "#dc2626" : overtimeMin < 0 ? "#2563eb" : "#64748b")
-                                  : ["actualInDate", "actualIn", "actualOutDate", "actualOut", "actualBreakTime", "actualWorkTime"].includes(c.key)
-                                    ? "rgb(0, 155, 240)"
-                                    : "rgb(137, 137, 137)",
+                                c.key === "overtimeTime"     ? overtimeColorFor(overtimeMin)
+                                : c.key === "inOvertimeTime"  ? overtimeColorFor(inOvertimeMin)
+                                : c.key === "outOvertimeTime" ? overtimeColorFor(outOvertimeMin)
+                                : ["actualInDate", "actualIn", "actualInRounded", "actualOutDate", "actualOut", "actualOutRounded", "actualBreakTime", "workTime", "actualWorkTime"].includes(c.key)
+                                  ? "rgb(0, 155, 240)"
+                                  : "rgb(137, 137, 137)",
                               fontWeight: c.key === "workTime" || c.key === "overtimeTime" ? 700 : undefined,
                             }}>
                               {renderCell(c.key)}
@@ -2055,13 +2205,21 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               }}
                             />
                             )}
+                            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                             <button onClick={() => setEditRecord({
-                              id: r.id,
-                              recordedAt: new Date(r.recordedAt).toISOString().slice(0, 16),
-                              note: r.note || "",
-                            })} style={{ padding:"4px 10px", fontSize:12, background:"#f1f5f9", border:"none", borderRadius:6, cursor:"pointer", color:"#475569" }}>
-                              編集
-                            </button>
+                                id: r.id,
+                                recordType: r.recordType,
+                                recordedAt: toJstDatetimeLocal(r.recordedAt),
+                                note: r.note || "",
+                              })} style={{ padding:"4px 10px", fontSize:12, background:"#f1f5f9", border:"none", borderRadius:6, cursor:"pointer", color:"#475569" }}>
+                                編集
+                              </button>
+                              <button onClick={() => handleDeleteRecord(r)}
+                                disabled={deletingId === r.id}
+                                style={{ padding:"4px 10px", fontSize:12, background:"#fee2e2", border:"none", borderRadius:6, cursor: deletingId === r.id ? "not-allowed" : "pointer", color:"#dc2626", opacity: deletingId === r.id ? 0.6 : 1 }}>
+                                {deletingId === r.id ? "..." : "削除"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -2071,10 +2229,28 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               })()}
             </div>
 
+            {deleteErr && (
+              <div style={{ padding:"10px 14px", borderRadius:8, background:"#fee2e2", color:"#dc2626", fontSize:12, marginBottom:12 }}>
+                削除エラー: {deleteErr}
+              </div>
+            )}
+
             {editRecord && (
               <div style={{ padding:14, borderRadius:10, background:"#fffbeb", border:"1px solid #fcd34d", marginBottom:16 }}>
                 <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:10 }}>✏️ 時刻を修正</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <label style={{ fontSize:12, fontWeight:600, color:"#555" }}>
+                    種別
+                    <select value={editRecord.recordType}
+                      onChange={e => setEditRecord({ ...editRecord, recordType: e.target.value })}
+                      style={{ display:"block", width:"100%", marginTop:4, padding:"6px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13, boxSizing:"border-box", background:"#fff" }}
+                    >
+                      <option value="CLOCK_IN">出勤</option>
+                      <option value="CLOCK_OUT">退勤</option>
+                      <option value="BREAK_START">休憩開始</option>
+                      <option value="BREAK_END">休憩終了</option>
+                    </select>
+                  </label>
                   <label style={{ fontSize:12, fontWeight:600, color:"#555" }}>
                     時刻
                     <input type="datetime-local" value={editRecord.recordedAt}

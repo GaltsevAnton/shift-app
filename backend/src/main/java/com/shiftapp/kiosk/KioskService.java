@@ -12,8 +12,11 @@ import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
 import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.restaurants.RestaurantRepository;
+import com.shiftapp.settings.department.Department;
 import com.shiftapp.users.User;
 import com.shiftapp.users.UserRepository;
+import com.shiftapp.users.UserRole;
+import com.shiftapp.users.dto.UserResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +53,32 @@ public class KioskService {
         this.restaurantRepository = restaurantRepository;
         this.preferenceRepository = preferenceRepository;
         this.notificationMailService = notificationMailService;
+    }
+
+    // ── Список сотрудников для киоска, отсортированный по приоритету отделов ──
+    // (транзакция нужна, т.к. departments — lazy ManyToMany, читается здесь же)
+    @Transactional(readOnly = true)
+    public List<UserResponse> getStaffList(Long restaurantId) {
+        List<User> staff = userRepository
+            .findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+            .stream()
+            .filter(u -> u.isActive() && (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER))
+            .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+
+        // stable sort — сохраняет исходный порядок (id desc) внутри одной группы отделов
+        staff.sort(Comparator.comparingInt(this::minDepartmentSortOrder));
+
+        return staff.stream().map(UserResponse::from).toList();
+    }
+
+    private int minDepartmentSortOrder(User u) {
+        if (u.getDepartments() == null || u.getDepartments().isEmpty()) {
+            return Integer.MAX_VALUE; // без отдела — в конец списка, но не скрываем
+        }
+        return u.getDepartments().stream()
+            .mapToInt(Department::getSortOrder)
+            .min()
+            .orElse(Integer.MAX_VALUE);
     }
 
     // ── Текущий статус сотрудника за сегодня ──

@@ -24,28 +24,34 @@ C_NEUTRAL  = "000000"
 
 # ── Определение опциональных колонок (соответствует LIST_COLUMNS на экране) ──
 COLUMN_DEFS = {
-    "scheduledInDate":  {"header": "出勤日付（予定）", "width": 16, "color": C_PLANNED, "bold": False},
-    "scheduledIn":      {"header": "出勤時間（予定）", "width": 10, "color": C_PLANNED, "bold": False},
-    "actualInDate":     {"header": "出勤日付（実際）", "width": 16, "color": C_ACTUAL,  "bold": False},
-    "actualIn":         {"header": "出勤時間（実際）", "width": 10, "color": C_ACTUAL,  "bold": False},
-    "scheduledOutDate": {"header": "退勤日付（予定）", "width": 16, "color": C_PLANNED, "bold": False},
-    "scheduledOut":     {"header": "退勤時間（予定）", "width": 10, "color": C_PLANNED, "bold": False},
-    "actualOutDate":    {"header": "退勤日付（実際）", "width": 16, "color": C_ACTUAL,  "bold": False},
-    "actualOut":        {"header": "退勤時間（実際）", "width": 10, "color": C_ACTUAL,  "bold": False},
-    "breakStart":       {"header": "休憩開始",         "width": 10, "color": C_PLANNED, "bold": False},
-    "breakEnd":         {"header": "休憩終了",         "width": 10, "color": C_PLANNED, "bold": False},
-    "scheduledBreak":   {"header": "休憩時間（予定）", "width": 12, "color": C_PLANNED, "bold": False},
-    "actualBreakTime":  {"header": "休憩時間（実際）", "width": 12, "color": C_ACTUAL,  "bold": False},
-    "workTime":         {"header": "勤務時間（予定）", "width": 12, "color": C_PLANNED, "bold": True},
-    "actualWorkTime":   {"header": "勤務時間（実際）", "width": 16, "color": C_ACTUAL,  "bold": False},
-    "overtimeTime":     {"header": "残業時間",         "width": 14, "color": None,      "bold": True},
-    "shiftPlan":        {"header": "シフト（予定）",   "width": 14, "color": C_PLANNED, "bold": False},
+    "scheduledInDate":  {"header": "出勤日（予定）",     "width": 16, "color": C_PLANNED, "bold": False},
+    "actualInDate":     {"header": "出勤日（実績）",     "width": 16, "color": C_ACTUAL,  "bold": False},
+    "scheduledIn":      {"header": "出勤時刻（予定）",   "width": 10, "color": C_PLANNED, "bold": False},
+    "actualIn":         {"header": "出勤時刻（実績）",   "width": 10, "color": C_ACTUAL,  "bold": False},
+    "actualInRounded":  {"header": "出勤時刻",           "width": 10, "color": C_ACTUAL,  "bold": False},
+    "inOvertimeTime":   {"header": "出勤前残業時間",     "width": 12, "color": None,      "bold": False},
+    "scheduledOutDate": {"header": "退勤日（予定）",     "width": 16, "color": C_PLANNED, "bold": False},
+    "actualOutDate":    {"header": "退勤日（実績）",     "width": 16, "color": C_ACTUAL,  "bold": False},
+    "scheduledOut":     {"header": "退勤時刻（予定）",   "width": 10, "color": C_PLANNED, "bold": False},
+    "actualOut":        {"header": "退勤時刻（実績）",   "width": 10, "color": C_ACTUAL,  "bold": False},
+    "actualOutRounded": {"header": "退勤時刻",           "width": 10, "color": C_ACTUAL,  "bold": False},
+    "outOvertimeTime":  {"header": "退勤後残業時間",     "width": 12, "color": None,      "bold": False},
+    "breakStart":       {"header": "休憩開始時刻",       "width": 10, "color": C_PLANNED, "bold": False},
+    "breakEnd":         {"header": "休憩終了時刻",       "width": 10, "color": C_PLANNED, "bold": False},
+    "scheduledBreak":   {"header": "休憩時間（予定）",   "width": 12, "color": C_PLANNED, "bold": False},
+    "actualBreakTime":  {"header": "休憩時間（実績）",   "width": 12, "color": C_ACTUAL,  "bold": False},
+    "workTime":         {"header": "実働時間",           "width": 12, "color": C_ACTUAL,  "bold": True},
+    "actualWorkTime":   {"header": "拘束時間",           "width": 16, "color": C_ACTUAL,  "bold": False},
+    "overtimeTime":     {"header": "残業時間（合計）",   "width": 14, "color": None,      "bold": True},
+    "shiftPlan":        {"header": "シフト（予定）",     "width": 14, "color": C_PLANNED, "bold": False},
 }
 COLUMN_ORDER = [
-    "scheduledInDate", "scheduledIn", "actualInDate", "actualIn",
-    "scheduledOutDate", "scheduledOut", "actualOutDate", "actualOut",
+    "scheduledInDate", "actualInDate", "scheduledIn", "actualIn", "actualInRounded", "inOvertimeTime",
+    "scheduledOutDate", "actualOutDate", "scheduledOut", "actualOut", "actualOutRounded", "outOvertimeTime",
+    "actualWorkTime",
     "breakStart", "breakEnd", "scheduledBreak", "actualBreakTime",
-    "workTime", "actualWorkTime", "overtimeTime", "shiftPlan",
+    "workTime",
+    "overtimeTime", "shiftPlan",
 ]
 
 
@@ -97,12 +103,18 @@ def _fmt_hm(mins):
     return f"{h}時間{m}分"
 
 def _fmt_overtime(mins):
-    if mins is None:
-        return "―"
-    sign = "+" if mins > 0 else ("-" if mins < 0 else "")
+    if mins is None or mins == 0:
+        return "-"
+    sign = "+" if mins > 0 else "-"
     abs_mins = abs(mins)
     h, m = divmod(abs_mins, 60)
-    return f"{sign}{h}時間{m}分"
+    return f"{sign}{h}時間{m:02d}分"
+
+def _fmt_overtime_minutes(mins):
+    if mins is None or mins == 0:
+        return "-"
+    sign = "+" if mins > 0 else "-"
+    return f"{sign}{abs(mins)}分"
 
 def _overtime_color(mins):
     if mins is None:
@@ -120,14 +132,23 @@ def _raw_break_minutes(s):
     mins = int((be - bs).total_seconds() / 60)
     return mins if mins > 0 else 0
 
-def _raw_actual_worked_minutes(s):
-    ci, co = _parse_dt(s.clockIn), _parse_dt(s.clockOut)
+def _raw_actual_gross_minutes(s):
+    """拘束時間 = 出勤時刻（丸め後）から退勤時刻（丸め後）までの時間（休憩を含む、差し引かない）"""
+    ci, co = _parse_dt(s.roundedClockIn), _parse_dt(s.roundedClockOut)
     if not ci or not co:
         return None
     mins = int((co - ci).total_seconds() / 60)
+    return mins if mins > 0 else 0
+
+def _raw_actual_worked_minutes(s):
+    """実働時間 = 拘束時間 − 休憩時間（実績）"""
+    gross = _raw_actual_gross_minutes(s)
+    if gross is None:
+        return None
     brk = _raw_break_minutes(s)
-    if brk:
-        mins -= brk
+    if brk is None:
+        brk = s.officialBreakMinutes or 0
+    mins = gross - brk
     return mins if mins > 0 else 0
 
 def _value_for(key, s):
@@ -140,6 +161,10 @@ def _value_for(key, s):
         return _fmt_date_wd(ci.strftime("%Y-%m-%d")) if ci else "―"
     if key == "actualIn":
         return _fmt_time(_parse_dt(s.clockIn))
+    if key == "actualInRounded":
+        return _fmt_time(_parse_dt(s.roundedClockIn))
+    if key == "inOvertimeTime":
+        return _fmt_overtime_minutes(s.inOvertimeMinutes)
     if key == "scheduledOutDate":
         if not s.scheduledClockOut:
             return "―"
@@ -152,6 +177,10 @@ def _value_for(key, s):
         return _fmt_date_wd(co.strftime("%Y-%m-%d")) if co else "―"
     if key == "actualOut":
         return _fmt_time(_parse_dt(s.clockOut))
+    if key == "actualOutRounded":
+        return _fmt_time(_parse_dt(s.roundedClockOut))
+    if key == "outOvertimeTime":
+        return _fmt_overtime_minutes(s.outOvertimeMinutes)
     if key == "breakStart":
         bs = _parse_dt(s.breakStart)
         return _fmt_time(bs) if bs else "―"
@@ -163,9 +192,9 @@ def _value_for(key, s):
     if key == "actualBreakTime":
         raw = _raw_break_minutes(s)
         return _fmt_hm(raw if raw is not None else s.officialBreakMinutes)
-    if key == "workTime":
-        return _fmt_hm(s.workMinutes)
     if key == "actualWorkTime":
+        return _fmt_hm(_raw_actual_gross_minutes(s))
+    if key == "workTime":
         return _fmt_hm(_raw_actual_worked_minutes(s))
     if key == "overtimeTime":
         return _fmt_overtime(s.overtimeMinutes)
@@ -212,6 +241,10 @@ def build(req: AttendanceSessionsRequest) -> bytes:
                 color = COLUMN_DEFS[key]["color"]
                 if key == "overtimeTime":
                     color = _overtime_color(s.overtimeMinutes)
+                elif key == "inOvertimeTime":
+                    color = _overtime_color(s.inOvertimeMinutes)
+                elif key == "outOvertimeTime":
+                    color = _overtime_color(s.outOvertimeMinutes)
                 elif color is None:
                     color = C_NEUTRAL
 
