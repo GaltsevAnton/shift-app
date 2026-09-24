@@ -1575,7 +1575,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             {viewMode === "period" ? "期間を正しく設定してください（7〜35日）" : "データがありません"}
           </div>
         ) : (
-          <div className={styles.tableWrap}>
+          <div className={styles.tableWrap} style={{ paddingBottom: 0, marginBottom: 36 }}>
             <table className={styles.table}>
               <thead>
                 <tr>

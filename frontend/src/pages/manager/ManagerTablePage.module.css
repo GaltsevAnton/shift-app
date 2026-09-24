@@ -1,8 +1,12 @@
 /* ─── Page ──────────────────────────────────────────────── */
+/* ─── Page ──────────────────────────────────────────────── */
 .page {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0; /* flexアイテムの暗黙的なmin-width:autoを解除 — 中の広いテーブルが
+                   ManagerLayoutの外側レイアウト全体を横に押し広げてしまい、
+                   モニターによって横スクロールが出ない/消える不具合を修正 */
   background: #f8fafc;
   font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, sans-serif;
   font-size: 12px;
@@ -70,7 +74,14 @@
 }
 
 /* ─── Table wrap ────────────────────────────────────────── */
-.tableWrap { flex: 1; overflow: auto; padding-bottom: 36px; }
+.tableWrap {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding-bottom: 36px;
+}
 
 /* ─── Table ─────────────────────────────────────────────── */
 .table {
