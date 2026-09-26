@@ -18,6 +18,7 @@ public class UserUpdateRequest {
     public String position;
     public List<Long> departmentIds;
     @NotNull  public UserRole role;
+    @NotNull  public Integer sortOrder;
     public boolean active;
     public String password;
 

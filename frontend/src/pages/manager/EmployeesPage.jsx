@@ -19,7 +19,7 @@ const emptyForm = {
   email: "", phone: "",
   postalCode: "", region: "", municipality: "", blockNumber: "", building: "",
   birthDate: "", gender: "MALE",
-  position: "", departmentIds: [], role: "STAFF", active: true,
+  position: "", sortOrder: "", departmentIds: [], role: "STAFF", active: true,
   unlockAccount: false,
 };
 
@@ -85,6 +85,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       birthDate: emp.birthDate || "",
       gender: emp.gender || "MALE",
       position: emp.position || "",
+      sortOrder: emp.sortOrder != null ? String(emp.sortOrder) : "",
       departmentIds: (emp.departments || []).map(d => d.id),
       role: emp.role || "STAFF",
       active: !!emp.active,
@@ -110,6 +111,8 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     if (!form.firstName.trim())      return "名を入力してください";
     if (!form.lastNameKana.trim())   return "姓（フリガナ）を入力してください";
     if (!form.firstNameKana.trim())  return "名（フリガナ）を入力してください";
+    if (!String(form.sortOrder).trim())               return "順番№を入力してください";
+    if (!/^\d+$/.test(String(form.sortOrder).trim())) return "順番№は半角数字で入力してください";
     return null;
   }
 
@@ -134,6 +137,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       birthDate: form.birthDate,
       gender: form.gender,
       position: form.position || null,
+      sortOrder: Number(form.sortOrder),
       departmentIds: form.departmentIds,
       role: form.role,
       password: form.password,
@@ -243,6 +247,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       if (!sortConfig.field) return 0;
       let va, vb;
       if (sortConfig.field === "id") { va = a.id; vb = b.id; }
+      else if (sortConfig.field === "sortOrder") { va = a.sortOrder ?? 0; vb = b.sortOrder ?? 0; }
       else if (sortConfig.field === "name")  { va = `${a.lastName || ""}${a.firstName || ""}`; vb = `${b.lastName || ""}${b.firstName || ""}`; }
       else if (sortConfig.field === "login") { va = a.login || ""; vb = b.login || ""; }
       if (typeof va === "number") return (sortConfig.dir === "asc" ? 1 : -1) * (va - vb);
@@ -322,8 +327,9 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
 
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
-              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
+            <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
                 <SortableTh label="ID"    field="id"    sortConfig={sortConfig} onSort={handleSort} />
+                <SortableTh label="順番№" field="sortOrder" sortConfig={sortConfig} onSort={handleSort} />
                 <SortableTh label="氏名"  field="name"  sortConfig={sortConfig} onSort={handleSort} />
                 <SortableTh label="Login" field="login" sortConfig={sortConfig} onSort={handleSort} />
                 <FilterTh
@@ -367,6 +373,9 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                   onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
                   onMouseLeave={e => e.currentTarget.style.background = ""}>
                   <td style={tdStyle}><span style={{ color: "#aaa", fontSize: 12 }}>#{emp.id}</span></td>
+                  <td style={tdStyle}>
+                    <span style={{ fontWeight: 700, color: "#475569" }}>{emp.sortOrder ?? "—"}</span>
+                  </td>
                   <td style={tdStyle}>
                     <b>{emp.lastName} {emp.firstName}</b>
                     {emp.lastNameKana && (
@@ -437,7 +446,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                 </tr>
               ))}
               {filteredItems.length === 0 && !loading && (
-                <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
+                <tr><td colSpan={9} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
                   {items.length === 0 ? "スタッフがいません" : "該当するスタッフが見つかりません"}
                 </td></tr>
               )}
@@ -563,8 +572,22 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
               </Field>
             </div>
 
+
             {/* ── 業務情報 ── */}
             <SectionTitle>業務情報</SectionTitle>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <Field label="順番№" required>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.sortOrder}
+                  onChange={e => setForm({ ...form, sortOrder: e.target.value })}
+                  style={inputStyle}
+                  placeholder="例：1"
+                />
+              </Field>
+              <div />
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <Field label="職種・役職">
                 <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} style={inputStyle}>

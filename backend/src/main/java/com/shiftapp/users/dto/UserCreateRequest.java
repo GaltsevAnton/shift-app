@@ -19,6 +19,7 @@ public class UserCreateRequest {
     public String position;
     public List<Long> departmentIds;
     @NotNull  public UserRole role;
+    @NotNull  public Integer sortOrder;
     @NotBlank public String password;
 
     // ── Опциональные поля профиля ──

@@ -7,6 +7,7 @@ import com.shiftapp.users.dto.UserResponse;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/kiosk")
@@ -30,6 +31,13 @@ public class KioskController {
     @GetMapping("/status/{userId}")
     public StaffStatusResponse getStatus(@PathVariable Long userId) {
         return kioskService.getStatus(userId);
+    }
+
+    // Статусы всех сотрудников киоска одним запросом (вместо отдельного запроса на каждого)
+    // Ответ: { "userId": StaffStatusResponse, ... }
+    @GetMapping("/statuses")
+    public Map<Long, StaffStatusResponse> getStatuses(@RequestParam Long restaurantId) {
+        return kioskService.getStatuses(restaurantId);
     }
 
     // Фиксация прихода/ухода/перерыва

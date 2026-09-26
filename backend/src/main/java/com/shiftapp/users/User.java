@@ -36,6 +36,9 @@ public class User {
     @Column(length = 100)
     private String position;
 
+    @Column(name = "sort_order", nullable = false)
+    private int sortOrder;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_departments",
@@ -123,6 +126,8 @@ public class User {
     public void setFullName(String fullName) { this.fullName = fullName; }
     public String getPosition() { return position; }
     public void setPosition(String position) { this.position = position; }
+    public int getSortOrder() { return sortOrder; }
+    public void setSortOrder(int sortOrder) { this.sortOrder = sortOrder; }
     public Set<Department> getDepartments() { return departments; }
     public void setDepartments(Set<Department> departments) { this.departments = departments; }
     public boolean isActive() { return active; }

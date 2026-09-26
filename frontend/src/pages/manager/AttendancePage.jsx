@@ -21,6 +21,7 @@ const LIST_VIEW_MODES = [
 ];
 
 const SORT_FIELDS = [
+  { value: "sortOrder",  label: "順番№" },
   { value: "name",       label: "氏名" },
   { value: "position",   label: "職種・役職" },
   { value: "department", label: "部署" },
@@ -517,7 +518,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("attFilterDept")   || new Set());
   const [visibleStatuses,    setVisibleStatuses]    = useState(() => loadFilterSet("attFilterStatus") || new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
   const [visibleColors, setVisibleColors] = useState(() => loadFilterSet("attFilterColor") || new Set(COLOR_FILTER_ITEMS.map(i => i.value)));
-  const [sortConfig, setSortConfig] = useState({ field: "name", dir: "asc" });
+  const [sortConfig, setSortConfig] = useState({ field: "sortOrder", dir: "asc" });
   const [showInactive, setShowInactive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftMap, setShiftMap] = useState({});
@@ -1086,6 +1087,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   }
 
   function sortFn(a, b) {
+    if (sortConfig.field === "sortOrder") {
+      return (sortConfig.dir === "asc" ? 1 : -1) * ((a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    }
     let va = "", vb = "";
     if (sortConfig.field === "name")       { va = a.fullName; vb = b.fullName; }
     if (sortConfig.field === "position")   { va = positions[a.id] || ""; vb = positions[b.id] || ""; }
@@ -1636,7 +1640,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                     <tr key={s.id} className={`${styles.staffRow} ${styles.attRow}`} data-staff={s.id}>
                       <td className={styles.tdNumber}
                         style={!colVisibility.number ? { display:"none" } : {}}>
-                        {idx + 1}
+                        {s.sortOrder ?? "—"}
                       </td>
                       <td className={styles.tdPosition}
                         style={!colVisibility.position ? { display:"none" } : {}}>

@@ -74,9 +74,14 @@ public class UserService {
         u.setFullName(req.lastName + " " + req.firstName);
         u.setFullNameKana(req.lastNameKana + " " + req.firstNameKana);
 
+        if (repo.existsByRestaurant_IdAndSortOrder(restaurantId, req.sortOrder)) {
+            throw new RuntimeException("この順番№は既に使用されています");
+        }
+
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
+        u.setSortOrder(req.sortOrder);
         u.setActive(true);
         u.setPasswordHash(passwordEncoder.encode(req.password));
 
@@ -115,9 +120,15 @@ public class UserService {
         u.setFullName(req.lastName + " " + req.firstName);
         u.setFullNameKana(req.lastNameKana + " " + req.firstNameKana);
 
+        if (u.getSortOrder() != req.sortOrder
+                && repo.existsByRestaurant_IdAndSortOrderAndIdNot(restaurantId, req.sortOrder, id)) {
+            throw new RuntimeException("この順番№は既に使用されています");
+        }
+
         u.setPosition(req.position);
         u.setDepartments(resolveDepartments(restaurantId, req.departmentIds));
         u.setRole(req.role);
+        u.setSortOrder(req.sortOrder);
         u.setActive(req.active);
 
         if (req.password != null && !req.password.isBlank()) {

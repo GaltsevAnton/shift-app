@@ -25,6 +25,7 @@ for (let h = 0; h < 24; h++)
     END_TIME_OPTS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 
 const SORT_FIELDS = [
+  { value: "sortOrder",  label: "順番№" },
   { value: "name",       label: "氏名" },
   { value: "position",   label: "職種・役職" },
   { value: "department", label: "部署" },
@@ -1137,6 +1138,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [data, setData]               = useState({});
   const [allStaff, setAllStaff]       = useState([]);
   const [positions, setPositions]     = useState({});
+  const [sortOrders, setSortOrders]   = useState({});
   const [workplaces, setWorkplaces]   = useState([]);
   const [departments, setDepartments] = useState([]);
   const [staffDepts, setStaffDepts]   = useState({});
@@ -1155,7 +1157,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const reportMenuRef  = useRef();
   const cellAnchorRefs = useRef({});
 
-  const [sortConfig, setSortConfig] = useState({ field:"name", dir:"asc" });
+  const [sortConfig, setSortConfig] = useState({ field:"sortOrder", dir:"asc" });
   const [colVisibility, setColVisibility] = useState(() => {
     try {
       const raw = localStorage.getItem("mgrColVisibility");
@@ -1271,15 +1273,17 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       setMonthStatus1(monthStatusRes?.status1 || "RECEIVING");
       setMonthStatus2(monthStatusRes?.status2 || "RECEIVING");
 
-      const posMap = {}, deptsMap = {};
+      const posMap = {}, deptsMap = {}, sortOrderMap = {};
       employees.forEach(e => {
-        posMap[e.id]    = e.position || "";
-        deptsMap[e.id]  = (e.departments || []).map(d => d.name);
-        activeMap[e.id] = e.active;
+        posMap[e.id]       = e.position || "";
+        deptsMap[e.id]     = (e.departments || []).map(d => d.name);
+        activeMap[e.id]    = e.active;
+        sortOrderMap[e.id] = e.sortOrder;
       });
       setActiveMap(activeMap);
       setPositions(posMap);
       setStaffDepts(deptsMap);
+      setSortOrders(sortOrderMap);
       setWorkplaces(Array.isArray(wps)   ? wps   : []);
       setDepartments(Array.isArray(depts) ? depts : []);
 
@@ -1498,6 +1502,11 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   ];
 
   function sortFn(a, b) {
+    if (sortConfig.field === "sortOrder") {
+      const va = sortOrders[a.userId] ?? 0;
+      const vb = sortOrders[b.userId] ?? 0;
+      return (sortConfig.dir === "asc" ? 1 : -1) * (va - vb);
+    }
     let va = "", vb = "";
     if (sortConfig.field === "name")       { va = a.userName; vb = b.userName; }
     if (sortConfig.field === "position")   { va = positions[a.userId] || ""; vb = positions[b.userId] || ""; }
@@ -2135,7 +2144,7 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           <>
                             <td className={styles.tdNumber} rowSpan={maxSlots}
                               style={!colVisibility.number ? { display:"none" } : {}}>
-                              {filteredStaff.indexOf(staff) + 1}
+                              {sortOrders[staff.userId] ?? "—"}
                             </td>
                             <td className={styles.tdPosition} rowSpan={maxSlots}
                               style={!colVisibility.position ? { display:"none" } : {}}>

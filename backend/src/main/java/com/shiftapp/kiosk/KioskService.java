@@ -7,10 +7,6 @@ import com.shiftapp.notifications.NotificationMailService;
 import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
 import com.shiftapp.preferences.ShiftSlot;
-import com.shiftapp.notifications.NotificationMailService;
-import com.shiftapp.preferences.Preference;
-import com.shiftapp.preferences.PreferenceRepository;
-import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.restaurants.RestaurantRepository;
 import com.shiftapp.settings.department.Department;
 import com.shiftapp.users.User;
@@ -26,9 +22,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.*;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class KioskService {
@@ -60,15 +61,21 @@ public class KioskService {
     @Transactional(readOnly = true)
     public List<UserResponse> getStaffList(Long restaurantId) {
         List<User> staff = userRepository
-            .findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+            .findAllWithDepartmentsByRestaurantId(restaurantId)   // сразу вместе с отделами — без отдельного запроса на каждого
             .stream()
-            .filter(u -> u.isActive() && (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER))
-            .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+            .distinct()
+            .filter(this::isKioskStaff)
+            .collect(Collectors.toCollection(ArrayList::new));
 
         // stable sort — сохраняет исходный порядок (id desc) внутри одной группы отделов
         staff.sort(Comparator.comparingInt(this::minDepartmentSortOrder));
 
         return staff.stream().map(UserResponse::from).toList();
+    }
+
+    // Кто показывается на киоске: активные STAFF и MANAGER
+    private boolean isKioskStaff(User u) {
+        return u.isActive() && (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER);
     }
 
     private int minDepartmentSortOrder(User u) {
@@ -81,71 +88,112 @@ public class KioskService {
             .orElse(Integer.MAX_VALUE);
     }
 
-    // ── Текущий статус сотрудника за сегодня ──
+    // ── Текущий статус сотрудника ──
     @Transactional(readOnly = true)
     public StaffStatusResponse getStatus(Long userId) {
-        // Ищем ВСЕ записи сотрудника, сортируем по времени
-        List<TimeRecord> allRecords = timeRecordRepository
-            .findByUser_IdOrderByRecordedAtAsc(userId);
+        return buildStatuses(List.of(userId)).get(userId);
+    }
 
-        StaffStatusResponse res = new StaffStatusResponse();
-        res.setStatus("NOT_STARTED");
-
-        // Находим последний CLOCK_IN без последующего CLOCK_OUT
-        TimeRecord lastClockIn  = null;
-        TimeRecord lastClockOut = null;
-
-        for (TimeRecord r : allRecords) {
-            if (r.getRecordType() == TimeRecordType.CLOCK_IN)  lastClockIn  = r;
-            if (r.getRecordType() == TimeRecordType.CLOCK_OUT) lastClockOut = r;
-        }
-
-        // Смена открыта если есть CLOCK_IN и нет CLOCK_OUT после него
-        boolean shiftOpen = lastClockIn != null &&
-            (lastClockOut == null || lastClockOut.getRecordedAt().isBefore(lastClockIn.getRecordedAt()));
-
-        if (!shiftOpen) {
-            // Смена закрыта или не начата — показываем записи за сегодня
-            LocalDate today = LocalDate.now(ZONE);
-            List<TimeRecord> todayRecords = allRecords.stream()
-                .filter(r -> r.getWorkDate().equals(today))
-                .toList();
-            res.setStatus("NOT_STARTED");
-            res.setRecords(todayRecords.stream()
-                .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
-                .toList());
-            todayRecords.stream()
-                .filter(r -> r.getPhotoPath() != null)
-                .reduce((a, b) -> b)
-                .ifPresent(r -> res.setLastPhotoPath(r.getPhotoPath()));
-            return res;
-        }
-
-        // Смена открыта — берём записи начиная с последнего CLOCK_IN
-        final TimeRecord openClockIn = lastClockIn;
-        List<TimeRecord> shiftRecords = allRecords.stream()
-            .filter(r -> !r.getRecordedAt().isBefore(openClockIn.getRecordedAt()))
+    // ── Статусы всех сотрудников киоска одним вызовом (для GET /api/kiosk/statuses) ──
+    @Transactional(readOnly = true)
+    public Map<Long, StaffStatusResponse> getStatuses(Long restaurantId) {
+        List<Long> ids = userRepository
+            .findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+            .stream()
+            .filter(this::isKioskStaff)
+            .map(User::getId)
             .toList();
+        return buildStatuses(ids);
+    }
 
-        for (TimeRecord r : shiftRecords) {
-            switch (r.getRecordType()) {
-                case CLOCK_IN    -> { res.setStatus("WORKING");  res.setClockInAt(r.getRecordedAt()); }
-                case BREAK_START -> { res.setStatus("ON_BREAK"); res.setBreakStartAt(r.getRecordedAt()); }
-                case BREAK_END   -> { res.setStatus("WORKING");  res.setBreakEndAt(r.getRecordedAt()); }
-                case CLOCK_OUT   -> { res.setStatus("FINISHED"); res.setClockOutAt(r.getRecordedAt()); }
+    // ── Расчёт статусов ──
+    // Логика та же, что и раньше:
+    //   смена открыта, если есть CLOCK_IN и нет CLOCK_OUT после него (дата не важна)
+    //     → статус по записям начиная с последнего CLOCK_IN
+    //   иначе → NOT_STARTED + записи за сегодня
+    // Но вместо загрузки ВСЕЙ истории каждого сотрудника — несколько лёгких запросов:
+    //   2 запроса «время последнего CLOCK_IN / CLOCK_OUT» на всех сразу,
+    //   по 1 запросу на каждую открытую смену, 1 запрос «записи за сегодня» на всех остальных.
+    private Map<Long, StaffStatusResponse> buildStatuses(List<Long> userIds) {
+        Map<Long, StaffStatusResponse> result = new LinkedHashMap<>();
+        if (userIds.isEmpty()) return result;
+
+        Map<Long, Instant> lastIn  = lastRecordedAt(userIds, TimeRecordType.CLOCK_IN);
+        Map<Long, Instant> lastOut = lastRecordedAt(userIds, TimeRecordType.CLOCK_OUT);
+
+        List<Long> closedIds = new ArrayList<>();
+        for (Long id : userIds) {
+            Instant in  = lastIn.get(id);
+            Instant out = lastOut.get(id);
+            boolean shiftOpen = in != null && (out == null || out.isBefore(in));
+            if (shiftOpen) {
+                result.put(id, buildOpenShift(timeRecordRepository.findRowsSince(id, in)));
+            } else {
+                closedIds.add(id);
             }
         }
 
-        res.setRecords(shiftRecords.stream()
-            .map(r -> new StaffStatusResponse.TimeRecordEntry(r.getRecordType().name(), r.getRecordedAt()))
-            .toList());
+        if (!closedIds.isEmpty()) {
+            LocalDate today = LocalDate.now(ZONE);
+            Map<Long, List<KioskRecordRow>> todayByUser = timeRecordRepository
+                .findRowsByUserIdsAndWorkDate(closedIds, today)
+                .stream()
+                .collect(Collectors.groupingBy(KioskRecordRow::userId, LinkedHashMap::new, Collectors.toList()));
+            for (Long id : closedIds) {
+                result.put(id, buildClosed(todayByUser.getOrDefault(id, List.of())));
+            }
+        }
+        return result;
+    }
 
-        shiftRecords.stream()
-            .filter(r -> r.getPhotoPath() != null)
-            .reduce((a, b) -> b)
-            .ifPresent(r -> res.setLastPhotoPath(r.getPhotoPath()));
+    // userId → время последней записи указанного типа
+    private Map<Long, Instant> lastRecordedAt(List<Long> userIds, TimeRecordType type) {
+        Map<Long, Instant> map = new HashMap<>();
+        for (Object[] row : timeRecordRepository.findLastRecordedAtByUserIds(userIds, type)) {
+            map.put((Long) row[0], (Instant) row[1]);
+        }
+        return map;
+    }
 
+    // Смена открыта — статус по записям начиная с последнего CLOCK_IN
+    private StaffStatusResponse buildOpenShift(List<KioskRecordRow> shiftRows) {
+        StaffStatusResponse res = new StaffStatusResponse();
+        res.setStatus("NOT_STARTED");
+        for (KioskRecordRow r : shiftRows) {
+            switch (r.recordType()) {
+                case CLOCK_IN    -> { res.setStatus("WORKING");  res.setClockInAt(r.recordedAt()); }
+                case BREAK_START -> { res.setStatus("ON_BREAK"); res.setBreakStartAt(r.recordedAt()); }
+                case BREAK_END   -> { res.setStatus("WORKING");  res.setBreakEndAt(r.recordedAt()); }
+                case CLOCK_OUT   -> { res.setStatus("FINISHED"); res.setClockOutAt(r.recordedAt()); }
+            }
+        }
+        res.setRecords(toEntries(shiftRows));
+        res.setLastPhotoPath(lastPhoto(shiftRows));
         return res;
+    }
+
+    // Смена закрыта или не начата — показываем записи за сегодня
+    private StaffStatusResponse buildClosed(List<KioskRecordRow> todayRows) {
+        StaffStatusResponse res = new StaffStatusResponse();
+        res.setStatus("NOT_STARTED");
+        res.setRecords(toEntries(todayRows));
+        res.setLastPhotoPath(lastPhoto(todayRows));
+        return res;
+    }
+
+    private List<StaffStatusResponse.TimeRecordEntry> toEntries(List<KioskRecordRow> rows) {
+        return rows.stream()
+            .map(r -> new StaffStatusResponse.TimeRecordEntry(r.recordType().name(), r.recordedAt()))
+            .toList();
+    }
+
+    // Последнее фото среди записей (или null)
+    private String lastPhoto(List<KioskRecordRow> rows) {
+        String photo = null;
+        for (KioskRecordRow r : rows) {
+            if (r.photoPath() != null) photo = r.photoPath();
+        }
+        return photo;
     }
 
     // ── Фиксация прихода/ухода ──
@@ -167,24 +215,22 @@ public class KioskService {
 
         Instant now      = Instant.now();
         LocalDate today  = LocalDate.now(ZONE);
-        
-        // Для CLOCK_OUT/BREAK_START/BREAK_END — берём workDate из открытого CLOCK_IN
+
+        // Для CLOCK_OUT/BREAK_START/BREAK_END — берём workDate из последнего CLOCK_IN
         LocalDate workDate = today;
         if (type != TimeRecordType.CLOCK_IN) {
-            workDate = timeRecordRepository.findByUser_IdOrderByRecordedAtAsc(req.getUserId())
-                .stream()
-                .filter(r -> r.getRecordType() == TimeRecordType.CLOCK_IN)
-                .reduce((first, second) -> second)
+            workDate = timeRecordRepository
+                .findFirstByUser_IdAndRecordTypeOrderByRecordedAtDesc(req.getUserId(), TimeRecordType.CLOCK_IN)
                 .map(TimeRecord::getWorkDate)
                 .orElse(today);
         }
-        
+
         // Сохраняем фото если есть
         String photoPath = null;
         if (req.getPhotoBase64() != null && !req.getPhotoBase64().isBlank()) {
             photoPath = savePhoto(req.getUserId(), type, workDate, now, req.getPhotoBase64());
         }
-        
+
         TimeRecord record = new TimeRecord();
         record.setUser(user);
         record.setRestaurant(user.getRestaurant());
@@ -235,10 +281,9 @@ public class KioskService {
                 .toList();
         if (sortedSlots.isEmpty()) return;
 
-        List<TimeRecord> dayRecords = timeRecordRepository.findByUser_IdOrderByRecordedAtAsc(user.getId())
-                .stream()
-                .filter(r -> r.getWorkDate().equals(workDate))
-                .toList();
+        // Записи только за этот рабочий день (раньше грузилась вся история и фильтровалась здесь)
+        List<TimeRecord> dayRecords = timeRecordRepository
+                .findByUser_IdAndWorkDateOrderByRecordedAtAsc(user.getId(), workDate);
 
         int clockInCount = 0;
         for (TimeRecord r : dayRecords) {

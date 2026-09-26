@@ -12,6 +12,7 @@ public class UserResponse {
     public String fullName;
     public String fullNameKana;
     public String position;
+    public int sortOrder;
     public List<DeptItem> departments;
     public UserRole role;
     public boolean active;
@@ -48,6 +49,7 @@ public class UserResponse {
         r.fullName      = u.getFullName();
         r.fullNameKana  = u.getFullNameKana();
         r.position      = u.getPosition();
+        r.sortOrder     = u.getSortOrder();
         r.role          = u.getRole();
         r.active        = u.isActive();
         r.departments   = u.getDepartments().stream()
