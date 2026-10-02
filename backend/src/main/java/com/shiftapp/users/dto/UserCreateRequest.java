@@ -21,6 +21,7 @@ public class UserCreateRequest {
     @NotNull  public UserRole role;
     @NotNull  public Integer sortOrder;
     @NotBlank public String password;
+    public Long customRoleId; // nullable — без назначенной кастомной роли пользователь не получает точечных Permission
 
     // ── Опциональные поля профиля ──
     public String email;

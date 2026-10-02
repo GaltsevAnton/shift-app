@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clearToken, getToken } from "../shared/api/api";
+import { api, clearToken, getToken } from "../shared/api/api";
 import Login from "../pages/auth/LoginPage";
 import ManagerTablePage from "../pages/manager/ManagerTablePage";
 // import ManagerWeekPage from "../pages/manager/ManagerWeekPage";
@@ -7,6 +7,8 @@ import StaffMonthPage from "../pages/staff/StaffMonthPage";
 import EmployeesPage from "../pages/manager/EmployeesPage";
 import SettingsPage from "../pages/manager/SettingsPage";
 import AttendancePage from "../pages/manager/AttendancePage";
+import LoggingPage from "../pages/manager/LoggingPage";
+import AccessDenied from "./layouts/AccessDenied";
 
 /* ─── Определение платформы ─────────────────────────────── */
 function getInstallHint() {
@@ -212,6 +214,23 @@ function InstallBanner() {
   );
 }
 
+/* ─── Права на страницы ─────────────────────────────────── */
+// Страница открывается, если есть ХОТЯ БЫ ОДНО из перечисленных прав.
+const VIEW_PERMISSIONS = {
+  SHIFTS:     ["SHIFT_VIEW"],
+  ATTENDANCE: ["ATTENDANCE_VIEW"],
+  EMPLOYEES:  ["EMPLOYEE_VIEW"],
+  SETTINGS:   ["WORKPLACE_VIEW", "POSITION_VIEW", "DEPARTMENT_VIEW", "BREAK_RULE_VIEW", "NOTIFICATION_VIEW"],
+  LOGGING:    ["LOGGING_VIEW"],
+};
+
+function canView(view, perms, role) {
+  if (role === "ADMIN") return true;
+  // неизвестный view рендерится как シフト管理 — проверяем как SHIFTS
+  const need = VIEW_PERMISSIONS[view] || VIEW_PERMISSIONS.SHIFTS;
+  return need.some(p => perms.includes(p));
+}
+
 /* ─── App ───────────────────────────────────────────────── */
 export default function App() {
   const [token, setTokenState] = useState(getToken());
@@ -222,6 +241,21 @@ export default function App() {
   useEffect(() => {
     setTokenState(getToken());
   }, []);
+
+  // Права текущего пользователя (null = ещё загружаются)
+  const [perms, setPerms] = useState(null);
+
+  function loadPerms() {
+    if (!getToken() || localStorage.getItem("appRole") === "STAFF") return;
+    api.mePermissions()
+      .then(p => setPerms(Array.isArray(p) ? p : []))
+      .catch(() => setPerms([])); // при ошибке — закрыто (fail-closed)
+  }
+
+  useEffect(() => {
+    setPerms(null);
+    if (token) loadPerms();
+  }, [token]);
 
   function onLogout() {
     clearToken();
@@ -252,6 +286,7 @@ export default function App() {
   function go(view) {
     localStorage.setItem("managerView", view);
     setManagerView(view);
+    loadPerms(); // подтягиваем актуальные права при каждом переходе
   }
 
   if (!token) return (
@@ -276,6 +311,19 @@ export default function App() {
       <StaffMonthPage onLogout={onLogout} managerNav={{ view: managerView, onNavigate: go }} />
     </>
   );
+  // Нет прав (или права ещё грузятся) — страницу не монтируем вообще
+  if (perms === null || !canView(managerView, perms, role)) return (
+    <>
+      <InstallBanner />
+      <AccessDenied
+        view={managerView}
+        onNavigate={go}
+        onLogout={onLogout}
+        loading={perms === null}
+      />
+    </>
+  );
+
   if (managerView === "EMPLOYEES") return (
     <>
       <InstallBanner />
@@ -285,13 +333,19 @@ export default function App() {
   if (managerView === "SETTINGS") return (
     <>
       <InstallBanner />
-      <SettingsPage view={managerView} onNavigate={go} onLogout={onLogout} />
+      <SettingsPage view={managerView} onNavigate={go} onLogout={onLogout} permissions={perms} />
     </>
   );
   if (managerView === "ATTENDANCE") return (
     <>
       <InstallBanner />
       <AttendancePage view={managerView} onNavigate={go} onLogout={onLogout} />
+    </>
+  );
+  if (managerView === "LOGGING") return (
+    <>
+      <InstallBanner />
+      <LoggingPage view={managerView} onNavigate={go} onLogout={onLogout} />
     </>
   );
   

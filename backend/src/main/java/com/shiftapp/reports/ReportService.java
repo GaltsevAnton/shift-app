@@ -13,6 +13,8 @@ import com.shiftapp.settings.department.Department;
 import com.shiftapp.users.User;
 import com.shiftapp.users.UserRepository;
 import com.shiftapp.users.UserRole;
+import com.shiftapp.attendance.note.AttendanceDayNote;
+import com.shiftapp.attendance.note.AttendanceDayNoteRepository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,6 +40,7 @@ public class ReportService {
     private final RestaurantRepository restaurantRepository;
     private final TimeRecordRepository timeRecordRepository;
     private final BreakRuleRepository  breakRuleRepository;
+    private final AttendanceDayNoteRepository attendanceDayNoteRepository;
     private final ObjectMapper         objectMapper;
 
     @Value("${report.service.url:http://localhost:8001}")
@@ -51,12 +54,14 @@ public class ReportService {
                 RestaurantRepository restaurantRepository,
                 TimeRecordRepository timeRecordRepository,
                 BreakRuleRepository breakRuleRepository,
+                AttendanceDayNoteRepository attendanceDayNoteRepository,
                 ObjectMapper objectMapper) {
         this.userRepository       = userRepository;
         this.preferenceRepository = preferenceRepository;
         this.restaurantRepository = restaurantRepository;
         this.timeRecordRepository = timeRecordRepository;
         this.breakRuleRepository  = breakRuleRepository;
+        this.attendanceDayNoteRepository = attendanceDayNoteRepository;
         this.objectMapper         = objectMapper;
     }
 
@@ -118,7 +123,17 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public byte[] generateAttendanceTimesheetFiltered(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
+        return generateAttendanceTimesheetFiltered(restaurantId, from, to, userIds, null, null, true);
+    }
+
+    // Excel 勤怠集計表 «как на экране»: колонки, строки и цветовые подсказки берутся из настроек экрана
+    @Transactional(readOnly = true)
+    public byte[] generateAttendanceTimesheetFiltered(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds,
+                                                      List<String> columns, List<String> rows, boolean showColors) {
         Map<String, Object> payload = buildAttendancePayloadRange(restaurantId, from, to, userIds);
+        payload.put("columns",    columns);    // null = все колонки
+        payload.put("rows",       rows);       // null = все строки
+        payload.put("showColors", showColors);
         return callPython("/generate/attendance/timesheet/filtered", payload);
     }
 
@@ -403,11 +418,29 @@ public class ReportService {
     }
 
     private Map<String, Object> buildAttendancePayloadRange(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
-        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
+        // 勤務状況 — ключ "userId_date" → label (сохранённая копия, не текущее название из справочника)
+        Map<String, String> noteMap = new HashMap<>();
+        for (AttendanceDayNote n : attendanceDayNoteRepository.findByRestaurant_IdAndWorkDateBetween(restaurantId, from, to)) {
+            noteMap.put(n.getUser().getId() + "_" + n.getWorkDate(), n.getLabel());
+        }
+        boolean byIds = userIds != null && !userIds.isEmpty();
+        List<User> candidates = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
                 .stream()
-                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
-                .filter(u -> userIds == null || userIds.isEmpty() || userIds.contains(u.getId()))
+                .filter(u -> u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER)
+                // Явный список с экрана — берём как есть (в т.ч. неактивных, если они показаны на экране);
+                // без списка — только активные, как раньше
+                .filter(u -> byIds ? userIds.contains(u.getId()) : u.isActive())
                 .toList();
+
+        List<User> allStaff;
+        if (byIds) {
+            // Порядок — как на экране (в том порядке, в каком фронт прислал id)
+            Map<Long, User> byId = new HashMap<>();
+            for (User u : candidates) byId.put(u.getId(), u);
+            allStaff = userIds.stream().distinct().map(byId::get).filter(Objects::nonNull).toList();
+        } else {
+            allStaff = candidates;
+        }
 
         List<TimeRecord> records = timeRecordRepository.findByRestaurantAndDateRange(restaurantId, from, to);
         Map<Long, Map<LocalDate, List<TimeRecord>>> byUser = new HashMap<>();
@@ -434,11 +467,14 @@ public class ReportService {
 
             List<Map<String, Object>> days = new ArrayList<>();
             for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
-                days.add(buildAttendanceDay(date, recMap.get(date), prefMap.get(date), breakRules));
+                Map<String, Object> day = buildAttendanceDay(date, recMap.get(date), prefMap.get(date), breakRules);
+                day.put("note", noteMap.get(u.getId() + "_" + date));
+                days.add(day);
             }
 
             Map<String, Object> staffEntry = new LinkedHashMap<>();
             staffEntry.put("userId",      u.getId());
+            staffEntry.put("sortOrder",   u.getSortOrder());   // колонка № в Excel
             staffEntry.put("userName",    u.getFullName());
             staffEntry.put("position",    u.getPosition());
             staffEntry.put("departments", u.getDepartments().stream()

@@ -16,6 +16,8 @@ public class UserResponse {
     public List<DeptItem> departments;
     public UserRole role;
     public boolean active;
+    public Long customRoleId;
+    public String customRoleName;
 
     // ── Профиль ──
     public String lastName;
@@ -52,6 +54,10 @@ public class UserResponse {
         r.sortOrder     = u.getSortOrder();
         r.role          = u.getRole();
         r.active        = u.isActive();
+        if (u.getCustomRole() != null) {
+            r.customRoleId   = u.getCustomRole().getId();
+            r.customRoleName = u.getCustomRole().getName();
+        }
         r.departments   = u.getDepartments().stream()
                 .map(d -> new DeptItem(d.getId(), d.getName()))
                 .sorted((a, b) -> a.name.compareTo(b.name))

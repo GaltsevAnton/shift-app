@@ -5,6 +5,195 @@
 
 ログ変更履歴。
 
+## 2026-09-26 (продолжение) — RBAC: кастомные роли и точечные права доступа
+
+> ⚠️ Часть этой функции (V18 sort_order на users, V19 audit_log, и, возможно, начало V20) была сделана в параллельном чате и попала в проект без подробностей — здесь зафиксировано то, что делалось непосредственно в этом чате (User.customRole → SecurityConfig → @PreAuthorize по контроллерам → RoleController/PermissionController), плюс то, что удалось восстановить по коду для V18/V19. См. `PROJECT_CONTEXT.md` §3.13/§3.14/§4 для полной картины и списка открытых задач.
+
+### Миграция `V20__add_roles.sql`
+- `roles(id, restaurant_id, name, created_at)`, UNIQUE(restaurant_id, name)
+- `role_permissions(role_id, permission)` — составной PK, ON DELETE CASCADE
+- `users.custom_role_id` → `roles(id)` ON DELETE SET NULL
+- Бэкфилл: на каждый ресторан создаётся роль "フルアクセス" со всеми `Permission`, назначается всем существующим `MANAGER` (без этого шага после миграции все менеджеры остались бы без единого точечного права)
+
+### Backend — новый пакет `com.shiftapp.roles`
+- `Role.java` (entity), `Permission.java` (enum: `SHIFT_VIEW`, `ATTENDANCE_VIEW/EDIT/DELETE`, `EMPLOYEE_VIEW/CREATE/EDIT/DELETE`, `WORKPLACE_VIEW/CREATE/EDIT/DELETE`, `POSITION_VIEW/CREATE/EDIT/DELETE`, `DEPARTMENT_VIEW/CREATE/EDIT/DELETE`, `BREAK_RULE_VIEW/CREATE/EDIT/DELETE`, `NOTIFICATION_VIEW/EDIT`, `LOGGING_VIEW`)
+- `RoleRepository`, `RoleService`, `RoleController` (`/api/manager/settings/roles`, полный CRUD)
+- `PermissionController` (`/api/manager/settings/permissions`, `GET` → список всех значений enum, для построения чекбоксов на фронте)
+- Оба контроллера — `@PreAuthorize("hasRole('ADMIN')")` на уровне класса. Осознанно НЕ через `Permission`: иначе пользователь с правом «редактировать роли» мог бы сам себе выдать любые права
+
+### Backend — привязка роли к пользователю
+- `User.java` — новое поле `customRole` (`@ManyToOne(LAZY)`, `custom_role_id`, nullable)
+- `UserRepository.findByLoginWithCustomRole(login)` — `LEFT JOIN FETCH customRole LEFT JOIN FETCH customRole.permissions`, чтобы не ловить `LazyInitializationException` при чтении прав сразу после логина
+- `CustomUserDetailsService.loadUserByUsername()` — переключён на `findByLoginWithCustomRole`
+- `CustomUserDetails.getAuthorities()` — теперь возвращает:
+  - `ROLE_<UserRole>` всегда (для `hasRole`/`hasAnyRole`, как раньше)
+  - плюс: `ADMIN` → все `Permission.values()`; иначе, если назначена `customRole` → её `permissions`; если `customRole == null` — точечных прав нет вовсе (осознанное решение, не fallback на «всё разрешено»)
+
+### SecurityConfig.java
+- `/api/manager/**`: `hasRole("MANAGER")` → `hasAnyRole("MANAGER", "ADMIN")` (роли в Spring Security не наследуются — без этой правки `ADMIN` не проходил бы вообще)
+- Решение по архитектуре: базовый периметр остаётся на уровне URL (грубо, по роли), а точечные права — только на уровне методов контроллеров через `@PreAuthorize("hasAuthority('...')")` (`@EnableMethodSecurity` был включён и раньше)
+
+### `@PreAuthorize` расставлены по всем manager-контроллерам
+- `AttendanceController` → `ATTENDANCE_VIEW`/`EDIT`/`DELETE`
+- `AuditLogController` → `LOGGING_VIEW`
+- `MonthStatusController`, `ManagerShiftController` (bulk/list/copy-week/delete), `ManagerWeekStatusController`, `ManagerPreferenceController` → все на `SHIFT_VIEW` (в `Permission` нет отдельных `SHIFT_EDIT/CREATE/DELETE` — решение объединить их под одним правом, а не заводить новые значения enum)
+- `NotificationPreferenceController`, `NotificationSettingsController` → `NOTIFICATION_VIEW`/`NOTIFICATION_EDIT` (было `hasAnyRole('MANAGER','ADMIN')`)
+- `BreakRuleController` → `BREAK_RULE_VIEW`/`CREATE`/`EDIT`/`DELETE`
+- `DepartmentController` → `DEPARTMENT_VIEW`/`CREATE`/`EDIT`/`DELETE` (`reorder` → `EDIT`)
+- `PositionController` → `POSITION_VIEW`/`CREATE`/`EDIT`/`DELETE`
+- `WorkplaceController` → `WORKPLACE_VIEW`/`CREATE`/`EDIT`/`DELETE`
+- `ManagerUserController` (employees) → `EMPLOYEE_VIEW`/`CREATE`/`EDIT`/`DELETE` (`unlock` → `EDIT`)
+- `ReportController` — не тронут, остался `hasAnyRole('MANAGER','ADMIN')` (в `Permission` нет отдельного права под отчёты)
+
+### Открытые задачи (следующий шаг, ещё не сделано)
+1. `UserCreateRequest`/`UserUpdateRequest`/`UserResponse`/`UserService` — добавить `customRoleId`, сейчас через API роль сотруднику не назначить
+2. Frontend: страница **設定 → 権限** (видна только `ADMIN`) — CRUD ролей, чекбоксы по `Permission`, сгруппированные по категориям
+3. Frontend: `EmployeesPage.jsx` — select `customRoleId` в форме сотрудника
+4. `api.js` — `settingsRolesList/Create/Update/Delete`, `settingsPermissionsList`
+
+---
+
+## 2026-09-26 — Audit Log (миграция `V19__add_audit_log.sql`)
+
+> Сделано до начала этого чата (в параллельном чате) — здесь зафиксировано по факту наличия в коде, полные детали `AuditAction`/`AuditEntityType`/`AuditLogService` не были получены в этом чате, см. `PROJECT_CONTEXT.md` §3.14.
+
+- Таблица `audit_log` — универсальный лог действий менеджеров/админов: кто (`actor_user_id`/`actor_name`), что сделал (`action`, `entity_type`, `entity_id`), над кем (`target_user_id`/`target_user_name`), человекочитаемое `summary` + технические `details`
+- Индексы: `(restaurant_id, created_at DESC)` — для выборки по периоду, `target_user_id`, `entity_type`
+- `AuditLogController.search()` — `GET /api/manager/audit-log?from=&to=&targetUserId=&entityType=`
+- Используется, например, из `MonthStatusController.setStatus()` — пишет запись при каждой фактической смене статуса месяца/половины месяца (сравнивает old/new, no-op не логирует)
+
+## 2026-09-26 — Сортировка сотрудников (миграция `V18`)
+
+> Также сделано до начала этого чата — зафиксировано по коду (`User.sortOrder`, `UserRepository.existsByRestaurant_IdAndSortOrder(...)`), точный SQL и имя файла в этом чате не были получены.
+
+- `sort_order` INT на `users` — аналогично `V17` (departments), задаёт порядок отображения сотрудников
+
+---
+
+## 2026-09-24 〜 2026-09-26
+
+### キオスク — 新デザイン（スマートフォン・タブレット・モニター）
+
+- **スマートフォン**
+  - ヘッダー刷新: ☰ / HannoSHIFT（中央）/ Wi-Fi の細線SVGアイコン、日付と時刻を中央1行表示（秒なし）
+  - 左の縦カタカナ列を廃止 → ヘッダー直下に横スクロールの文字バー（`MobileKanaBar`、スクロール時も固定、右端に `›`）
+  - スタッフ一覧: 4列グリッド、隙間2px、写真の高さは固定（CSS変数 `--kiosk-photo-h`、`.mGrid`）
+  - 出勤時刻バッジ: 写真左上に半透明の小さなバッジ（● + 時:分、勤務中=緑、休憩中=オレンジ）
+  - Wi-Fiアイコンをタップ → 「接続あり/接続なし」の小さなツールチップ（2秒で消える。旧OKボタン付きモーダルは廃止）
+  - ☰メニューを新スタイルに（ユーザーアイコン＋出勤中N人、ログアウトアイコン）
+- **打刻ポップアップ（スマホ・タブレット共通の新デザイン）**
+  - カメラ: 角丸、点線の楕円、左下に氏名、右上に✕、出勤済みなら左上に出勤時刻バッジ
+  - 日付・時刻（左寄せ）、本日の打刻一覧、2×2のアイコン付きボタン、枠線のみの「× キャンセル」
+  - タブレットはカメラ左・パネル右の横並び、確認画面は中央1カラム（写真4:3）
+  - 確認画面: カメラアイコン＋「写真を確認してください」、写真、時刻、✓付きの大きな確定ボタン
+  - ボタン色変更: 出勤=緑 `#17935f`、復帰=青 `#3b6fd4`（退勤=赤、休憩=オレンジは変更なし）
+  - 撮影写真を左右反転して保存（カメラのプレビューと同じ向き）
+- **タブレット**: ヘッダー刷新（細線アイコン、時刻は大きく秒は小さく、「出勤中 N人」はテキストのみ）、スタッフ一覧は5列、縦向きではヘッダーをコンパクト表示（`@media (max-width: 1100px)`）
+- **モニター**: 1920px以上で8列、2560px以上で10列
+- **スタイルを `KioskPage.module.css` に分離**（CSS Modules、インラインスタイルを廃止）。接頭辞: `t*`=タブレット、`m*`=スマホ、`p*`=ポップアップ共通、`s*`=スタッフカード
+
+### キオスク — パフォーマンス最適化
+
+- **Backend**
+  - 新エンドポイント `GET /api/kiosk/statuses?restaurantId=` — 全スタッフのステータスを1リクエストで返す（`{ userId: StaffStatusResponse }`）。従来は1人1リクエスト（48人で49リクエスト／30秒）
+  - `KioskService.getStatus()` — 従来はスタッフの**全履歴**を読み込んでいた（`findByUser_IdOrderByRecordedAtAsc`）。軽量クエリに置き換え（最後のCLOCK_IN/CLOCK_OUT時刻の集計＋開いているシフトの記録／本日の記録のみ）。判定ロジックは従来と完全に同一（ランダムデータ2880件＋打刻300シナリオで一致を確認）
+  - `punch()` — 全履歴の読み込み3回（ステータス確認・`workDate`・`checkAndNotify`）を軽量クエリに置き換え
+  - `getStaffList()` — 部署を一括取得（`UserRepository.findAllWithDepartmentsByRestaurantId`、`@EntityGraph`）、1人ごとの追加クエリを解消
+  - 新規 `KioskRecordRow.java`（record）— ステータス計算用の軽量な行（userId, recordType, recordedAt, workDate, photoPath）
+  - `TimeRecordRepository` に追加: `findLastRecordedAtByUserIds`, `findRowsSince`, `findRowsByUserIdsAndWorkDate`, `findFirstByUser_IdAndRecordTypeOrderByRecordedAtDesc`
+  - `SecurityConfig` — `/api/kiosk/statuses` をKIOSKロールに追加
+- **Frontend**
+  - ステータス取得を1リクエストに（サーバーが未対応の場合は自動的に旧方式へフォールバック）。一部リクエスト失敗時は前回のステータスを保持（「未出勤」に誤表示されない）
+  - 画面が非表示の間はポーリング停止、復帰時に即時更新
+  - 打刻成功後、ポップアップを即座に閉じ、カードを即時更新（サーバーのステータスはバックグラウンドで取得、写真はプリロードしてちらつき防止）
+  - カメラ: アプリ全体で1つのストリームを共有、ポップアップを閉じても60秒間は起動したまま（次の人はすぐに撮影可能）、画面非表示で即停止、スリープ復帰時に自動再起動。**不具合修正**: カメラ起動前にポップアップを閉じるとカメラが起動したままになっていた
+  - 毎秒の全画面再描画を廃止: 時計を独立コンポーネントに（スマホは1分ごと）、`React.memo`/`useMemo`、変化のないデータは再利用
+  - JPEGエンコードを非同期化（`toBlob`）、カード写真に `loading="lazy"`
+  - ポップアップ背景の `backdrop-filter: blur` を廃止（低性能端末で重いため、代わりに背景を少し暗く）
+  - `main.jsx` — `React.lazy` でコード分割（キオスクはマネージャー画面のコードを読み込まない）。`globals.css` は従来どおり最後に読み込み、CSSの順序を維持
+- **計測結果**: 更新1回あたりのリクエスト 49→2、DB読み込み行数 約6250→約230（従来は日数に比例して増加）、アイドル時のCPU（低性能端末想定）スマホ 256ms→0ms／タブレット 258ms→68ms（10秒あたり）、打刻後にポップアップが閉じるまで 約950ms→約150ms（低速回線）
+
+---
+
+## 2026-09-23
+
+### 勤怠管理 — Excelレポートを1つに統合
+
+- 従来の3種類（勤怠集計表（実績）、打刻一覧、表示中の勤怠集計表）のドロップダウンメニューを廃止
+- 画面に表示中のデータ（フィルター・期間を反映）をそのまま出力する「📥 Excel」ボタン1つに統合
+- 対象範囲・対象スタッフは常に画面上でフィルタリング中のもの — 旧「表示中の勤怠集計表」と同じロジックを継続使用
+- 目的: 複数の似た名前のレポートでスタッフが混乱していたため、シンプルに一本化
+
+### 勤怠管理 — Excel/カレンダーの出退勤丸めロジックを統一
+
+- **不具合**: Excelレポート（勤怠集計表・打刻一覧・表示中の勤怠集計表）では、出退勤時刻が予定に「吸着」される古いロジックのままだった（例: 予定10:00、実際7:45の出勤でも「10:00」と表示）。カレンダー・リスト画面（09/11対応）は実際の打刻を丸めて表示するよう既に修正済みだったが、Excel側の`ReportService.computeSessionOfficial()`だけ未修正だった
+- **修正**: `officialClockIn`/`officialClockOut`を、予定との比較で分岐せず常に実際の打刻の丸め値（出勤は30分単位で切り上げ、退勤は切り下げ）を使うよう変更。`lateIn`/`earlyOut`（色分け判定用フラグ）は引き続き予定との比較で算出 — 表示する時刻の計算と、遅刻/早退の判定ロジックを分離
+- これにより`実働時間`（`workMinutes`）も自動的に実際の値になる（`officialOut − officialIn`から算出されるため）
+
+### 勤怠管理 — 打刻記録の編集不具合を2件修正
+
+- **タイムゾーンのバグ**: `編集`フォームを開く際に`toISOString()`でUTC時刻を表示していたため、実際は09:30の打刻でも「00:30」と表示されてしまい、時刻を直接保存すると9時間ズレる不具合があった（種別→時刻→保存を繰り返し試すことで結果的に補正されていたため発覚が遅れていた）
+  - `toJstDatetimeLocal(iso)` / `fromJstDatetimeLocal(value)` を新設 — JST基準で明示的に変換（ブラウザのタイムゾーン設定に依存しない、`+09:00`固定）
+- **保存後にモーダルへ反映されない不具合**: `編集`で時刻や種別を保存しても、開いたままの詳細ポップアップの表示は更新されず、閉じて開き直す必要があった
+  - 保存APIのレスポンスを`detailPopup.dayRecords`へ即時反映するよう修正（削除機能と同じパターン）
+
+---
+
+## 2026-09-11
+
+### キオスク — 部署の表示順を設定可能に
+
+- **背景**: スタッフ一覧で「全員（All）」を選択した際に、部署がバラバラに混在して表示されていた
+- `departments`テーブルに`sort_order`カラムを追加（`V17__add_department_sort_order.sql`、初期値は既存の`id`）
+- **Backend**
+  - `Department.java` — `sortOrder`フィールド追加
+  - `DepartmentRepository` — `findAllByRestaurant_IdOrderBySortOrderAsc`、`countByRestaurant_Id`を追加
+  - `DepartmentService` — `list()`は`sortOrder`順に変更、`create()`で新規部署は末尾（`countByRestaurant_Id`の位置）に自動配置、新規`reorder(restaurantId, orderedIds)`で並び替え保存
+  - `DepartmentController` — `PUT /api/manager/settings/departments/reorder`エンドポイント追加
+  - `KioskService.getStaffList()`新設 — スタッフ一覧の取得・並び替えをコントローラからサービス層に移動（`departments`が遅延ロードのため、トランザクション内で読む必要がある）
+    - 複数部署に所属するスタッフは、所属部署のうち`sortOrder`が最も小さい（優先順位が最も高い）部署のグループに表示される
+    - 部署なしのスタッフは末尾グループに表示（除外はされない）
+  - `KioskController` — `getStaffList()`を`KioskService`に委譲するだけに簡素化
+- **Frontend**
+  - `api.js` — `settingsDepartmentsReorder(orderedIds)`を追加
+  - `SettingsPage.jsx`「部署」タブに↑↓ボタンを追加、クリックで即座にサーバーへ並び替えを保存（オプティミスティック更新、失敗時はロールバック）。`MasterPanel`に`onMove`propを追加（他の設定タブには影響なし）
+  - `KioskPage.jsx`は変更なし — `.filter()`は配列の順序を保持するため、バックエンド側で順序を制御するだけでキオスク画面（全員／カタカナ絞り込みいずれも）に自動反映される設計
+
+### 勤怠管理（リスト）— 列の全面見直し・4列追加
+
+- 新規列: **出勤時刻**（実際の出勤打刻を30分単位で切り上げ）、**出勤前残業時間**（予定出勤−出勤時刻）、**退勤時刻**（実際の退勤打刻を30分単位で切り下げ）、**退勤後残業時間**（退勤時刻−予定退勤）
+- **残業時間（合計）** = 出勤前残業時間 + 退勤後残業時間（両方0の場合は「-」表示）。予定（シフト）がない日はこれら3列とも「-」表示
+- 列名をより自然な日本語表現に変更: `出勤日付（予定/実際）`→`出勤日（予定/実際）`、`出勤時間（予定/実際）`→`出勤時刻（予定/実際）`、`退勤`側も同様、`休憩開始/終了`→`休憩開始時刻/休憩終了時刻`
+- `勤務時間（実際）`→**`拘束時間`**、`勤務時間（予定）`→**`実働時間`**、`残業時間`→**`残業時間（合計）`**に変更
+  - `拘束時間` = 出勤時刻（丸め後）〜退勤時刻（丸め後）の総時間（休憩を含む、差し引かない）
+  - `実働時間` = 拘束時間 − 休憩時間（実績）（実打刻優先、なければ`officialBreakMinutes`にフォールバック）
+  - 一般的な労務用語の定義（拘束時間 ≥ 実働時間、差分＝休憩）に統一
+- 列の並び順を「出勤日→出勤時刻→出勤前残業時間→退勤日→退勤時刻→退勤後残業時間→拘束時間→休憩→実働時間→残業時間（合計）→シフト」の流れに整理
+- Excel（`attendance_sessions.py`）・画面（`AttendancePage.jsx`）の両方に同じ列構成・計算式を反映（`ReportService`側に`roundedClockIn`/`roundedClockOut`/`inOvertimeMinutes`/`outOvertimeMinutes`を追加）
+
+### 勤怠管理（カレンダー）— 出退勤時刻の表示不具合修正
+
+- **不具合**: 実際より早く出勤した場合、実際の時刻ではなく予定時刻がそのまま表示されていた（例: 予定10:00、実際7:45でも「10:00」と表示）
+- 各セルの出勤/退勤表示を、リストと同じ丸めロジック（実打刻ベース、出勤は切り上げ・退勤は切り下げ）に統一
+- 各日のマスに「拘束」の行を追加（表示順: 出勤→退勤→拘束→休憩→実働）
+- 合計時間列・セル内の時間表記フォーマットを統一
+
+### 勤怠管理 — 打刻記録の削除・種別変更機能を追加
+
+- スタッフの取り違え等で重複した打刻記録が発生するケース（例: 他のスタッフが誤って退勤打刻し、本人が来て再度出退勤し直した結果、記録が4件に増える）に対応
+- 詳細ポップアップの各打刻記録に「削除」ボタンを追加（`DELETE /api/manager/attendance/{id}`、`AttendanceController`に新設）。写真ファイル自体は削除しない（実害が小さいため対象外と判断）
+- `編集`フォームに「種別」セレクトを追加 — 時刻だけでなく出勤／退勤／休憩開始／休憩終了の種別自体も修正可能に（`AttendanceEditRequest.recordType`追加）
+
+### 勤怠管理（リスト）— 並び替え・検索・期間選択の改善
+
+- リスト画面で機能していなかった旧・並び替えバー（氏名/職種・役職/部署、カレンダー用の`sortConfig`を誤って共用していた）を削除
+- 各列見出しをクリックすることでその列を基準にソートできるように変更（対応列: 申請者、出勤日（予定/実績）、出勤前残業時間、退勤日（予定/実績）、退勤後残業時間、残業時間（合計）のみ — 意味のある列に限定）
+- 「申請者」の絞り込みメニューを拡大（250×500px）、氏名検索欄を追加（`CheckDropdown`に`searchable`/`panelWidth`/`panelHeight`propを追加、他タブには影響なし）
+- 期間選択に「日」単位を追加（`月|週|日|期間`） — 特定の1日だけを選んでスタッフ全員の打刻状況を素早く確認可能に（リスト専用、カレンダー側の月/週/期間には影響なし）
+- 「申請者」で選択したスタッフの状態がページ再読み込み後もリセットされないよう`localStorage`（`attListFilterStaff`）に保存
+
+---
+
 ## 2026-09-09
  
 ### キオスク — スマートフォン対応の続き（スタッフ一覧・打刻画面）

@@ -1,6 +1,7 @@
 package com.shiftapp.users;
 
 import com.shiftapp.restaurants.Restaurant;
+import com.shiftapp.roles.Role;
 import com.shiftapp.settings.department.Department;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -38,6 +39,10 @@ public class User {
 
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "custom_role_id")
+    private Role customRole;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
@@ -128,6 +133,8 @@ public class User {
     public void setPosition(String position) { this.position = position; }
     public int getSortOrder() { return sortOrder; }
     public void setSortOrder(int sortOrder) { this.sortOrder = sortOrder; }
+    public Role getCustomRole() { return customRole; }
+    public void setCustomRole(Role customRole) { this.customRole = customRole; }
     public Set<Department> getDepartments() { return departments; }
     public void setDepartments(Set<Department> departments) { this.departments = departments; }
     public boolean isActive() { return active; }

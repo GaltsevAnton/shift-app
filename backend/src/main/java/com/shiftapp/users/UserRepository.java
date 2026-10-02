@@ -14,10 +14,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByLogin(String login);
 
+    // Для логина: сразу подтягиваем customRole и его permissions,
+    // чтобы не ловить LazyInitializationException в getAuthorities()
+    @Query("SELECT u FROM User u LEFT JOIN FETCH u.customRole cr LEFT JOIN FETCH cr.permissions WHERE u.login = :login")
+    Optional<User> findByLoginWithCustomRole(@Param("login") String login);
+
     Optional<User> findByIdAndRestaurant_Id(Long id, Long restaurantId);
 
     // Для списка сотрудников — с подгрузкой departments
-    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.departments WHERE u.restaurant.id = :restaurantId ORDER BY u.id DESC")
+    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.departments LEFT JOIN FETCH u.customRole WHERE u.restaurant.id = :restaurantId ORDER BY u.id DESC")
     List<User> findAllByRestaurant_IdOrderByIdDesc(@Param("restaurantId") Long restaurantId);
 
     // Для киоска: сотрудники ресторана сразу вместе с отделами (без отдельного запроса на каждого)
@@ -31,6 +36,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<User> findByRestaurant_IdAndRoleInOrderByFullNameAsc(Long restaurantId, List<UserRole> roles);
 
     boolean existsByRestaurant_IdAndSortOrder(Long restaurantId, int sortOrder);
+
+    long countByRestaurant_IdAndRole(Long restaurantId, UserRole role);
 
     boolean existsByRestaurant_IdAndSortOrderAndIdNot(Long restaurantId, int sortOrder, Long id);
 }

@@ -5,6 +5,7 @@ import com.shiftapp.users.dto.UserCreateRequest;
 import com.shiftapp.users.dto.UserResponse;
 import com.shiftapp.users.dto.UserUpdateRequest;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,24 +24,28 @@ public class ManagerUserController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('EMPLOYEE_VIEW')")
     public List<UserResponse> list() {
         var me = CurrentUser.require();
         return service.list(me.getRestaurantId());
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('EMPLOYEE_CREATE')")
     public UserResponse create(@RequestBody @Valid UserCreateRequest req) {
         var me = CurrentUser.require();
         return service.create(me.getRestaurantId(), req);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('EMPLOYEE_EDIT')")
     public UserResponse update(@PathVariable Long id, @RequestBody @Valid UserUpdateRequest req) {
         var me = CurrentUser.require();
         return service.update(me.getRestaurantId(), id, req);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('EMPLOYEE_DELETE')")
     public void delete(@PathVariable Long id) {
         var me = CurrentUser.require();
         service.delete(me.getRestaurantId(), id);
@@ -48,6 +53,7 @@ public class ManagerUserController {
 
     @Transactional
     @PostMapping("/{id}/unlock")
+    @PreAuthorize("hasAuthority('EMPLOYEE_EDIT')")
     public UserResponse unlock(@PathVariable Long id) {
         var me = CurrentUser.require();
         User user = userRepository.findByIdAndRestaurant_Id(id, me.getRestaurantId())

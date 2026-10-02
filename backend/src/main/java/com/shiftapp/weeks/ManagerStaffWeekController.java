@@ -22,6 +22,7 @@ import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
 import com.shiftapp.preferences.ShiftSlot;
 import com.shiftapp.users.UserRepository;
+import com.shiftapp.weeks.dto.ManagerStaffDaySaveRequest;
 import com.shiftapp.weeks.dto.ManagerStaffWeekSaveRequest;
 import com.shiftapp.weeks.dto.SlotDto;
 import com.shiftapp.weeks.dto.StaffWeekDay;
@@ -135,5 +136,14 @@ public class ManagerStaffWeekController {
             @RequestParam Long userId) {
         var me = CurrentUser.require();
         return weekService.managerSaveStaffWeek(me.getRestaurantId(), userId, req);
+    }
+
+    // 1日単位の保存（実際に変更があった日だけログに記録される）
+    @PostMapping("/staff-day/save")
+    public String saveStaffDay(
+            @RequestBody ManagerStaffDaySaveRequest req,
+            @RequestParam Long userId) {
+        var me = CurrentUser.require();
+        return weekService.managerSaveStaffDay(me.getRestaurantId(), me.getUserId(), userId, req);
     }
 }

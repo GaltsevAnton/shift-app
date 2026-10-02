@@ -380,6 +380,53 @@ function DepartmentsTab() {
   );
 }
 
+/* ─── Attendance statuses tab (勤務状況リスト) ───────────── */
+function AttendanceStatusesTab() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState("");
+
+  async function load() {
+    setLoading(true); setErr("");
+    try { setItems(await api.settingsAttendanceStatusesList()); }
+    catch (e) { setErr(e.message || "読み込みエラー"); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function onCreate(name) {
+    setErr("");
+    try { await api.settingsAttendanceStatusesCreate({ name }); await load(); }
+    catch (e) { setErr(e.message || "作成エラー"); }
+  }
+  async function onUpdate(id, name) {
+    setErr("");
+    try { await api.settingsAttendanceStatusesUpdate(id, { name }); await load(); }
+    catch (e) { setErr(e.message || "更新エラー"); }
+  }
+  async function onDelete(id) {
+    if (!window.confirm("削除しますか？\n（勤怠管理で既に設定済みの表示はそのまま残ります）")) return;
+    setErr("");
+    try { await api.settingsAttendanceStatusesDelete(id); await load(); }
+    catch (e) { setErr(e.message || "削除エラー"); }
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
+        勤怠管理の「状況」欄で選択できる項目です。名称変更・削除をしても、既に設定済みの日の表示は変更前のまま残ります。
+      </div>
+      <MasterPanel
+        title="勤務状況"
+        hint="例：有給、欠勤、日時調整..."
+        items={items} loading={loading} err={err}
+        onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
 /* ─── Break Rules tab ───────────────────────────────────── */
 function BreakRulesTab() {
   const [items, setItems]     = useState([]);
@@ -751,18 +798,347 @@ function NotificationsTab() {
   );
 }
 
+/* ─── Roles tab (権限, ADMIN専用) ────────────────────────── */
+const PERMISSION_GROUPS = [
+  { label: "シフト", items: [
+      { key: "SHIFT_VIEW", label: "閲覧・作成・編集・削除" },
+  ]},
+  { label: "勤怠管理", items: [
+      { key: "ATTENDANCE_VIEW",   label: "閲覧" },
+      { key: "ATTENDANCE_EDIT",   label: "編集" },
+      { key: "ATTENDANCE_DELETE", label: "削除" },
+  ]},
+  { label: "従業員", items: [
+      { key: "EMPLOYEE_VIEW",   label: "閲覧" },
+      { key: "EMPLOYEE_CREATE", label: "作成" },
+      { key: "EMPLOYEE_EDIT",   label: "編集" },
+      { key: "EMPLOYEE_DELETE", label: "削除" },
+  ]},
+  { label: "勤務場所", items: [
+      { key: "WORKPLACE_VIEW",   label: "閲覧" },
+      { key: "WORKPLACE_CREATE", label: "作成" },
+      { key: "WORKPLACE_EDIT",   label: "編集" },
+      { key: "WORKPLACE_DELETE", label: "削除" },
+  ]},
+  { label: "職種・役職", items: [
+      { key: "POSITION_VIEW",   label: "閲覧" },
+      { key: "POSITION_CREATE", label: "作成" },
+      { key: "POSITION_EDIT",   label: "編集" },
+      { key: "POSITION_DELETE", label: "削除" },
+  ]},
+  { label: "部署", items: [
+      { key: "DEPARTMENT_VIEW",   label: "閲覧" },
+      { key: "DEPARTMENT_CREATE", label: "作成" },
+      { key: "DEPARTMENT_EDIT",   label: "編集" },
+      { key: "DEPARTMENT_DELETE", label: "削除" },
+  ]},
+  { label: "休憩ルール", items: [
+      { key: "BREAK_RULE_VIEW",   label: "閲覧" },
+      { key: "BREAK_RULE_CREATE", label: "作成" },
+      { key: "BREAK_RULE_EDIT",   label: "編集" },
+      { key: "BREAK_RULE_DELETE", label: "削除" },
+  ]},
+  { label: "勤務状況リスト", items: [
+    { key: "ATTENDANCE_STATUS_VIEW",   label: "閲覧" },
+    { key: "ATTENDANCE_STATUS_CREATE", label: "作成" },
+    { key: "ATTENDANCE_STATUS_EDIT",   label: "編集" },
+    { key: "ATTENDANCE_STATUS_DELETE", label: "削除" },
+]},
+{ label: "通知設定", items: [
+      { key: "NOTIFICATION_VIEW", label: "閲覧" },
+      { key: "NOTIFICATION_EDIT", label: "編集" },
+  ]},
+  { label: "ログ", items: [
+      { key: "LOGGING_VIEW", label: "閲覧" },
+  ]},
+];
+
+const emptyRoleForm = { name: "", permissions: [] };
+
+function RolesTab() {
+  const [roles, setRoles]         = useState([]);
+  const [allPerms, setAllPerms]   = useState([]); // серверный список Permission — источник истины
+  const [loading, setLoading]     = useState(false);
+  const [err, setErr]             = useState("");
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editId, setEditId]       = useState(null);
+  const [form, setForm]           = useState(emptyRoleForm);
+  const [saving, setSaving]       = useState(false);
+  const [formErr, setFormErr]     = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+  async function load() {
+    setLoading(true); setErr("");
+    try {
+      const [r, p] = await Promise.all([
+        api.settingsRolesList(),
+        api.settingsPermissionsList(),
+      ]);
+      setRoles(Array.isArray(r) ? r : []);
+      setAllPerms(Array.isArray(p) ? p : []);
+    } catch (e) {
+      setErr(e.message || "読み込みエラー");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function openCreate() {
+    setEditId(null);
+    setForm(emptyRoleForm);
+    setFormErr("");
+    setModalOpen(true);
+  }
+
+  function openEdit(role) {
+    setEditId(role.id);
+    setForm({ name: role.name, permissions: role.permissions || [] });
+    setFormErr("");
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setEditId(null);
+    setForm(emptyRoleForm);
+    setFormErr("");
+  }
+
+  function togglePerm(key) {
+    setForm(f => ({
+      ...f,
+      permissions: f.permissions.includes(key)
+        ? f.permissions.filter(p => p !== key)
+        : [...f.permissions, key],
+    }));
+  }
+
+  function toggleGroup(group, checked) {
+    const keys = group.items.map(i => i.key);
+    setForm(f => {
+      const without = f.permissions.filter(p => !keys.includes(p));
+      return { ...f, permissions: checked ? [...without, ...keys] : without };
+    });
+  }
+
+  async function handleSave() {
+    if (!form.name.trim()) { setFormErr("名前を入力してください"); return; }
+    setSaving(true); setFormErr("");
+    try {
+      const payload = { name: form.name.trim(), permissions: form.permissions };
+      if (editId) await api.settingsRolesUpdate(editId, payload);
+      else        await api.settingsRolesCreate(payload);
+      closeModal();
+      await load();
+    } catch (e) {
+      setFormErr(e.message || "保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteConfirmed() {
+    if (!deleteConfirm) return;
+    setErr("");
+    try {
+      await api.settingsRolesDelete(deleteConfirm);
+      setDeleteConfirm(null);
+      await load();
+    } catch (e) {
+      setErr(e.message || "削除エラー");
+      setDeleteConfirm(null);
+    }
+  }
+
+  const visibleGroups = PERMISSION_GROUPS
+    .map(g => ({ ...g, items: g.items.filter(i => allPerms.length === 0 || allPerms.includes(i.key)) }))
+    .filter(g => g.items.length > 0);
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
+        ロールごとに操作可能な範囲を設定します。従業員にロールを割り当てると、そのロールの権限のみが有効になります（未割り当ての場合は権限なし）。
+      </div>
+
+      {err && (
+        <div style={{ background: "#ffe5e5", color: "#c0392b", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <button style={btnPrimaryStyle} type="button" onClick={openCreate}>＋ 新規ロール</button>
+      </div>
+
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>ロール一覧</div>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
+                <th style={thStyle}>名前</th>
+                <th style={thStyle}>権限数</th>
+                <th style={{ ...thStyle, textAlign: "right" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map(role => (
+                <tr key={role.id} style={{ borderBottom: "1px solid #f0f1f6" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
+                  onMouseLeave={e => e.currentTarget.style.background = ""}>
+                  <td style={tdStyle}>
+                    <span style={{ fontSize: 13, color: "#1a1d2e", background: "#f1f5f9", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
+                      {role.name}
+                    </span>
+                  </td>
+                  <td style={tdStyle}>
+                    <span style={{ color: "#64748b" }}>{(role.permissions || []).length} 件</span>
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "right" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button style={btnSecondaryStyle} type="button" onClick={() => openEdit(role)}>編集</button>
+                      <button style={btnDangerStyle} type="button" onClick={() => setDeleteConfirm(role.id)}>削除</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {roles.length === 0 && !loading && (
+                <tr><td colSpan={3} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>まだ登録されていません</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ── Modal: create/edit ── */}
+      {modalOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 2000,
+          background: "rgba(15,23,42,0.5)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 18, padding: 28,
+            width: 640, maxHeight: "90vh", overflowY: "auto",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
+          }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d2e", marginBottom: 16 }}>
+              {editId ? "ロールを編集" : "ロールを新規作成"}
+            </div>
+
+            {formErr && (
+              <div style={{ background: "#ffe5e5", color: "#c0392b", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+                {formErr}
+              </div>
+            )}
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+                ロール名 *
+              </label>
+              <input
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                style={inputStyle}
+                placeholder="例：ホールリーダー"
+              />
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 10 }}>権限</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {visibleGroups.map(group => {
+                const allChecked = group.items.every(i => form.permissions.includes(i.key));
+                return (
+                  <div key={group.label} style={{ border: "1px solid #f0f1f6", borderRadius: 10, padding: "10px 14px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#1a1d2e", marginBottom: 8, cursor: "pointer" }}>
+                      <input type="checkbox" checked={allChecked} onChange={e => toggleGroup(group, e.target.checked)} />
+                      {group.label}
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", paddingLeft: 24 }}>
+                      {group.items.map(item => (
+                        <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#475569", cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={form.permissions.includes(item.key)}
+                            onChange={() => togglePerm(item.key)}
+                          />
+                          {item.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+              <button onClick={closeModal} style={btnSecondaryStyle} type="button">キャンセル</button>
+              <button onClick={handleSave} disabled={saving} style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }} type="button">
+                {saving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirm ── */}
+      {deleteConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 3000,
+          background: "rgba(15,23,42,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 420, width: "90%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1d2e", marginBottom: 12 }}>本当に削除しますか？</div>
+            <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.7, marginBottom: 24 }}>
+              このロールを削除すると、割り当てられている従業員は「ロールなし」（権限なし）になります。
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button onClick={() => setDeleteConfirm(null)} style={{ ...btnSecondaryStyle, padding: "10px 24px", fontSize: 14 }} type="button">キャンセル</button>
+              <button onClick={handleDeleteConfirmed} style={{ padding: "10px 24px", fontSize: 14, fontWeight: 700, background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }} type="button">削除する</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main page ─────────────────────────────────────────── */
-const TABS = [
+const BASE_TABS = [
   { key: "workplaces",     label: "勤務場所" },
   { key: "positions",      label: "職種・役職" },
   { key: "departments",    label: "部署" },
   { key: "breakrules",     label: "休憩ルール" },
+  { key: "attstatuses",    label: "勤務状況リスト" },
   { key: "notifications",  label: "通知設定" },
 ];
 
-export default function SettingsPage({ view, onNavigate, onLogout }) {
+// Какое право нужно для таба
+const TAB_PERMISSION = {
+  workplaces:    "WORKPLACE_VIEW",
+  positions:     "POSITION_VIEW",
+  departments:   "DEPARTMENT_VIEW",
+  breakrules:    "BREAK_RULE_VIEW",
+  attstatuses:   "ATTENDANCE_STATUS_VIEW",
+  notifications: "NOTIFICATION_VIEW",
+};
+
+export default function SettingsPage({ view, onNavigate, onLogout, permissions = [] }) {
   const name = localStorage.getItem("staffName") || "manager";
+  const isAdmin = localStorage.getItem("appRole") === "ADMIN";
+  const allowedTabs = BASE_TABS.filter(t => isAdmin || permissions.includes(TAB_PERMISSION[t.key]));
+  const TABS = isAdmin ? [...allowedTabs, { key: "roles", label: "権限" }] : allowedTabs;
   const [tab, setTab] = useState("workplaces");
+  // если выбранный таб недоступен — показываем первый доступный
+  const activeTab = TABS.some(t => t.key === tab) ? tab : (TABS[0]?.key ?? null);
 
   return (
     <ManagerLayout name={name} view={view} onNavigate={onNavigate} onLogout={onLogout}>
@@ -795,9 +1171,9 @@ export default function SettingsPage({ view, onNavigate, onLogout }) {
                 fontWeight: 700,
                 cursor: "pointer",
                 transition: "all 0.15s",
-                background: tab === t.key ? "#fff" : "transparent",
-                color: tab === t.key ? "#6366f1" : "#64748b",
-                boxShadow: tab === t.key ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                background: activeTab === t.key ? "#fff" : "transparent",
+                color: activeTab === t.key ? "#6366f1" : "#64748b",
+                boxShadow: activeTab === t.key ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
               }}
             >
               {t.label}
@@ -806,11 +1182,13 @@ export default function SettingsPage({ view, onNavigate, onLogout }) {
         </div>
 
         {/* Tab content */}
-        {tab === "workplaces"    && <WorkplacesTab />}
-        {tab === "positions"     && <PositionsTab />}
-        {tab === "departments"   && <DepartmentsTab />}
-        {tab === "breakrules"    && <BreakRulesTab />}
-        {tab === "notifications" && <NotificationsTab />}
+        {activeTab === "workplaces"    && <WorkplacesTab />}
+        {activeTab === "positions"     && <PositionsTab />}
+        {activeTab === "departments"   && <DepartmentsTab />}
+        {activeTab === "breakrules"    && <BreakRulesTab />}
+        {activeTab === "attstatuses"   && <AttendanceStatusesTab />}
+        {activeTab === "notifications" && <NotificationsTab />}
+        {activeTab === "roles" && isAdmin && <RolesTab />}
       </div>
       </div>
     </ManagerLayout>

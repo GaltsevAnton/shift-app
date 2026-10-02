@@ -22,7 +22,7 @@ public class NotificationSettingsController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('NOTIFICATION_VIEW')")
     public Map<String, String> get(@AuthenticationPrincipal CustomUserDetails user) {
         LocalTime t = repository.findByRestaurant_Id(user.getRestaurantId())
                 .map(NotificationSettings::getForgotClockoutCheckTime)
@@ -31,7 +31,7 @@ public class NotificationSettingsController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('NOTIFICATION_EDIT')")
     public Map<String, String> set(@AuthenticationPrincipal CustomUserDetails user,
                                     @RequestParam String time) {
         NotificationSettings settings = repository.findByRestaurant_Id(user.getRestaurantId())

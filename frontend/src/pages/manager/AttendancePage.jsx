@@ -39,6 +39,38 @@ const STATUS_FILTER_ITEMS = [
   { value: "none",     label: "未出勤" },
 ];
 
+// Строки календаря 勤怠管理 (порядок = порядок на экране и в Excel)
+const ROW_ITEMS = [
+  { value: "in",    label: "出勤" },
+  { value: "out",   label: "退勤" },
+  { value: "gross", label: "拘束" },
+  { value: "break", label: "休憩" },
+  { value: "work",  label: "実働" },
+  { value: "note",  label: "状況" },
+];
+const ROW_LABEL        = Object.fromEntries(ROW_ITEMS.map(i => [i.value, i.label]));
+const SESSION_ROW_KEYS = ["in", "out", "gross", "break", "work"];
+
+// Фиксированная высота строк — подписи и все ячейки дня всегда на одном уровне
+const ATT_ROW_H  = 22;
+const ATT_NOTE_H = 26;
+function attRowStyle(extra = {}) {
+  return {
+    height: ATT_ROW_H, boxSizing: "border-box", padding: "0 6px",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    whiteSpace: "nowrap", overflow: "hidden",
+    ...extra,
+  };
+}
+function attNoteStyle(withTopBorder) {
+  return {
+    height: ATT_NOTE_H, boxSizing: "border-box", padding: "0 2px",
+    display: "flex", alignItems: "center",
+    borderTop: withTopBorder ? "2px solid #cbd5e1" : "none",
+    background: "#fff",
+  };
+}
+
 const COLOR_FILTER_ITEMS = [
   { value: "green",   label: "🟢 時間通り" },
   { value: "red",     label: "🔴 遅刻（出勤）" },
@@ -375,7 +407,7 @@ function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
 }
 
 /* ─── CheckDropdown ─────────────────────────────────────── */
-function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight, panelWidth, panelHeight, searchable }) {
+function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight, panelWidth, panelHeight, searchable, hideAll }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef();
@@ -435,15 +467,19 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
               />
             </div>
           )}
-          <label className={styles.wpDropdownAll}>
-            <input type="checkbox" className={styles.colToggleCheck}
-              checked={allOn}
-              ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
-              onChange={() => onToggleAll(allKeys, !allOn)}
-            />
-            <span>すべて</span>
-          </label>
-          <div className={styles.wpDropdownDivider} />
+          {!hideAll && (
+            <>
+              <label className={styles.wpDropdownAll}>
+                <input type="checkbox" className={styles.colToggleCheck}
+                  checked={allOn}
+                  ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+                  onChange={() => onToggleAll(allKeys, !allOn)}
+                />
+                <span>すべて</span>
+              </label>
+              <div className={styles.wpDropdownDivider} />
+            </>
+          )}
           {displayItems.map(item => (
             <label key={item.value} className={styles.wpDropdownItem}>
               <input type="checkbox" className={styles.colToggleCheck}
@@ -523,6 +559,12 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftMap, setShiftMap] = useState({});
   const [breakRules, setBreakRules] = useState([]);
+  const [visibleRows, setVisibleRows] = useState(
+    () => loadFilterSet("attRowVisibility") || new Set(ROW_ITEMS.map(i => i.value))
+  );
+  const [showColors, setShowColors] = useState(() => localStorage.getItem("attShowColors") !== "0");
+  const [attStatuses, setAttStatuses] = useState([]); // 勤務状況リスト
+  const [notesMap, setNotesMap]       = useState({});  // "userId_date" → {statusId, label}
 
   /* ── popup ── */
   const [detailPopup, setDetailPopup] = useState(null);
@@ -603,6 +645,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   useEffect(() => { saveFilterSet("attFilterDept",   visibleDepartments);}, [visibleDepartments]);
   useEffect(() => { saveFilterSet("attFilterStatus", visibleStatuses);   }, [visibleStatuses]);
   useEffect(() => { saveFilterSet("attFilterColor", visibleColors); }, [visibleColors]);
+  useEffect(() => { saveFilterSet("attRowVisibility", visibleRows); }, [visibleRows]);
+  useEffect(() => {
+    try { localStorage.setItem("attShowColors", showColors ? "1" : "0"); } catch { /* ignore */ }
+  }, [showColors]);
   useEffect(() => {
     try { localStorage.setItem("attColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
   }, [colVisibility]);
@@ -636,12 +682,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       const from = displayDates[0];
       const to   = displayDates[displayDates.length - 1];
 
-      const [recs, emps, depts, shiftData, brRules] = await Promise.all([
+      const [recs, emps, depts, shiftData, brRules, notes, statuses] = await Promise.all([
         api.attendanceRecords(from, to),
         api.managerEmployeesList(),
         api.settingsDepartmentsList(),
         api.managerRange(from, to),
         api.settingsBreakRulesList().catch(() => []),
+        api.attendanceNotes(from, to).catch(() => []),
+        api.settingsAttendanceStatusesList().catch(() => []),
       ]);
 
       const posMap = {}, deptsMap = {};
@@ -667,6 +715,12 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
       setRecords(Array.isArray(recs) ? recs : []);
       setBreakRules(Array.isArray(brRules) ? brRules : []);
+      setAttStatuses(Array.isArray(statuses) ? statuses : []);
+      const nm = {};
+      (Array.isArray(notes) ? notes : []).forEach(n => {
+        nm[`${n.userId}_${n.workDate}`] = { statusId: n.statusId, label: n.label };
+      });
+      setNotesMap(nm);
       const sm = {};
       for (const week of (shiftData || [])) {
         for (const row of (week.rows || [])) {
@@ -1170,6 +1224,25 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   function handleColorToggleAll(allKeys, allOn) {
     setVisibleColors(allOn ? new Set(allKeys) : new Set());
   }
+  // 表示行: хотя бы одна строка должна оставаться
+  function handleRowToggle(key) {
+    setVisibleRows(prev => {
+      const n = new Set(prev);
+      if (n.has(key)) {
+        if (n.size === 1) return prev;
+        n.delete(key);
+      } else {
+        n.add(key);
+      }
+      return n;
+    });
+  }
+  function handleRowToggleAll(allKeys, turnOn) {
+    if (!turnOn) return;
+    setVisibleRows(new Set(allKeys));
+  }
+  const sessionRowKeys = SESSION_ROW_KEYS.filter(k => visibleRows.has(k));
+  const showNoteRow    = visibleRows.has("note");
   function handleReset() {
     localStorage.removeItem("attFilterPos");
     localStorage.removeItem("attFilterDept");
@@ -1257,17 +1330,53 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     return "green";
   }
 
+  /* ── 勤務状況: сохранение пометки (оптимистично, с откатом при ошибке) ── */
+  async function handleNoteChange(userId, date, value) {
+    if (value === "__keep") return; // выбрана старая (удалённая/переименованная) пометка — ничего не меняем
+    const key      = `${userId}_${date}`;
+    const prev     = notesMap[key];
+    const statusId = value ? Number(value) : null;
+    const st       = attStatuses.find(x => x.id === statusId);
+
+    setNotesMap(m => {
+      const n = { ...m };
+      if (statusId) n[key] = { statusId, label: st?.name || "" };
+      else delete n[key];
+      return n;
+    });
+    try {
+      await api.attendanceNoteSet({ userId, workDate: date, statusId });
+    } catch (e) {
+      setNotesMap(m => {
+        const n = { ...m };
+        if (prev) n[key] = prev; else delete n[key];
+        return n;
+      });
+      setAlertMsg("勤務状況の保存に失敗しました: " + e.message);
+    }
+  }
+
   async function handleReport() {
     if (displayDates.length === 0) {
       setAlertMsg("期間を正しく設定してください");
       return;
     }
+    if (filteredStaffByStatus.length === 0) {
+      setAlertMsg("出力対象のスタッフがいません");
+      return;
+    }
     setReportLoading(true);
     try {
+      // Всё «как на экране»: сотрудники и их порядок, колонки, строки, цветовые подсказки
       await api.reportAttendanceTimesheetFiltered(
         displayDates[0],
         displayDates[displayDates.length - 1],
-        filteredStaffByStatus.map(s => s.id)
+        filteredStaffByStatus.map(s => s.id),
+        {
+          columns:    Object.keys(colVisibility).filter(k => colVisibility[k]),
+          rows:       ROW_ITEMS.map(i => i.value).filter(k => visibleRows.has(k)),
+          showColors,
+        }
       );
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
@@ -1462,6 +1571,15 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         <div className={styles.sortBar}>
           <ColToggleDropdown colVisibility={colVisibility} onColVisibilityChange={setColVisibility} />
 
+          <CheckDropdown
+            label="表示行"
+            items={ROW_ITEMS}
+            visibleSet={visibleRows}
+            onToggle={handleRowToggle}
+            onToggleAll={handleRowToggleAll}
+            hideAll
+          />
+
           {positionOptions.length > 0 && (
             <CheckDropdown
               label="職種・役職"
@@ -1497,6 +1615,18 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             onToggle={handleColorToggle}
             onToggleAll={handleColorToggleAll}
           />
+
+          <label style={{
+            display: "flex", alignItems: "center", gap: 5,
+            fontSize: 13, cursor: "pointer", color: "#666", whiteSpace: "nowrap",
+          }}>
+            <input
+              type="checkbox"
+              checked={showColors}
+              onChange={e => setShowColors(e.target.checked)}
+            />
+            色分け表示
+          </label>
 
           <div className={styles.sortBarDivider} />
 
@@ -1654,22 +1784,30 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
                       {(() => {
                         const sessionRows = maxSessionsForStaff(s.id);
+                        const hasBlocks   = sessionRowKeys.length > 0;
                         return (
                           <td className={styles.cell} style={{ padding: 0, verticalAlign: "top" }}>
-                            {Array.from({ length: sessionRows }, (_, si) => (
+                            {hasBlocks && Array.from({ length: sessionRows }, (_, si) => (
                               <div key={si} style={{ borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none" }}>
-                                {["出勤", "退勤", "拘束", "休憩", "実働"].map(label => (
-                                  <div key={label} style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    display: "flex", alignItems: "center",
+                                {sessionRowKeys.map((key, ri) => (
+                                  <div key={key} style={attRowStyle({
+                                    justifyContent: "flex-start",
                                     fontSize: 11, color: "#64748b", fontWeight: 600,
-                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                                  }}>
-                                    {label}
+                                    borderBottom: ri < sessionRowKeys.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none",
+                                  })}>
+                                    {ROW_LABEL[key]}
                                   </div>
                                 ))}
                               </div>
                             ))}
+                            {showNoteRow && (
+                              <div style={{
+                                ...attNoteStyle(hasBlocks),
+                                padding: "0 6px", fontSize: 11, color: "#64748b", fontWeight: 600,
+                              }}>
+                                状況
+                              </div>
+                            )}
                           </td>
                         );
                       })()}
@@ -1686,8 +1824,8 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                         const matched     = matchSessionsToSlots(daySessions, shift?.slots || []);
 
                         let cellBg = "#fff";
-                        if (hasShift && !hasPunch) cellBg = "#e0f2fe";
-                        if (!hasShift && hasPunch) cellBg = "#f1f5f9";
+                        if (showColors && hasShift && !hasPunch) cellBg = "#e0f2fe";
+                        if (showColors && !hasShift && hasPunch) cellBg = "#f1f5f9";
 
                         return (
                           <td key={date}
@@ -1699,7 +1837,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               }
                             }}
                           >
-                            {Array.from({ length: sessionRows }, (_, si) => {
+                            {sessionRowKeys.length > 0 && Array.from({ length: sessionRows }, (_, si) => {
                               const pair       = matched[si];
                               const session    = pair?.session || null;
                               const slot       = pair?.slot || null;
@@ -1714,6 +1852,60 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                               const brkMin   = session ? (rawBrk !== null ? rawBrk : (info?.officialBreakMinutes ?? 0)) : null;
                               const netMin   = grossMin !== null ? Math.max(grossMin - brkMin, 0) : null;
 
+                              const cells = {
+                                in: {
+                                  bg: showColors ? (info?.inColor || "transparent") : "transparent",
+                                  content: (
+                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: displayIn ? "#1e293b" : "#cbd5e1" }}>
+                                      {displayIn ? fmtTime(displayIn) : "--:--"}
+                                    </span>
+                                  ),
+                                },
+                                out: {
+                                  bg: showColors ? (info?.outColor || "transparent") : "transparent",
+                                  content: (
+                                    <>
+                                      <span style={{
+                                        fontSize: 12, fontWeight: 600, fontFamily: "monospace",
+                                        color: !displayOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
+                                      }}>
+                                        {displayOut ? fmtTime(displayOut) : "--:--"}
+                                      </span>
+                                      {outNextDay && (
+                                        <span style={{
+                                          marginLeft: 4, fontSize: 9, fontWeight: 700, color: "#fff",
+                                          background: "#7c3aed", borderRadius: 3, padding: "1px 3px", lineHeight: 1.4,
+                                        }}>翌日</span>
+                                      )}
+                                    </>
+                                  ),
+                                },
+                                gross: {
+                                  bg: "transparent",
+                                  content: (
+                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: session ? "#475569" : "#cbd5e1" }}>
+                                      {!session ? "--:--" : (grossMin === null ? "―" : fmtHM(grossMin))}
+                                    </span>
+                                  ),
+                                },
+                                break: {
+                                  bg: "transparent",
+                                  content: (
+                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8" }}>
+                                      {session ? fmtHM(brkMin) : "--:--"}
+                                    </span>
+                                  ),
+                                },
+                                work: {
+                                  bg: "transparent",
+                                  content: (
+                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
+                                      {!session ? "--:--" : (netMin === null ? "―" : fmtHM(netMin))}
+                                    </span>
+                                  ),
+                                },
+                              };
+
                               return (
                                 <div key={si} style={{
                                   position: "relative",
@@ -1725,74 +1917,50 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                                       height: 3, background: "#7c3aed", zIndex: 1, pointerEvents: "none",
                                     }} />
                                   )}
-
-                                  {/* 出勤 */}
-                                  <div style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    background: info?.inColor || "transparent",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                                  }}>
-                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: displayIn ? "#1e293b" : "#cbd5e1" }}>
-                                      {displayIn ? fmtTime(displayIn) : "--:--"}
-                                    </span>
-                                  </div>
-
-                                  {/* 退勤 */}
-                                  <div style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    background: info?.outColor || "transparent",
-                                    display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                                  }}>
-                                    <span style={{
-                                      fontSize: 12, fontWeight: 600, fontFamily: "monospace",
-                                      color: !displayOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
-                                    }}>
-                                      {displayOut ? fmtTime(displayOut) : "--:--"}
-                                    </span>
-                                    {outNextDay && (
-                                      <span style={{
-                                        fontSize: 9, fontWeight: 700, color: "#fff",
-                                        background: "#7c3aed", borderRadius: 3, padding: "1px 3px", lineHeight: 1.4,
-                                      }}>翌日</span>
-                                    )}
-                                  </div>
-
-                                  {/* 拘束 */}
-                                  <div style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                                  }}>
-                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: session ? "#475569" : "#cbd5e1" }}>
-                                      {!session ? "--:--" : (grossMin === null ? "―" : fmtHM(grossMin))}
-                                    </span>
-                                  </div>
-
-                                  {/* 休憩 */}
-                                  <div style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                                  }}>
-                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8" }}>
-                                      {session ? fmtHM(brkMin) : "--:--"}
-                                    </span>
-                                  </div>
-
-                                  {/* 実働 */}
-                                  <div style={{
-                                    minHeight: 22, padding: "2px 6px",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                  }}>
-                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
-                                      {!session ? "--:--" : (netMin === null ? "―" : fmtHM(netMin))}
-                                    </span>
-                                  </div>
+                                  {sessionRowKeys.map((key, ri) => (
+                                    <div key={key} style={attRowStyle({
+                                      background: cells[key].bg,
+                                      borderBottom: ri < sessionRowKeys.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none",
+                                    })}>
+                                      {cells[key].content}
+                                    </div>
+                                  ))}
                                 </div>
                               );
                             })}
+
+                            {/* 状況 — 勤務状況リストから選択（1日1つ） */}
+                            {showNoteRow && (() => {
+                              const note  = notesMap[`${s.id}_${date}`];
+                              // «живой» пункт: существует в справочнике и название совпадает с сохранённым
+                              const known = !!note && note.statusId != null &&
+                                attStatuses.some(st => st.id === note.statusId && st.name === note.label);
+                              const value = !note ? "" : (known ? String(note.statusId) : "__keep");
+                              return (
+                                <div
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ ...attNoteStyle(sessionRowKeys.length > 0), cursor: "default" }}
+                                >
+                                  <select
+                                    value={value}
+                                    onChange={e => handleNoteChange(s.id, date, e.target.value)}
+                                    style={{
+                                      width: "100%", height: ATT_NOTE_H - 4, fontSize: 11, padding: 0,
+                                      border: "none", background: "transparent",
+                                      color: note ? "#1e293b" : "#cbd5e1",
+                                      fontWeight: note ? 600 : 400,
+                                      cursor: "pointer", textAlignLast: "center",
+                                    }}
+                                  >
+                                    <option value="">—</option>
+                                    {note && !known && <option value="__keep">{note.label}</option>}
+                                    {attStatuses.map(st => (
+                                      <option key={st.id} value={st.id}>{st.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })()}
                           </td>
                         );
                       })}
@@ -2329,7 +2497,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       )}
 
       {/* ── Легенда внизу ── */}
-      {pageMode === "calendar" && (
+      {pageMode === "calendar" && showColors && (
         <div style={{
           position: "fixed", bottom: 0, left: 56, right: 0,
           height: 36, zIndex: 100,

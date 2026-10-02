@@ -144,6 +144,13 @@ export const api = {
       body: { weekStart, days },
     }),
 
+  // 1日単位の保存 — 実際に変更があった日だけ監査ログに記録される
+  managerStaffDaySave: (userId, day) =>
+    request(`/api/manager/staff-day/save?userId=${userId}`, {
+      method: "POST",
+      body: day, // {date, off, slots}
+    }),
+
   // ===== MANAGER WEEK EDITOR =====
   managerWeek: (weekStart) =>
     request(`/api/manager/week?weekStart=${weekStart}`),
@@ -221,6 +228,26 @@ export const api = {
   settingsDepartmentsReorder: (orderedIds) =>
     request("/api/manager/settings/departments/reorder", { method: "PUT", body: orderedIds }),
 
+  // ===== SETTINGS: ROLES (権限, ADMIN専用) =====
+  settingsRolesList: () =>
+    request("/api/manager/settings/roles"),
+
+  settingsRolesCreate: (payload) =>
+    request("/api/manager/settings/roles", { method: "POST", body: payload }),
+
+  settingsRolesUpdate: (id, payload) =>
+    request(`/api/manager/settings/roles/${id}`, { method: "PUT", body: payload }),
+
+  settingsRolesDelete: (id) =>
+    request(`/api/manager/settings/roles/${id}`, { method: "DELETE" }),
+
+  settingsPermissionsList: () =>
+    request("/api/manager/settings/permissions"),
+
+  // ===== ME: права текущего пользователя =====
+  mePermissions: () =>
+    request("/api/manager/me/permissions"),
+
   // ===== REPORTS =====
   reportShiftAll: (ym) =>
     fetchBlob(`/api/manager/reports/shift/all?ym=${ym}`),
@@ -264,10 +291,16 @@ export const api = {
       body: JSON.stringify({ userIds: userIds || [], visibleColumns: visibleColumns || [] }),
     }),
 
-  reportAttendanceTimesheetFiltered: (from, to, userIds) =>
+  // options: { columns: [...], rows: [...], showColors } — настройки отображения экрана
+  reportAttendanceTimesheetFiltered: (from, to, userIds, options = {}) =>
     fetchBlob(`/api/manager/reports/attendance/timesheet/filtered?from=${from}&to=${to}`, {
       method: "POST",
-      body: JSON.stringify(userIds || []),
+      body: JSON.stringify({
+        userIds:    userIds || [],
+        columns:    options.columns ?? null,
+        rows:       options.rows ?? null,
+        showColors: options.showColors ?? true,
+      }),
     }),
     
   // ===== ATTENDANCE =====
@@ -279,6 +312,27 @@ export const api = {
 
   attendanceDelete: (id) =>
     request(`/api/manager/attendance/${id}`, { method: "DELETE" }),
+
+  // ===== ATTENDANCE: 勤務状況 (пометки по дням) =====
+  attendanceNotes: (from, to) =>
+    request(`/api/manager/attendance-notes?from=${from}&to=${to}`),
+
+  // statusId = null — снять пометку
+  attendanceNoteSet: ({ userId, workDate, statusId }) =>
+    request("/api/manager/attendance-notes", { method: "PUT", body: { userId, workDate, statusId } }),
+
+  // ===== SETTINGS: 勤務状況リスト =====
+  settingsAttendanceStatusesList: () =>
+    request("/api/manager/settings/attendance-statuses"),
+
+  settingsAttendanceStatusesCreate: (payload) =>
+    request("/api/manager/settings/attendance-statuses", { method: "POST", body: payload }),
+
+  settingsAttendanceStatusesUpdate: (id, payload) =>
+    request(`/api/manager/settings/attendance-statuses/${id}`, { method: "PUT", body: payload }),
+
+  settingsAttendanceStatusesDelete: (id) =>
+    request(`/api/manager/settings/attendance-statuses/${id}`, { method: "DELETE" }),
 
   // ===== SETTINGS: BREAK RULES =====
   settingsBreakRulesList: () =>
@@ -319,4 +373,16 @@ export const api = {
 
   notificationSettingsSet: (time) =>
     request(`/api/manager/notifications/settings?time=${time}`, { method: "POST" }),
+
+  // ===== AUDIT LOG =====
+  // from/to: "YYYY-MM-DD" | undefined、targetUserId・entityType: 未指定でフィルターなし
+  auditLogSearch: ({ from, to, targetUserId, entityType } = {}) => {
+    const params = new URLSearchParams();
+    if (from)         params.set("from", from);
+    if (to)           params.set("to", to);
+    if (targetUserId) params.set("targetUserId", targetUserId);
+    if (entityType)   params.set("entityType", entityType);
+    const qs = params.toString();
+    return request(`/api/manager/audit-log${qs ? `?${qs}` : ""}`);
+  },
 };

@@ -5,6 +5,7 @@ const MANAGER_MENU = [
   { key: "ATTENDANCE", label: "勤怠管理",   icon: "🕐" },
   { key: "EMPLOYEES", label: "ユーザー",  icon: "👥" },
   { key: "SETTINGS",  label: "設定",        icon: "⚙️" },
+  { key: "LOGGING",   label: "Logging",     icon: "📝" },
 ];
 
 export default function ManagerLayout({ name, view, onNavigate, onLogout, children }) {
@@ -44,13 +45,6 @@ export default function ManagerLayout({ name, view, onNavigate, onLogout, childr
               )}
             </button>
           ))}
-
-          {/* Disabled items — coming soon */}
-          <button className={`${styles.sidebarItem} ${styles.sidebarItemDisabled}`} disabled type="button">
-            <span className={styles.sidebarIcon}>📊</span>
-            <span className={styles.sidebarLabel}>レポート</span>
-            <span className={styles.sidebarSoon}>準備中</span>
-          </button>
         </nav>
 
         {/* Footer — personal shifts + logout */}

@@ -15,6 +15,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 
+/**
+ * Права:
+ *  - シフト系レポート (shift/*, timesheet*)        → SHIFT_VIEW
+ *  - 勤怠系レポート   (attendance/*)                → ATTENDANCE_VIEW
+ */
 @RestController
 @RequestMapping("/api/manager/reports")
 public class ReportController {
@@ -30,7 +35,7 @@ public class ReportController {
      * Шифт-таблица по отделу
      */
     @GetMapping("/shift/dept")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftByDept(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym,
@@ -46,7 +51,7 @@ public class ReportController {
      * Сводная шифт-таблица по всем сотрудникам
      */
     @GetMapping("/shift/all")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftAll(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym) {
@@ -58,10 +63,10 @@ public class ReportController {
 
     /**
      * GET /api/manager/reports/timesheet?ym=2026-05
-     * Табель учёта рабочего времени
+     * Табель учёта рабочего времени (по плану смен — отчёт экрана シフト管理)
      */
     @GetMapping("/timesheet")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> timesheet(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym) {
@@ -70,13 +75,13 @@ public class ReportController {
         String filename = "勤怠_" + ym + ".xlsx";
         return xlsxResponse(data, filename);
     }
-    
+
     /**
-         * POST /api/manager/reports/attendance/sessions?from=2026-07-01&to=2026-07-31
-         * Список смен (session-based), фильтр по сотрудникам и колонкам — соответствует экрану リスト
-         */
+     * POST /api/manager/reports/attendance/sessions?from=2026-07-01&to=2026-07-31
+     * Список смен (session-based), фильтр по сотрудникам и колонкам — соответствует экрану リスト
+     */
     @PostMapping("/attendance/sessions")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('ATTENDANCE_VIEW')")
     public ResponseEntity<byte[]> attendanceSessions(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -98,7 +103,7 @@ public class ReportController {
      * Шифт-таблица по выбранным сотрудникам
      */
     @PostMapping("/shift/filtered")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftFiltered(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym,
@@ -113,7 +118,7 @@ public class ReportController {
      * GET /api/manager/reports/shift/all/range?from=&to=
      */
     @GetMapping("/shift/all/range")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftAllRange(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -128,7 +133,7 @@ public class ReportController {
      * GET /api/manager/reports/shift/dept/range?from=&to=&department=
      */
     @GetMapping("/shift/dept/range")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftDeptRange(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -144,7 +149,7 @@ public class ReportController {
      * GET /api/manager/reports/timesheet/range?from=&to=
      */
     @GetMapping("/timesheet/range")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> timesheetRange(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -159,7 +164,7 @@ public class ReportController {
      * POST /api/manager/reports/shift/filtered/range?from=&to=
      */
     @PostMapping("/shift/filtered/range")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public ResponseEntity<byte[]> shiftFilteredRange(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -176,7 +181,7 @@ public class ReportController {
      * Табель фактического времени (по打刻)
      */
     @GetMapping("/attendance/timesheet")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('ATTENDANCE_VIEW')")
     public ResponseEntity<byte[]> attendanceTimesheet(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym) {
@@ -191,24 +196,38 @@ public class ReportController {
      * 勤怠集計表（実績）— по отфильтрованным на экране сотрудникам, произвольный диапазон дат
      */
     @PostMapping("/attendance/timesheet/filtered")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('ATTENDANCE_VIEW')")
     public ResponseEntity<byte[]> attendanceTimesheetFiltered(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestBody(required = false) List<Long> userIds) {
+            @RequestBody(required = false) AttendanceTimesheetExportRequest body) {
 
-        byte[] data = reportService.generateAttendanceTimesheetFiltered(user.getRestaurantId(), from, to, userIds);
+        List<Long>   userIds    = body != null ? body.userIds()  : null;
+        List<String> columns    = body != null ? body.columns()  : null;   // null = все колонки
+        List<String> rows       = body != null ? body.rows()     : null;   // null = все строки
+        boolean      showColors = body == null || body.showColors() == null || body.showColors();
+
+        byte[] data = reportService.generateAttendanceTimesheetFiltered(
+                user.getRestaurantId(), from, to, userIds, columns, rows, showColors);
         String filename = "勤怠集計_" + from + "_" + to + ".xlsx";
         return xlsxResponse(data, filename);
     }
+
+    /**
+     * Тело Excel 勤怠集計表 — настройки экрана:
+     * userIds — сотрудники в порядке экрана; columns — number/position/department;
+     * rows — in/out/gross/break/work/note; showColors — цветовые подсказки 出勤/退勤
+     */
+    public record AttendanceTimesheetExportRequest(
+            List<Long> userIds, List<String> columns, List<String> rows, Boolean showColors) {}
 
     /**
      * GET /api/manager/reports/attendance/list?ym=2026-07
      * Плоский список всех打刻
      */
     @GetMapping("/attendance/list")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('ATTENDANCE_VIEW')")
     public ResponseEntity<byte[]> attendanceList(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam String ym) {

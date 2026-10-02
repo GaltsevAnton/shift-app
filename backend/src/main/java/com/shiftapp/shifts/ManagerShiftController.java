@@ -4,6 +4,7 @@ import com.shiftapp.common.CurrentUser;
 import com.shiftapp.shifts.dto.BulkShiftRequest;
 import com.shiftapp.shifts.dto.ShiftResponse;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.shiftapp.shifts.dto.CopyWeekRequest;
 
@@ -21,6 +22,7 @@ public class ManagerShiftController {
     }
 
     @PostMapping("/bulk")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public String bulk(@RequestBody @Valid BulkShiftRequest req) {
         var me = CurrentUser.require();
         shiftService.bulkUpsert(me.getUserId(), me.getRestaurantId(), req);
@@ -28,12 +30,14 @@ public class ManagerShiftController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public List<ShiftResponse> list(@RequestParam LocalDate from, @RequestParam LocalDate to) {
         var me = CurrentUser.require();
         return shiftService.list(me.getRestaurantId(), from, to);
     }
 
     @PostMapping("/copy-week")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public String copyWeek(@RequestBody @Valid CopyWeekRequest req) {
         var me = CurrentUser.require();
         int count = shiftService.copyWeek(me.getUserId(), me.getRestaurantId(), req);
@@ -41,10 +45,10 @@ public class ManagerShiftController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
     public String delete(@PathVariable Long id) {
         var me = CurrentUser.require();
         shiftService.deleteShift(me.getRestaurantId(), id);
         return "DELETED";
     }
-
 }

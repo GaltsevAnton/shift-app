@@ -4,6 +4,7 @@ import com.shiftapp.common.CurrentUser;
 import com.shiftapp.restaurants.Restaurant;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,6 +23,7 @@ public class BreakRuleController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('BREAK_RULE_VIEW')")
     public List<BreakRuleResponse> list() {
         Long restaurantId = CurrentUser.require().getRestaurantId();
         return repo.findByRestaurant_IdOrderByThresholdMinutesAsc(restaurantId)
@@ -29,6 +31,7 @@ public class BreakRuleController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('BREAK_RULE_CREATE')")
     public BreakRuleResponse create(@RequestBody BreakRuleRequest req) {
         Long restaurantId = CurrentUser.require().getRestaurantId();
         BreakRule rule = new BreakRule();
@@ -40,6 +43,7 @@ public class BreakRuleController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('BREAK_RULE_EDIT')")
     public BreakRuleResponse update(@PathVariable Long id, @RequestBody BreakRuleRequest req) {
         Long restaurantId = CurrentUser.require().getRestaurantId();
         BreakRule rule = repo.findById(id)
@@ -52,6 +56,7 @@ public class BreakRuleController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('BREAK_RULE_DELETE')")
     public void delete(@PathVariable Long id) {
         Long restaurantId = CurrentUser.require().getRestaurantId();
         BreakRule rule = repo.findById(id)

@@ -21,6 +21,7 @@ public class UserUpdateRequest {
     @NotNull  public Integer sortOrder;
     public boolean active;
     public String password;
+    public Long customRoleId; // null — снять кастомную роль
 
     public String email;
     public String phone;

@@ -1576,27 +1576,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   async function saveCell(userId, date, patch) {
     const week = findWeekForDate(weeksRaw, date);
     if (!week) return;
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d  = new Date(week.weekStart);
-      d.setDate(d.getDate() + i);
-      const ds = d.toISOString().slice(0, 10);
-      const existing = data[week.weekStart]?.staffById?.[userId]?.dayMap?.[ds]
-        || { date: ds, off: true, slots: [] };
-      days.push(ds === date
-        ? { date: ds, off: patch.off, slots: patch.slots }
-        : {
-            date: ds, off: existing.off,
-            slots: (existing.slots || []).map(s => ({
-              startTime: s.startTime, endTime: s.endTime,
-              last: s.last, workplace: s.workplace,
-              nextDay: s.nextDay || false,
-            })),
-          });
-    }
     setSavingCell(`${userId}_${date}`);
     try {
-      await api.managerStaffWeekSave(userId, week.weekStart, days);
+      await api.managerStaffDaySave(userId, { date, off: patch.off, slots: patch.slots });
       setData(prev => {
         const wk  = prev[week.weekStart];
         if (!wk) return prev;
@@ -1688,37 +1670,11 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   async function saveBulkCells(patch) {
     setBulkSaving(true);
     try {
-      const byWeek = new Map();
-      for (const { userId, date } of selectedCells) {
-        const week = findWeekForDate(weeksRaw, date);
-        if (!week) continue;
-        const key = `${userId}_${week.weekStart}`;
-        if (!byWeek.has(key)) byWeek.set(key, { userId, weekStart: week.weekStart, dates: [] });
-        byWeek.get(key).dates.push(date);
-      }
-      for (const { userId, weekStart, dates } of byWeek.values()) {
-        const days = [];
-        for (let i = 0; i < 7; i++) {
-          const d  = new Date(weekStart);
-          d.setDate(d.getDate() + i);
-          const ds = d.toISOString().slice(0, 10);
-          if (dates.includes(ds)) {
-            days.push({ date: ds, off: patch.off, slots: patch.slots });
-          } else {
-            const existing = data[weekStart]?.staffById?.[userId]?.dayMap?.[ds]
-              || { date: ds, off: true, slots: [] };
-            days.push({
-              date: ds, off: existing.off,
-              slots: (existing.slots || []).map(s => ({
-                startTime: s.startTime, endTime: s.endTime,
-                last: s.last, workplace: s.workplace,
-                nextDay: s.nextDay || false,
-              })),
-            });
-          }
-        }
-        await api.managerStaffWeekSave(userId, weekStart, days);
-      }
+      await Promise.all(
+        selectedCells.map(({ userId, date }) =>
+          api.managerStaffDaySave(userId, { date, off: patch.off, slots: patch.slots })
+        )
+      );
       await load(true);
       setSelectedCells([]);
     } catch (e) {

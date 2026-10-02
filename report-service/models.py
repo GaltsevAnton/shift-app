@@ -43,10 +43,12 @@ class AttendanceDayModel(BaseModel):
     hasShift: bool = False
     shiftStart: Optional[str] = None   # "09:00" — из плановой смены, для сравнения
     shiftEnd: Optional[str] = None
+    note: Optional[str] = None         # 勤務状況（日時調整/有給/欠勤...）— сохранённая копия названия
 
 class AttendanceStaffModel(BaseModel):
     userId: int
     userName: str
+    sortOrder: Optional[int] = None    # колонка №
     position: Optional[str] = None
     departments: list[str] = []
     days: list[AttendanceDayModel] = []
@@ -62,6 +64,10 @@ class AttendanceReportRangeRequest(BaseModel):
     fromDate: str                       # "2026-08-01"
     toDate: str                         # "2026-08-23"
     staff: list[AttendanceStaffModel] = []
+    # Настройки отображения экрана 勤怠管理 (None = показать всё)
+    columns: Optional[list[str]] = None   # number / position / department
+    rows: Optional[list[str]] = None      # in / out / gross / break / work / note
+    showColors: bool = True               # цветовые подсказки 出勤/退勤
 
 class SessionModel(BaseModel):
     userId: int

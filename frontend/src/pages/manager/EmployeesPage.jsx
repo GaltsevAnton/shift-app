@@ -19,8 +19,10 @@ const emptyForm = {
   email: "", phone: "",
   postalCode: "", region: "", municipality: "", blockNumber: "", building: "",
   birthDate: "", gender: "MALE",
-  position: "", sortOrder: "", departmentIds: [], role: "STAFF", active: true,
+  position: "", departmentIds: [], role: "STAFF", active: true,
   unlockAccount: false,
+  customRoleId: null,
+  sortOrder: "",
 };
 
 export default function EmployeesPage({ view, onNavigate, onLogout }) {
@@ -29,6 +31,7 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   const [items, setItems]             = useState([]);
   const [positions, setPositions]     = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [roles, setRoles]             = useState([]);
   const [loading, setLoading]         = useState(false);
   const [err, setErr]                 = useState("");
 
@@ -41,14 +44,16 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
   async function load() {
     setErr(""); setLoading(true);
     try {
-      const [data, pos, deps] = await Promise.all([
+      const [data, pos, deps, rls] = await Promise.all([
         api.managerEmployeesList(),
         api.settingsPositionsList(),
         api.settingsDepartmentsList(),
+        api.settingsRolesList().catch(() => []), // 403 для не-ADMIN — просто нет списка ролей на выбор
       ]);
       setItems(Array.isArray(data) ? data : []);
       setPositions(Array.isArray(pos) ? pos : []);
       setDepartments(Array.isArray(deps) ? deps : []);
+      setRoles(Array.isArray(rls) ? rls : []);
     } catch (e) {
       setErr(e.message || "Load error");
     } finally {
@@ -85,11 +90,12 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       birthDate: emp.birthDate || "",
       gender: emp.gender || "MALE",
       position: emp.position || "",
-      sortOrder: emp.sortOrder != null ? String(emp.sortOrder) : "",
       departmentIds: (emp.departments || []).map(d => d.id),
       role: emp.role || "STAFF",
       active: !!emp.active,
       unlockAccount: false,
+      customRoleId: emp.customRoleId || null,
+      sortOrder: emp.sortOrder != null ? String(emp.sortOrder) : "",
     });
     setEditingLockInfo({ accountLocked: !!emp.accountLocked, lockLevel: emp.lockLevel || 0 });
     setFormErr("");
@@ -111,7 +117,8 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
     if (!form.firstName.trim())      return "名を入力してください";
     if (!form.lastNameKana.trim())   return "姓（フリガナ）を入力してください";
     if (!form.firstNameKana.trim())  return "名（フリガナ）を入力してください";
-    if (!String(form.sortOrder).trim())               return "順番№を入力してください";
+    if (form.sortOrder === undefined || form.sortOrder === null || String(form.sortOrder).trim() === "")
+      return "順番№を入力してください";
     if (!/^\d+$/.test(String(form.sortOrder).trim())) return "順番№は半角数字で入力してください";
     return null;
   }
@@ -137,10 +144,11 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
       birthDate: form.birthDate,
       gender: form.gender,
       position: form.position || null,
-      sortOrder: Number(form.sortOrder),
       departmentIds: form.departmentIds,
       role: form.role,
       password: form.password,
+      customRoleId: form.customRoleId || null,
+      sortOrder: Number(form.sortOrder),
     };
 
     try {
@@ -402,13 +410,20 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                     }
                   </td>
                   <td style={tdStyle}>
-                    <span style={{
-                      display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                      background: emp.role === "MANAGER" ? "#ede9fe" : emp.role === "KIOSK" ? "#fef3c7" : "#e0f2fe",
-                      color: emp.role === "MANAGER" ? "#7c3aed" : emp.role === "KIOSK" ? "#92400e" : "#0369a1",
-                    }}>
-                      {emp.role}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                      <span style={{
+                        display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                        background: emp.role === "MANAGER" ? "#ede9fe" : emp.role === "KIOSK" ? "#fef3c7" : "#e0f2fe",
+                        color: emp.role === "MANAGER" ? "#7c3aed" : emp.role === "KIOSK" ? "#92400e" : "#0369a1",
+                      }}>
+                        {emp.role}
+                      </span>
+                      {emp.customRoleName && (
+                        <span style={{ fontSize: 11, color: "#059669", background: "#ecfdf5", padding: "1px 8px", borderRadius: 20, fontWeight: 600 }}>
+                          {emp.customRoleName}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={tdStyle}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
@@ -599,8 +614,26 @@ export default function EmployeesPage({ view, onNavigate, onLogout }) {
                 <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={inputStyle}>
                   <option value="STAFF">STAFF</option>
                   <option value="MANAGER">MANAGER</option>
+                  <option value="ADMIN">ADMIN</option>
                   <option value="KIOSK">KIOSK</option>
                 </select>
+              </Field>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Field label="権限ロール（カスタム）">
+                <select
+                  value={form.customRoleId ?? ""}
+                  onChange={e => setForm({ ...form, customRoleId: e.target.value ? Number(e.target.value) : null })}
+                  style={inputStyle}
+                >
+                  <option value="">— 未設定（権限なし） —</option>
+                  {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                {roles.length === 0 && (
+                  <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                    設定 → 権限 でロールを作成してください（ADMINのみ作成可能）
+                  </div>
+                )}
               </Field>
             </div>
             <div style={{ marginBottom: 12 }}>

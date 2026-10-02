@@ -1,5 +1,8 @@
 package com.shiftapp.weeks;
 
+import com.shiftapp.audit.AuditAction;
+import com.shiftapp.audit.AuditEntityType;
+import com.shiftapp.audit.AuditLogService;
 import com.shiftapp.preferences.Preference;
 import com.shiftapp.preferences.PreferenceRepository;
 import com.shiftapp.preferences.ShiftSlot;
@@ -7,6 +10,7 @@ import com.shiftapp.preferences.ShiftSlotRepository;
 import com.shiftapp.restaurants.RestaurantRepository;
 import com.shiftapp.users.UserRepository;
 import com.shiftapp.weeks.dto.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.*;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class WeekService {
@@ -23,17 +28,23 @@ public class WeekService {
     private final UserRepository          userRepository;
     private final PreferenceRepository    preferenceRepository;
     private final ShiftSlotRepository     slotRepository;
+    private final AuditLogService         auditLogService;
+    private final ObjectMapper            objectMapper;
 
     public WeekService(WeekStatusRepository weekStatusRepository,
                        RestaurantRepository restaurantRepository,
                        UserRepository userRepository,
                        PreferenceRepository preferenceRepository,
-                       ShiftSlotRepository slotRepository) {
+                       ShiftSlotRepository slotRepository,
+                       AuditLogService auditLogService,
+                       ObjectMapper objectMapper) {
         this.weekStatusRepository = weekStatusRepository;
         this.restaurantRepository = restaurantRepository;
         this.userRepository       = userRepository;
         this.preferenceRepository = preferenceRepository;
         this.slotRepository       = slotRepository;
+        this.auditLogService      = auditLogService;
+        this.objectMapper         = objectMapper;
     }
 
     // ===== helpers =====
@@ -434,6 +445,181 @@ public class WeekService {
             preferenceRepository.save(p);
         }
         return "SAVED";
+    }
+
+    // ===== MANAGER: save ONE day (с логированием реальных изменений) =====
+    @Transactional
+    public String managerSaveStaffDay(Long restaurantId, Long actorUserId, Long userId, ManagerStaffDaySaveRequest req) {
+        var user = userRepository.findById(userId).orElseThrow();
+        if (!user.getRestaurant().getId().equals(restaurantId))
+            throw new IllegalArgumentException("User belongs to another restaurant");
+
+        var restaurant = restaurantRepository.findById(restaurantId).orElseThrow();
+
+        LocalDate date = req.getDate();
+        Preference p = preferenceRepository.findByUser_IdAndWorkDate(userId, date)
+                .orElseGet(Preference::new);
+
+        // ── 変更前の状態をスナップショット（clear()する前に）──
+        boolean beforeExists = p.getId() != null;
+        boolean beforeOff = beforeExists ? p.isOff() : true;
+        List<SlotSnapshot> beforeSlots = beforeExists ? snapshotSlots(p.getSlots()) : List.of();
+
+        p.setUser(user);
+        p.setRestaurant(restaurant);
+        p.setWorkDate(date);
+
+        boolean hasSlots = req.getSlots() != null && !req.getSlots().isEmpty();
+
+        if (req.isOff() || !hasSlots) {
+            p.setOff(true);
+            p.getSlots().clear();
+        } else {
+            p.setOff(false);
+            p.getSlots().clear();
+
+            int order = 0;
+            for (var si : req.getSlots()) {
+                ShiftSlot slot = new ShiftSlot();
+                slot.setPreference(p);
+                slot.setSlotOrder(order++);
+                slot.setStartTime(si.getStartTime());
+                slot.setLast(si.isLast());
+                slot.setEndTime(si.getEndTime());
+                slot.setWorkplace(si.getWorkplace());
+                slot.setNextDay(si.isLast() ? false : si.isNextDay());
+                slot.setBreakOverrideMinutes(si.getBreakOverrideMinutes());
+                p.getSlots().add(slot);
+            }
+        }
+        preferenceRepository.save(p);
+
+        // ── 変更後の状態をスナップショットしてdiffを計算、実際に変わった場合のみログ ──
+        boolean afterOff = p.isOff();
+        List<SlotSnapshot> afterSlots = snapshotSlots(p.getSlots());
+
+        String summary = buildDiffSummary(beforeOff, beforeSlots, afterOff, afterSlots);
+        if (summary != null) {
+            var actor = userRepository.findById(actorUserId).orElseThrow();
+            String detailsJson = buildDiffJson(beforeOff, beforeSlots, afterOff, afterSlots);
+            auditLogService.log(
+                restaurantId, actorUserId, actor.getFullName(),
+                AuditAction.UPDATE, AuditEntityType.SHIFT, p.getId(),
+                userId, user.getFullName(),
+                date + " のシフト: " + summary,
+                detailsJson
+            );
+        }
+
+        return "SAVED";
+    }
+
+    // ===== シフト差分（diff）計算用ヘルパー =====
+
+    private record SlotSnapshot(LocalTime startTime, LocalTime endTime, boolean last,
+                                 String workplace, Integer breakOverrideMinutes) {}
+
+    private List<SlotSnapshot> snapshotSlots(List<ShiftSlot> slots) {
+        List<SlotSnapshot> out = new ArrayList<>();
+        for (ShiftSlot s : slots) {
+            out.add(new SlotSnapshot(s.getStartTime(), s.getEndTime(), s.isLast(),
+                    s.getWorkplace(), s.getBreakOverrideMinutes()));
+        }
+        return out;
+    }
+
+    private String fmtTimeRange(SlotSnapshot s) {
+        String start = s.startTime() != null ? s.startTime().toString().substring(0, 5) : "--:--";
+        String end   = s.last() ? "L" : (s.endTime() != null ? s.endTime().toString().substring(0, 5) : "--:--");
+        return start + "〜" + end;
+    }
+
+    private String describeSlot(SlotSnapshot s) {
+        String range = fmtTimeRange(s);
+        return s.workplace() != null ? range + " " + s.workplace() : range;
+    }
+
+    private String describeSlots(List<SlotSnapshot> slots) {
+        return slots.stream().map(this::describeSlot).collect(Collectors.joining("、"));
+    }
+
+    private String orDash(Object o) {
+        return o == null ? "なし" : o.toString();
+    }
+
+    // 実際に変わった箇所だけを人が読める文にする。変化なしなら null を返す（＝ログを書かない）
+    private String buildDiffSummary(boolean beforeOff, List<SlotSnapshot> before,
+                                     boolean afterOff, List<SlotSnapshot> after) {
+        if (beforeOff == afterOff && before.equals(after)) return null; // 変化なし
+
+        boolean beforeHasShift = !beforeOff && !before.isEmpty();
+        boolean afterHasShift  = !afterOff && !after.isEmpty();
+
+        if (!beforeHasShift && afterHasShift) {
+            return "追加（" + describeSlots(after) + "）";
+        }
+        if (beforeHasShift && !afterHasShift) {
+            return "削除（" + describeSlots(before) + "）";
+        }
+        if (!beforeHasShift && !afterHasShift) {
+            return null; // 両方とも公休/空 — 変化なし扱い
+        }
+
+        // 両方ともシフトあり — スロット単位で比較
+        List<String> changes = new ArrayList<>();
+        int max = Math.max(before.size(), after.size());
+        for (int i = 0; i < max; i++) {
+            SlotSnapshot b = i < before.size() ? before.get(i) : null;
+            SlotSnapshot a = i < after.size()  ? after.get(i)  : null;
+
+            if (b == null) { changes.add("スロット追加: " + describeSlot(a)); continue; }
+            if (a == null) { changes.add("スロット削除: " + describeSlot(b)); continue; }
+            if (b.equals(a)) continue;
+
+            List<String> fieldChanges = new ArrayList<>();
+            if (!Objects.equals(b.startTime(), a.startTime()) || !Objects.equals(b.endTime(), a.endTime()) || b.last() != a.last()) {
+                fieldChanges.add(fmtTimeRange(b) + " → " + fmtTimeRange(a));
+            }
+            if (!Objects.equals(b.workplace(), a.workplace())) {
+                fieldChanges.add("場所: " + orDash(b.workplace()) + " → " + orDash(a.workplace()));
+            }
+            if (!Objects.equals(b.breakOverrideMinutes(), a.breakOverrideMinutes())) {
+                fieldChanges.add("休憩: " + orDash(b.breakOverrideMinutes()) + "分 → " + orDash(a.breakOverrideMinutes()) + "分");
+            }
+            if (!fieldChanges.isEmpty()) {
+                changes.add((max > 1 ? "#" + (i + 1) + " " : "") + String.join("、", fieldChanges));
+            }
+        }
+        return changes.isEmpty() ? null : String.join(" / ", changes);
+    }
+
+    private String buildDiffJson(boolean beforeOff, List<SlotSnapshot> before,
+                                  boolean afterOff, List<SlotSnapshot> after) {
+        try {
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("before", slotsToMap(beforeOff, before));
+            root.put("after",  slotsToMap(afterOff, after));
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> slotsToMap(boolean off, List<SlotSnapshot> slots) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("off", off);
+        List<Map<String, Object>> slotList = new ArrayList<>();
+        for (SlotSnapshot s : slots) {
+            Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("startTime", s.startTime() != null ? s.startTime().toString() : null);
+            sm.put("endTime",   s.endTime()   != null ? s.endTime().toString()   : null);
+            sm.put("last", s.last());
+            sm.put("workplace", s.workplace());
+            sm.put("breakOverrideMinutes", s.breakOverrideMinutes());
+            slotList.add(sm);
+        }
+        m.put("slots", slotList);
+        return m;
     }
 
     // ===== private helpers =====

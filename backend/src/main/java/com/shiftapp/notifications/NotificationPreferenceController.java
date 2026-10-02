@@ -20,7 +20,7 @@ public class NotificationPreferenceController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('NOTIFICATION_VIEW')")
     public Map<String, Boolean> get(@AuthenticationPrincipal CustomUserDetails user) {
         Map<String, Boolean> result = new LinkedHashMap<>();
         for (NotificationType type : NotificationType.values()) {
@@ -33,7 +33,7 @@ public class NotificationPreferenceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    @PreAuthorize("hasAuthority('NOTIFICATION_EDIT')")
     public Map<String, Boolean> set(@AuthenticationPrincipal CustomUserDetails userDetails,
                                      @RequestBody Map<String, Boolean> body) {
         var user = userRepository.findById(userDetails.getUserId()).orElseThrow();

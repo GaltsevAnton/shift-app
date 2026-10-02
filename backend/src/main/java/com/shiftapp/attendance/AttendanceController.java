@@ -8,6 +8,7 @@ import com.shiftapp.kiosk.TimeRecordRepository;
 import com.shiftapp.kiosk.TimeRecordType;
 import com.shiftapp.users.UserRepository;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ public class AttendanceController {
     // Все записи ресторана за диапазон дат
     @Transactional(readOnly = true)
     @GetMapping
+    @PreAuthorize("hasAuthority('ATTENDANCE_VIEW')")
     public List<AttendanceRecordResponse> getRecords(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
@@ -48,6 +50,7 @@ public class AttendanceController {
 
     @Transactional
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('ATTENDANCE_EDIT')")
     public AttendanceRecordResponse editRecord(
         @PathVariable Long id,
         @RequestBody AttendanceEditRequest req
@@ -93,6 +96,7 @@ public class AttendanceController {
 
     @Transactional
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ATTENDANCE_DELETE')")
     public void deleteRecord(@PathVariable Long id) {
         var me = CurrentUser.require();
         TimeRecord record = timeRecordRepository.findById(id)

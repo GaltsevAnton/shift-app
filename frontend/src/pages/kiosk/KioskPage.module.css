@@ -711,7 +711,7 @@
 }
 .tHeaderLeft  { justify-self: start; display: flex; align-items: center; gap: 16px; }
 .tHeaderRight { justify-self: end;   display: flex; align-items: center; gap: 22px; }
-.tDate { font-size: 22px; color: rgba(255,255,255,0.9); font-weight: 600; }
+.tDate { font-size: 22px; color: rgba(255,255,255,0.9); font-weight: 600; white-space: nowrap; }
 .tTimeBox {
   display: inline-flex;
   align-items: baseline;
@@ -806,4 +806,16 @@
 }
 @media (min-width: 2560px) {
   .tGrid { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+}
+
+/* ═══ Планшет вертикально (узкий экран): шапка компактнее, чтобы дата/время не наезжали на название ═══ */
+@media (max-width: 1100px) {
+  .tHeader      { padding: 8px 14px; }
+  .tHeaderLeft  { gap: 10px; }
+  .tHeaderRight { gap: 16px; }
+  .tDate        { font-size: 18px; }
+  .tTime        { font-size: 30px; }
+  .tSec         { font-size: 18px; }
+  .tTitle       { font-size: 18px; }
+  .tWorking     { font-size: 16px; }
 }
