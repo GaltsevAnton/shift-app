@@ -1,409 +1,789 @@
-/* ─── Page wrapper ──────────────────────────────────────── */
-.page {
-  background: #f0f1f6;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 20px 12px;
-  font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, sans-serif;
-  box-sizing: border-box;
+/* ─── 希望シフト提出 (StaffMonth) ─────────────────────────────
+   Цвета: navy — шапка/текст, green — действия и 確定, orange — сроки/作成中
+   ──────────────────────────────────────────────────────────── */
+
+   .page {
+    --navy:      #12395e;
+    --navy-dark: #0d2c4a;
+    --green:     #1a8a5f;
+    --green-bg:  #e8f5ee;
+    --line:      #dbe5ef;
+    --text:      #16324d;
+    --muted:     #7f94a8;
+    --ease:      cubic-bezier(0.22, 0.8, 0.24, 1);
   
-}
-
-/* ─── Card ──────────────────────────────────────────────── */
-.card {
-  width: 100%;
-  max-width: 680px;
-  background: #fff;
-  border-radius: 18px;
-  border: 1px solid rgba(0,0,0,0.07);
-  box-shadow: 0 8px 32px rgba(20,20,40,0.08);
-  overflow: hidden;
-}
-
-/* ─── Header ────────────────────────────────────────────── */
-.header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 20px 14px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
-}
-
-.headerLeft {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.hotelName {
-  font-size: 12px;
-  font-weight: 600;
-  color: #94a3b8;
-  letter-spacing: 0.3px;
-}
-
-.branchName {
-  font-size: 20px;
-  font-weight: 800;
-  color: #0f172a;
-  letter-spacing: -0.3px;
-  line-height: 1.2;
-}
-
-.staffName {
-  margin-top: 4px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #475569;
-}
-
-.logoutBtn {
-  padding: 7px 16px;
-  border-radius: 50px;
-  border: 2px solid #f43f5e;
+  /* Каркас как у приложения: шапка и кнопка закреплены, прокручивается только середина.
+     position: fixed — самый надёжный вариант на iPhone (не зависит от адресной строки Safari) */
+     position: fixed;
+     inset: 0;
+     display: flex;
+     flex-direction: column;
+     overflow: hidden;
+     background: #f3f7fb;
+    color: var(--text);
+    font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+/* Внутри ManagerLayout (страница 希望シフト у менеджера) — обычный поток, без фиксации */
+.pageEmbedded {
+  position: static;
+  inset: auto;
+  overflow: visible;
   background: transparent;
-  color: #f43f5e;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
-.logoutBtn:hover { background: #f43f5e; color: #fff; }
-
-/* ─── Divider ───────────────────────────────────────────── */
-.divider {
-  height: 1px;
-  background: #f1f5f9;
+  
+  .icon18 { width: 18px; height: 18px; flex-shrink: 0; }
+  .icon24 { width: 24px; height: 24px; }
+  
+  /* ─── App bar ───────────────────────────────────────────── */
+  .appBar {
+    position: relative;
+    flex-shrink: 0;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    align-items: center;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    background: linear-gradient(180deg, var(--navy-dark) 0%, var(--navy) 100%);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(13, 44, 74, 0.18);
+  }
+  .appTitle { text-align: center; line-height: 1.25; min-width: 0; }
+  .appName  { font-size: 12px; font-weight: 700; letter-spacing: 0.5px; opacity: 0.8; }
+  .appUser  {
+    font-size: 18px; font-weight: 800; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .iconBtn {
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: #fff; cursor: pointer;
+    border-radius: 12px;
+  }
+  .iconBtn:active { background: rgba(255, 255, 255, 0.12); }
+  
+  .menuWrap { position: relative; }
+  .menu {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    min-width: 210px;
+    background: #fff;
+    color: var(--text);
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(13, 44, 74, 0.22);
+    padding: 6px;
+    animation: pop 0.16s var(--ease);
+  }
+  .menuUser {
+    font-size: 12px; color: var(--muted); font-weight: 600;
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid #eef2f6; margin-bottom: 4px;
+  }
+  .menuItem {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%;
+    padding: 11px 12px;
+    border: none; background: none; border-radius: 10px;
+    font-size: 14px; font-weight: 700; color: var(--text);
+    text-align: left; cursor: pointer; font-family: inherit;
+  }
+  .menuItem:active { background: #f1f5f9; }
+  .menuItemActive { background: var(--green-bg); color: var(--green); cursor: default; }
+  
+/* ─── Прокручиваемая середина ───────────────────────────── */
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
+.pageEmbedded .scroller { overflow: visible; flex: none; }
 
-/* ─── Body ──────────────────────────────────────────────── */
-.body {
-  padding: 20px 16px 24px;
+/* ─── Content ───────────────────────────────────────────── */
+  .content {
+    flex: 1;
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 16px 16px 0;
+    box-sizing: border-box;
+  }
+  
+  /* ─── Hero (заголовок + месяц) ──────────────────────────────
+     Стартовое состояние: крупный заголовок, подпись, большой список месяца под ними.
+     После выбора месяца (.heroCompact): заголовок уменьшается в левый верхний угол,
+     подпись исчезает, список уезжает вправо и уменьшается до высоты заголовка. */
+  .hero {
+    position: relative;
+    height: 148px;
+    margin-bottom: 18px;
+    transition: height 0.5s var(--ease), margin-bottom 0.5s var(--ease);
+  }
+  .heroCompact { height: 42px; margin-bottom: 14px; }
+  
+  .heroTitle {
+    position: absolute;
+    left: 0; top: 0;
+    display: flex; align-items: center; gap: 10px;
+    height: 42px;
+  }
+  .heroIcon {
+    width: 34px; height: 34px;
+    color: var(--navy);
+    flex-shrink: 0;
+    transition: width 0.5s var(--ease), height 0.5s var(--ease);
+  }
+  .heroText {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--text);
+    white-space: nowrap;
+    transition: font-size 0.5s var(--ease);
+  }
+  .heroCompact .heroIcon { width: 24px; height: 24px; }
+  .heroCompact .heroText { font-size: 17px; }
+  
+  .heroSub {
+    position: absolute;
+    left: 0; top: 48px;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #6f8fae;
+    white-space: nowrap;
+    transition: opacity 0.3s ease, transform 0.4s var(--ease);
+  }
+  .heroCompact .heroSub {
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+  }
+  
+  .monthPicker {
+    position: absolute;
+    top: 84px;
+    left: 0;
+    width: 210px;
+    z-index: 20;
+    transition: top 0.5s var(--ease), left 0.5s var(--ease), width 0.5s var(--ease);
+  }
+  .heroCompact .monthPicker {
+    top: 0;
+    left: calc(100% - 148px);
+    width: 148px;
+  }
+  
+  .monthBtn {
+    width: 100%;
+    height: 56px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 0 16px 0 20px;
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(18, 57, 94, 0.06);
+    cursor: pointer;
+    font-family: inherit;
+    transition: height 0.5s var(--ease), border-radius 0.5s var(--ease), padding 0.5s var(--ease);
+  }
+  .heroCompact .monthBtn {
+    height: 42px;
+    border-radius: 12px;
+    padding: 0 10px 0 14px;
+  }
+  .monthBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .monthValue {
+    font-size: 19px; font-weight: 800; color: var(--text);
+    white-space: nowrap;
+    transition: font-size 0.5s var(--ease);
+  }
+  .heroCompact .monthValue { font-size: 14px; }
+  .monthPlaceholder { color: var(--navy); letter-spacing: 1px; }
+  .monthChev {
+    width: 20px; height: 20px; color: var(--navy); flex-shrink: 0;
+    transition: transform 0.2s ease;
+  }
+  .monthChevOpen { transform: rotate(180deg); }
+  
+  .monthList {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 100%;
+    margin: 0; padding: 6px;
+    list-style: none;
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 14px 34px rgba(18, 57, 94, 0.16);
+    animation: pop 0.16s var(--ease);
+    box-sizing: border-box;
+  }
+  .heroCompact .monthList { left: auto; right: 0; min-width: 180px; }
+  .monthOption {
+    width: 100%;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px;
+    border: none; background: none; border-radius: 10px;
+    font-family: inherit; font-size: 16px; font-weight: 700; color: var(--text);
+    cursor: pointer; text-align: left;
+  }
+  .monthOption:active { background: #f1f5f9; }
+  .monthOptionActive { background: var(--green-bg); color: var(--text); }
+  .monthOptionActive svg { color: var(--green); }
+  
+  /* ─── Tabs ──────────────────────────────────────────────── */
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    position: relative;
+    z-index: 10;
+  }
+  .tab {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    min-height: 52px;
+    padding: 0 12px;
+    background: #eaf0f6;
+    border: 1.5px solid var(--line);
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    position: relative;
+  }
+  .tabActive {
+    background: #fff;
+    margin-bottom: -1.5px;          /* сливается с панелью */
+    padding-bottom: 1.5px;
+  }
+  .tabDisabled { cursor: default; opacity: 0.85; }
+  .tabLabel {
+    font-size: 14px; font-weight: 800; color: var(--text);
+    white-space: nowrap;
+  }
+  
+  .statusWrap { position: relative; display: inline-flex; }
+  .statusBtn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 4px;
+    background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: 12px; font-weight: 700;
+    white-space: nowrap;
+  }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9);
+  }
+  
+  /* Подсказка по статусу */
+  .tip {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 230px;
+    padding: 12px 14px;
+    background: var(--navy-dark);
+    color: #fff;
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(13, 44, 74, 0.3);
+    z-index: 30;
+    cursor: default;
+    animation: tipIn 0.16s var(--ease);
+  }
+  .tip::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    margin-left: -6px;
+    width: 12px; height: 12px;
+    background: var(--navy-dark);
+    transform: rotate(45deg);
+    border-radius: 2px;
+  }
+  .tipRight { left: auto; right: -8px; transform: none; animation-name: tipInRight; }
+  .tipRight::before { left: auto; right: 28px; margin-left: 0; }
+  .tipTitle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 800; margin-bottom: 4px;
+  }
+  .tipDot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,0.6); }
+  .tipText { font-size: 13px; line-height: 1.5; opacity: 0.92; }
+  
+  /* ─── Panel ─────────────────────────────────────────────── */
+  .panel {
+    position: relative;
+    min-height: 380px;
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 0 0 16px 16px;
+    box-shadow: 0 6px 20px rgba(18, 57, 94, 0.05);
+    overflow: hidden;
+  }
+  .panelBody {
+    padding: 12px;
+    animation: fadeUp 0.35s var(--ease);
+  }
+  
+  .empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    min-height: 380px;
+    color: #8aa2b8;
+    font-size: 15px; font-weight: 700;
+  }
+  .emptyIcon { width: 64px; height: 64px; color: #a9bccd; }
+  
+  .skeletons { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+  .skeleton {
+    height: 46px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, #eef3f8 25%, #e2eaf2 50%, #eef3f8 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.3s infinite;
+  }
+  
+  .error {
+    background: #fff1f2; color: #e11d48;
+    border: 1px solid #fecdd3; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 10px;
+    font-size: 13px; font-weight: 700;
+  }
+  
+  /* Баннеры */
+  .banner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    font-size: 14px; font-weight: 800;
+    line-height: 1.4;
+  }
+  .bannerWarn  { background: #fff8ec; color: #e08a00; }
+  .bannerDraft { background: #fff3e2; color: #b86b00; }
+  .bannerOk    { background: var(--green-bg); color: #157347; align-items: flex-start; }
+  .bannerOkIcon {
+    width: 22px; height: 22px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--green); color: #fff;
+  }
+  .bannerOkIcon svg { width: 14px; height: 14px; }
+  .bannerSub { font-size: 12px; font-weight: 600; color: #4a7c62; margin-top: 2px; }
+  
+  /* ─── Быстрое заполнение ────────────────────────────────── */
+  .fill { margin-bottom: 12px; }
+  .rangePill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px;
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 16px;
+    margin-bottom: 10px;
+  }
+  .rangePillDisabled { background: #f6f8fa; }
+  .rangeClock { width: 26px; height: 26px; color: var(--navy); margin: 0 4px 0 6px; flex-shrink: 0; }
+  .fillBtns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .fillBtn {
+    height: 40px;
+    border-radius: 999px;
+    border: 1.5px solid #cfdce8;
+    background: #fff;
+    color: var(--text);
+    font-family: inherit; font-size: 14px; font-weight: 800;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  }
+  .fillBtn:active:not(:disabled) { transform: scale(0.97); }
+  .fillBtnActive { background: var(--green); border-color: var(--green); color: #fff; }
+  .fillBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+  
+  /* ─── Поле времени ──────────────────────────────────────── */
+  .timeBtn {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    padding: 0 8px;
+    overflow: hidden;              /* содержимое никогда не вылезает за поле */
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--text);
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .timeBtn:active:not(:disabled) { border-color: var(--green); }
+  .timeBtn:disabled { background: #f6f8fa; cursor: not-allowed; opacity: 0.55; }
+  .timeBtnLg { height: 44px; border-color: transparent; background: #f4f8fb; border-radius: 12px; padding: 0 12px; }
+  .timeBtnValue {
+    flex: 1;
+    text-align: center;
+    font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .timeBtnLg .timeBtnValue { font-size: 18px; font-weight: 800; }
+  .timeBtnEmpty .timeBtnValue { color: #a9bccd; }
+  .timeBtnClock { width: 16px; height: 16px; color: #6f8fae; flex-shrink: 0; }
+  .timeBtnChev  { width: 14px; height: 14px; color: #8aa2b8; flex-shrink: 0; }
+  .timeBtnLg .timeBtnChev { width: 18px; height: 18px; color: var(--navy); }
+  
+  .tilde { color: #8aa2b8; font-weight: 700; flex-shrink: 0; }
+  
+  .lastBadge {
+    flex: 1;
+    height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: #f4f8fb;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    color: #7f94a8;
+    font-size: 15px; font-weight: 900; letter-spacing: 1px;
+  }
+  
+  /* ─── Таблица дней ──────────────────────────────────────── */
+  .table {
+    border: 1.5px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .thead,
+  .row {
+    display: grid;
+    grid-template-columns: minmax(84px, 0.9fr) 40px minmax(0, 2fr);
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+  }
+  .thead {
+    height: 40px;
+    background: #f1f6fa;
+    font-size: 13px; font-weight: 700; color: #6f8fae;
+  }
+  .thCenter { text-align: center; }
+  .row {
+    min-height: 52px;
+    padding-top: 6px; padding-bottom: 6px;
+    border-top: 1px solid #edf2f7;
+    transition: background 0.15s ease;
+  }
+  .rowOff { background: #fafcfd; }
+  .rowError {
+    background: #fff1f2;
+    box-shadow: inset 3px 0 0 #e5484d;
+    animation: shake 0.35s ease;
+  }
+  .rowError .timeBtn { border-color: #f5a3a6; }
+
+  /* Подсказка под строкой с ошибкой — в стиле подсказок статусов */
+  .rowTip {
+    grid-column: 1 / -1;               /* на всю ширину строки, под датой и временем */
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    margin: 8px 0 2px;
+    padding: 10px 12px;
+    background: var(--navy-dark);
+    color: #fff;
+    border-radius: 12px;
+    box-shadow: 0 10px 24px rgba(13, 44, 74, 0.25);
+    font-size: 13px; font-weight: 700; line-height: 1.5;
+    animation: tipInRight 0.18s var(--ease);
+  }
+  .rowTip::before {                     /* стрелка вверх — на поля времени */
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: calc(50% + 24px);
+    width: 12px; height: 12px;
+    background: var(--navy-dark);
+    transform: rotate(45deg);
+    border-radius: 2px;
+  }
+  .rowTipIcon { width: 18px; height: 18px; flex-shrink: 0; }
+  
+  .date {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .dateWeekend { color: #e5484d; }
+  
+  .offCell { display: flex; justify-content: center; }
+  .offBtn {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid #7fa6c6;
+    background: #fff;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  }
+  .offBtn svg { width: 16px; height: 16px; }
+  .offBtn:active:not(:disabled) { transform: scale(0.9); }
+  .offBtnOn { background: var(--green); border-color: var(--green); }
+  .offBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+  
+  .times { min-width: 0; }
+  .timeRow { display: flex; align-items: center; gap: 4px; }
+  /* В строках дней стрелка не нужна — всё поле нажимается, а места на телефоне мало */
+  .timeRow .timeBtnChev { display: none; }
+  .timeRow .timeBtnValue { flex: 0 1 auto; }
+  .warn { font-size: 11px; font-weight: 700; color: #e5484d; margin-top: 3px; }
+  .note { font-size: 11px; font-weight: 600; color: #8aa2b8; margin-top: 3px; }
+  
+  /* ─── Сообщение «保存しました» ───────────────────────────── */
+  .saved {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.94);
+    animation: fadeIn 0.2s ease;
+    cursor: pointer;
+  }
+  .savedCheck {
+    width: 72px; height: 72px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: var(--green);
+    color: #fff;
+    box-shadow: 0 10px 26px rgba(26, 138, 95, 0.35);
+    margin-bottom: 8px;
+    animation: popIn 0.45s var(--ease);
+  }
+  .savedCheck svg { width: 38px; height: 38px; }
+  .savedTitle { font-size: 22px; font-weight: 900; color: var(--text); }
+  .savedText  { font-size: 14px; font-weight: 600; color: #4f7395; }
+  
+  /* ─── Кнопка сохранения (прилипает к низу экрана) ───────── */
+  .saveBar {
+    position: relative;
+    flex-shrink: 0;
+    z-index: 15;
+    width: 100%;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    background: #f3f7fb;
+  }
+  /* мягкий переход над кнопкой, чтобы строки таблицы не обрезались резко */
+  .saveBar::before {
+    content: "";
+    position: absolute;
+    left: 0; right: 0;
+    top: -24px;
+    height: 24px;
+    background: linear-gradient(180deg, rgba(243, 247, 251, 0) 0%, #f3f7fb 100%);
+    pointer-events: none;
+  }
+  .saveBar .saveBtn {
+    display: block;
+    max-width: 528px;
+    margin: 0 auto;
+  }
+  /* У менеджера — как раньше, прилипает к низу его области прокрутки */
+  .pageEmbedded .saveBar { position: sticky; bottom: 0; background: none; }
+  .pageEmbedded .saveBar::before { display: none; }
+  .saveBtn {
+    width: 100%;
+    height: 54px;
+    border: none;
+    border-radius: 16px;
+    background: var(--green);
+    color: #fff;
+    font-family: inherit; font-size: 18px; font-weight: 800; letter-spacing: 1px;
+    box-shadow: 0 8px 20px rgba(26, 138, 95, 0.28);
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+  }
+  .saveBtn:active:not(:disabled) { transform: scale(0.985); }
+  .saveBtn:disabled { opacity: 0.5; box-shadow: none; cursor: not-allowed; }
+  
+  /* ─── Шторка выбора времени ─────────────────────────────── */
+  .sheetOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(13, 44, 74, 0.45);
+    animation: fadeIn 0.2s ease;
+  }
+  .sheetOverlayOut { animation: fadeOut 0.2s ease forwards; }
+  .sheet {
+    width: 100%;
+    max-width: 560px;
+    background: #fff;
+    border-radius: 22px 22px 0 0;
+    padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    animation: slideUp 0.28s var(--ease);
+  }
+  .sheetOut { animation: slideDown 0.2s ease forwards; }
+  .sheetHead {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .sheetTitle { font-size: 18px; font-weight: 900; color: var(--text); }
+  .sheetX {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: none; color: #8aa2b8; cursor: pointer; border-radius: 10px;
+  }
+  .sheetX svg { width: 22px; height: 22px; }
+  
+  .wheelWrap {
+    position: relative;
+    height: 220px;                    /* 5 × ITEM_H */
+    border: 1px solid #eef2f6;
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .wheelBand {
+    position: absolute;
+    left: 8px; right: 8px;
+    top: 88px;                        /* 2 × ITEM_H */
+    height: 44px;
+    border-radius: 10px;
+    background: #eef3f8;
+    pointer-events: none;
+  }
+  .wheel {
+    position: relative;
+    height: 100%;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 28%, #000 72%, transparent 100%);
+            mask-image: linear-gradient(180deg, transparent 0%, #000 28%, #000 72%, transparent 100%);
+  }
+  .wheel::-webkit-scrollbar { display: none; }
+  .wheelItem {
+    height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    scroll-snap-align: center;
+    font-size: 18px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #9fb2c4;
+    cursor: pointer;
+    transition: color 0.12s ease, font-size 0.12s ease;
+  }
+  .wheelItem[data-dist="0"] { font-size: 24px; font-weight: 900; color: var(--text); }
+  .wheelItem[data-dist="1"] { color: #8aa2b8; }
+  .wheelItem[data-dist="2"] { color: #b6c5d3; }
+  .wheelItem[data-dist="3"] { color: #cfdae4; }
+  
+  .sheetBtns {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 10px;
+  }
+  .sheetCancel,
+  .sheetOk {
+    height: 50px;
+    border-radius: 14px;
+    font-family: inherit; font-size: 16px; font-weight: 800;
+    cursor: pointer;
+  }
+  .sheetCancel { background: #fff; border: 1.5px solid var(--line); color: var(--text); }
+  .sheetOk     { background: var(--green); border: none; color: #fff; }
+
+  /* ─── Окно «変更が保存されていません» ────────────────────── */
+.confirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background: rgba(13, 44, 74, 0.45);
+  animation: fadeIn 0.2s ease;
 }
-
-.titleArea { margin-bottom: 16px; }
-
-.title {
-  font-size: 20px;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0 0 4px;
-  letter-spacing: -0.3px;
-}
-
-.subtitle {
-  font-size: 13px;
-  color: #94a3b8;
-  margin: 0;
-  font-weight: 500;
-}
-
-/* ─── Month selector ────────────────────────────────────── */
-.monthRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.monthLabel {
-  font-size: 14px;
-  font-weight: 600;
-  color: #475569;
-  white-space: nowrap;
-}
-
-.monthSelect {
-  appearance: none;
-  -webkit-appearance: none;
-  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 12px center;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 8px 36px 8px 14px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.12s;
-  min-width: 150px;
-}
-.monthSelect:focus { border-color: #6366f1; }
-.monthSelect:disabled { opacity: 0.5; }
-
-/* ─── Error ─────────────────────────────────────────────── */
-.error {
-  background: #fff5f5;
-  color: #f43f5e;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
-  margin-bottom: 16px;
-}
-
-/* ─── Skeletons ─────────────────────────────────────────── */
-.skeletons { display: flex; flex-direction: column; gap: 10px; }
-.skeleton {
-  height: 56px;
-  background: linear-gradient(90deg, #f1f5f9 25%, #e8edf2 50%, #f1f5f9 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
-  border-radius: 10px;
-}
-@keyframes shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* ─── Table ─────────────────────────────────────────────── */
-.tableWrap {
-  border-radius: 12px;
-  border: 1px solid #f1f5f9;
-  overflow: hidden;
-  transition: opacity 0.15s ease;
-}
-.refreshing { opacity: 0.5; }
-
-.table {
+.confirmCard {
+  position: relative;
   width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.th {
-  background: #f8fafc;
-  padding: 10px 12px;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-/* Ширина колонок */
-.table th:nth-child(1),
-.table td:nth-child(1) { width: 45%; }
-
-.table th:nth-child(2),
-.table td:nth-child(2) { width: 30%; }
-
-.table th:nth-child(3),
-.table td:nth-child(3) { width: 25%; }
-
-.tr { transition: background 0.08s; }
-.tr:hover { background: #f8fafc; }
-.tr:last-child .td { border-bottom: none; }
-
-.td {
-  padding: 14px 12px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: middle;
-}
-
-.period {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1e293b;
-  font-family: 'JetBrains Mono', monospace;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.periodStart {
-  display: block;
-  font-size: 14px;
-  white-space: nowrap;
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  color: #1e293b;
-  letter-spacing: -0.5px;
-}
-.periodEnd {
-  display: block;
-  font-size: 14px;
-  color: #64748b;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: -0.5px;
-}
-
-.tilde { color: #94a3b8; margin: 0 2px; }
-
-/* ─── Status badge ──────────────────────────────────────── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 700;
-  border: 1.5px solid transparent;
-  white-space: nowrap;
-}
-.badge_receiving { background: #F0F0F0; color: #555; border-color: #ddd; }
-.badge_drafting  { background: #F6EAB3; color: #7a6000; border-color: #e0cc80; }
-.badge_confirmed { background: #85A175; color: #fff; border-color: #6a8860; }
-
-/* ─── Open button ───────────────────────────────────────── */
-.openBtn {
-  background: #0f172a;
-  color: #fff;
-  border: none;
-  padding: 8px 18px;
-  border-radius: 50px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.12s;
-  white-space: nowrap;
-  width: 100%;
-}
-.openBtn:hover { background: #1e293b; }
-
-/* ─── Empty ─────────────────────────────────────────────── */
-.empty {
+  max-width: 340px;
+  padding: 26px 18px 18px;
+  background: #fff;
+  border-radius: 22px;
+  box-shadow: 0 20px 50px rgba(13, 44, 74, 0.3);
   text-align: center;
-  padding: 32px;
-  color: #94a3b8;
-  font-size: 14px;
+  animation: popCard 0.3s var(--ease);
 }
-
-/* ─── Mobile ────────────────────────────────────────────── */
-@media (max-width: 480px) {
-  .page { padding: 12px 8px; }
-  .header { padding: 14px 14px 12px; }
-  .body { padding: 16px 12px 20px; }
-  .branchName { font-size: 18px; }
-  .title { font-size: 18px; }
-  .th { padding: 8px 10px; font-size: 11px; }
-  .td { padding: 12px 10px; }
-  .period { font-size: 12px; }
-  .openBtn { padding: 8px 12px; font-size: 12px; }
+.confirmX {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none; color: #8aa2b8; cursor: pointer; border-radius: 10px;
 }
-
-
-/* ─── Month view additions ──────────────────────────────── */
-.titleRow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 16px;
+.confirmX svg { width: 20px; height: 20px; }
+.confirmIcon {
+  width: 64px; height: 64px;
+  margin: 0 auto 12px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: #fff4e0;
 }
-
-.loading {
-  text-align: center;
-  padding: 40px;
-  color: #94a3b8;
-  font-size: 14px;
-}
-
-.locked {
-  font-size: 12px;
-  color: #f43f5e;
-  font-weight: 600;
-}
-
-.infoHint {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
-  color: #1e40af;
-  margin-bottom: 14px;
-}
-
-.infoWarning {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
-  color: #c2410c;
-  margin-top: 14px;
-}
-
-/* ─── Day row colors ─────────────────────────────────────── */
-.saturday { background: #f0f7ff; }
-.sunday   { background: #fff5f5; }
-
-.tdDate { font-size: 13px; font-weight: 600; color: #1e293b; }
-.wkndDate { font-weight: 700; }
-.saturday .wkndDate { color: #2563eb; }
-.sunday   .wkndDate { color: #dc2626; }
-
-/* ─── Time row ───────────────────────────────────────────── */
-.timeRow {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.timeSelect {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 13px;
-  color: #0f172a;
-  background: #f8fafc;
-  cursor: pointer;
-  outline: none;
-  min-width: 72px;
-}
-.timeSelect:disabled { opacity: 0.45; cursor: not-allowed; }
-.timeSelect:focus { border-color: #6366f1; background: #fff; }
-
-.duration { font-size: 11px; margin-left: 4px; }
-.durationOk { color: #16a34a; font-weight: 600; }
-.warn { color: #dc2626; font-weight: 600; font-size: 11px; }
-
-.checkbox {
-  width: 18px;
-  height: 18px;
-  accent-color: #6366f1;
-  cursor: pointer;
-}
-.checkbox:disabled { cursor: not-allowed; }
-
-/* ─── Bottom bar ─────────────────────────────────────────── */
-.bottomBar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.confirmIcon svg { width: 34px; height: 34px; }
+.confirmTitle { font-size: 18px; font-weight: 900; color: var(--text); margin-bottom: 6px; }
+.confirmText  { font-size: 14px; font-weight: 600; color: #4f7395; line-height: 1.6; }
+.confirmBtns {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
   margin-top: 20px;
 }
+.confirmBtns button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.saveBtn {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  border: none;
-  padding: 11px 32px;
-  border-radius: 50px;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.12s;
-}
-.saveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
-.saveBtn:hover:not(:disabled) { opacity: 0.9; }
-
-.toast {
-  font-size: 13px;
-  font-weight: 700;
-  color: #16a34a;
-}
-
-/* ─── Mobile additions ───────────────────────────────────── */
-@media (max-width: 480px) {
-  .timeSelect { min-width: 60px; font-size: 12px; padding: 5px 6px; }
-  .tdDate { font-size: 12px; }
-}
+@keyframes popCard { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+  
+  /* ─── Animations ────────────────────────────────────────── */
+  @keyframes fadeIn    { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fadeOut   { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes fadeUp    { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes slideUp   { from { transform: translateY(100%); } to { transform: none; } }
+  @keyframes slideDown { from { transform: none; } to { transform: translateY(100%); } }
+  @keyframes pop       { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @keyframes popIn     { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+  @keyframes tipIn      { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  @keyframes tipInRight { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes shimmer   { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  @keyframes shake {
+    0%, 100% { transform: none; }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
+  
+  /* ─── Узкие экраны ──────────────────────────────────────── */
+  @media (max-width: 370px) {
+    .content { padding: 14px 12px 0; }
+    .heroText { font-size: 21px; }
+    .heroCompact .heroText { font-size: 15px; }
+    .heroCompact .monthPicker { left: calc(100% - 136px); width: 136px; }
+    .heroCompact .monthValue { font-size: 13px; }
+    .tab { padding: 0 8px; }
+    .tabLabel { font-size: 12px; }
+    .statusBtn { font-size: 11px; }
+    .thead, .row { padding: 0 8px; grid-template-columns: minmax(76px, 0.9fr) 34px minmax(0, 2fr); }
+    .row { padding-top: 6px; padding-bottom: 6px; }
+    .date { font-size: 13px; }
+    .timeBtn { padding: 0 6px; }
+    .timeBtnClock { display: none; }
+    .fillBtn { font-size: 13px; }
+  }
+  
+  @media (prefers-reduced-motion: reduce) {
+    .page *, .page *::before { transition: none !important; animation: none !important; }
+  }

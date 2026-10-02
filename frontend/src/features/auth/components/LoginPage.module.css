@@ -1,185 +1,252 @@
-.page {
-  background: #f0f1f6;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 20px 12px;
-  font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, sans-serif;
-  box-sizing: border-box;
-}
+/* ─── Страница входа ──────────────────────────────────────
+   Цвета общие со страницей 希望シフト提出: navy — текст, green — кнопка
+   ──────────────────────────────────────────────────────────── */
+
+   .page {
+    --navy:  #12395e;
+    --text:  #16324d;
+    --green: #2a7d63;
+    --line:  #dbe5ef;
+    --ease:  cubic-bezier(0.22, 0.8, 0.24, 1);
   
-  .card {
-    width: 100%;
-    max-width: 420px;
-    background: #fff;
-    border-radius: 14px;
-    border: 1px solid rgba(0,0,0,0.06);
-    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.06);
+    position: relative;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    padding: calc(56px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom));
+    background: #f3f7fa;
+    font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, sans-serif;
+    color: var(--text);
+    box-sizing: border-box;
     overflow: hidden;
   }
   
-  .header {
-    padding: 16px 18px;
-    border-bottom: 1px solid rgba(0,0,0,0.06);
-    background: linear-gradient(180deg, #ffffff 0%, #fbfbff 100%);
+  /* ─── Декоративные круги ────────────────────────────────── */
+  .decoTop,
+  .decoBottom {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .decoTop {
+    width: 300px; height: 300px;
+    top: -170px; left: -160px;
+    background: radial-gradient(circle, rgba(42, 125, 99, 0.10) 0 58%, rgba(42, 125, 99, 0.05) 58% 100%);
+  }
+  .decoBottom {
+    width: 360px; height: 360px;
+    right: -170px; bottom: -150px;
+    background: radial-gradient(circle, rgba(42, 125, 99, 0.10) 0 52%, rgba(42, 125, 99, 0.05) 52% 100%);
   }
   
-  .title {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 850;
-  }
-  
-  .sub {
-    margin: 6px 0 0;
-    font-size: 12.5px;
-    color: rgba(0,0,0,0.55);
-  }
-  
-  .body {
-    padding: 18px;
-  }
-  
-  .tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  
-  .tab {
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.12);
-    background: #fff;
-    cursor: pointer;
-    font-size: 13.5px;
-    font-weight: 800;
-    transition: background .15s ease, border-color .15s ease, transform .05s ease;
-  }
-  
-  .tab:hover {
-    background: rgba(0,0,0,0.04);
-    border-color: rgba(0,0,0,0.18);
-  }
-  
-  .tab:active {
-    transform: translateY(1px);
-  }
-  
-  .tabActive {
-    background: rgba(17,24,39,0.06);
-    border-color: rgba(17,24,39,0.22);
-  }
-  
-  .form {
-    display: grid;
-    gap: 10px;
-  }
-  
-  .fieldLabel {
-    display: grid;
-    gap: 6px;
-    font-size: 13px;
-    color: rgba(0,0,0,0.75);
-    font-weight: 750;
-  }
-  
-  .input {
+  .inner {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.12);
-    background: #fff;
-    font-size: 16px;
-    outline: none;
-    color: #000;
+    max-width: 420px;
+    animation: fadeUp 0.5s var(--ease);
   }
   
-  .input:focus {
-    border-color: rgba(17,24,39,0.35);
-    box-shadow: 0 0 0 4px rgba(17,24,39,0.08);
-  }
-  
-  .btn {
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.12);
-    background: #111827;
-    color: #fff;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 850;
-    transition: transform .05s ease, opacity .15s ease;
-  }
-  
-  .btn:active {
-    transform: translateY(1px);
-  }
-  
-  .btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  
-  .err {
-    margin-top: 2px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(220,38,38,0.25);
-    background: rgba(220,38,38,0.06);
-    color: #b91c1c;
-    font-size: 13.5px;
-    font-weight: 650;
-  }
-  
-  .footer {
-    margin-top: 12px;
-    font-size: 12px;
-    color: rgba(0,0,0,0.55);
-  }
+  /* ─── Логотип ───────────────────────────────────────────── */
   .brand {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 14px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid rgba(0,0,0,0.06);
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 34px;
   }
-  
   .brandLogo {
-    width: 40px;
-    height: 34px;
+    width: 78px;
+    height: 66px;
     object-fit: contain;
-    border-radius: 6px;
     flex-shrink: 0;
   }
-  
   .brandTexts {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
   }
-  
   .brandHotel {
-    font-size: 11px;
-    font-weight: 600;
-    color: #94a3b8;
-    letter-spacing: 0.3px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6f8196;
+    letter-spacing: 1px;
   }
-  
   .brandApp {
-    font-size: 20px;
+    font-size: 34px;
     font-weight: 900;
-    color: #1e293b;
+    color: var(--text);
     letter-spacing: -0.5px;
-    line-height: 1.2;
-  }
-  /* мобилка */
-  @media (max-width: 520px) {
-    .page {
-      padding: 14px;
-      align-items: flex-start;
-    }
+    line-height: 1.1;
   }
   
+  /* ─── Карточка ──────────────────────────────────────────── */
+  .card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 28px 24px 26px;
+    box-shadow: 0 10px 34px rgba(18, 57, 94, 0.08);
+  }
+  .title {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 900;
+    color: var(--text);
+  }
+  .sub {
+    margin: 8px 0 22px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #5f7387;
+  }
+  
+  /* ─── Форма ─────────────────────────────────────────────── */
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .label {
+    font-size: 14px;
+    font-weight: 800;
+    color: #3f556b;
+  }
+  
+  .inputWrap { position: relative; }
+  .inputIcon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px; height: 22px;
+    color: #6f8196;
+    pointer-events: none;
+  }
+  .inputIcon svg { width: 100%; height: 100%; display: block; }
+  
+  .input {
+    width: 100%;
+    height: 52px;
+    padding: 0 14px 0 50px;
+    border: 1.5px solid var(--line);
+    border-radius: 14px;
+    background: #f4f7fa;
+    font-family: inherit;
+    font-size: 16px;               /* не меньше 16px — iPhone не увеличивает страницу */
+    color: var(--text);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .input:focus {
+    background: #fff;
+    border-color: var(--green);
+    box-shadow: 0 0 0 4px rgba(42, 125, 99, 0.12);
+  }
+  .inputWithEye { padding-right: 52px; }
+  
+  .eyeBtn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 42px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #6f8196;
+    cursor: pointer;
+    border-radius: 10px;
+  }
+  .eyeBtn svg { width: 22px; height: 22px; }
+  .eyeBtn:active { background: rgba(18, 57, 94, 0.06); }
+  
+/* ─── Ошибка — всплывающая подсказка (как на странице 希望シフト提出) ─── */
+.inputError,
+.inputError:focus {
+  border-color: #f5a3a6;
+  background: #fff7f7;
+  box-shadow: none;
+}
+
+.tip {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #0d2c4a;
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(13, 44, 74, 0.25);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  animation: tipIn 0.2s var(--ease);
+}
+.tip::before {                     /* стрелка вверх — на поле */
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 28px;
+  width: 12px; height: 12px;
+  background: #0d2c4a;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+.tipIcon { width: 20px; height: 20px; flex-shrink: 0; display: flex; }
+.tipIcon svg { width: 100%; height: 100%; }
+  
+  /* ─── Кнопка ────────────────────────────────────────────── */
+  .btn {
+    margin-top: 6px;
+    height: 54px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    border: none;
+    border-radius: 14px;
+    background: var(--green);
+    color: #fff;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(42, 125, 99, 0.25);
+    transition: opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  .btn:active:not(:disabled) { transform: scale(0.985); }
+  .btn:disabled { opacity: 0.55; box-shadow: none; cursor: not-allowed; }
+  .btnArrow { width: 20px; height: 20px; display: flex; }
+  .btnArrow svg { width: 100%; height: 100%; }
+  
+  .spinner {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 2.5px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #fff;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  /* ─── Animations ────────────────────────────────────────── */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes spin   { to { transform: rotate(360deg); } }
+  @keyframes tipIn  { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  
+  /* ─── Узкие экраны ──────────────────────────────────────── */
+  @media (max-width: 370px) {
+    .page { padding-left: 14px; padding-right: 14px; }
+    .brandLogo { width: 64px; height: 54px; }
+    .brandApp  { font-size: 28px; }
+    .card { padding: 24px 18px 22px; }
+    .title { font-size: 23px; }
+  }
+  
+  /* ─── Компьютер: по центру экрана по вертикали ──────────── */
+  @media (min-width: 768px) and (min-height: 700px) {
+    .page { align-items: center; padding-top: 32px; }
+  }
+  
+  @media (prefers-reduced-motion: reduce) {
+    .inner, .tip, .spinner { animation: none; }
+  }

@@ -1,28 +1,30 @@
 import styles from "../../features/auth/components/LoginPage.module.css";
 import LoginForm from "../../features/auth/components/LoginForm";
 
-import AppLayout from "../../app/layouts/AppLayout";
-
 export default function LoginPage({ onLoggedIn }) {
   return (
     <div className={styles.page}>
-      <div className={styles.card}>
-        <div className={styles.header}>
-          <div className={styles.brand}>
-            <img src="/logo.png" alt="logo" className={styles.brandLogo} />
-            <div className={styles.brandTexts}>
-              <span className={styles.brandHotel}>ホテル・ヘリテイジ</span>
-              <span className={styles.brandApp}>HannoSHIFT</span>
-            </div>
+      {/* Декоративные круги фона */}
+      <span className={styles.decoTop} aria-hidden="true" />
+      <span className={styles.decoBottom} aria-hidden="true" />
+
+      <main className={styles.inner}>
+        {/* Логотип */}
+        <div className={styles.brand}>
+          <img src="/logo.png" alt="" className={styles.brandLogo} />
+          <div className={styles.brandTexts}>
+            <span className={styles.brandHotel}>ホテル・ヘリテイジ</span>
+            <span className={styles.brandApp}>HannoSHIFT</span>
           </div>
-          <h2 className={styles.title}>Login</h2>
-          <p className={styles.sub}>ログインIDとパスワードを入力してください</p>
         </div>
 
-        <div className={styles.body}>
+        {/* Карточка входа */}
+        <section className={styles.card}>
+          <h1 className={styles.title}>ログイン</h1>
+          <p className={styles.sub}>ログインIDとパスワードを入力してください</p>
           <LoginForm onLoggedIn={onLoggedIn} />
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }

@@ -1,13 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../shared/api/api";
-import styles from "./StaffWeek.module.css";
+import styles from "./StaffMonth.module.css";
 
 /* ─── constants ─────────────────────────────────────────── */
-const HOTEL_NAME  = "ホテル・ヘリテイジ";
-const BRANCH_NAME = "飯能 sta.";
 const JP_WD = ["日", "月", "火", "水", "木", "金", "土"];
 
+// Статусы половин месяца: цвет точки, текст и подсказка (всплывающее окно по тапу)
+const STATUS_INFO = {
+  RECEIVING: { label: "受付中", dot: "#9aaabb", color: "#64748b", text: "希望シフトを提出・変更できます" },
+  DRAFTING:  { label: "作成中", dot: "#f5a524", color: "#e08a00", text: "マネージャーがシフトを作成中です。変更はできません" },
+  CONFIRMED: { label: "確定",   dot: "#1a8a5f", color: "#1a8a5f", text: "シフトが確定しました。変更はできません" },
+};
+
+const DEADLINE = {
+  1: "前月20日までに提出してください",
+  2: "当月5日までに提出してください",
+};
+
+const ITEM_H = 44; // высота строки в барабане выбора времени
+
 /* ─── helpers ───────────────────────────────────────────── */
+const cx = (...a) => a.filter(Boolean).join(" ");
 function pad2(n) { return String(n).padStart(2, "0"); }
 function formatYm(y, m) { return `${y}-${pad2(m)}`; }
 function addMonths(ym, delta) {
@@ -27,18 +40,17 @@ function monthLabelJa(ym) {
   const [y, m] = ym.split("-").map(Number);
   return `${y}年${pad2(m)}月`;
 }
-function dowJa(dateStr) {
-  return JP_WD[new Date(dateStr + "T00:00:00").getDay()];
+function weekdayOf(dateStr) {
+  return new Date(dateStr + "T00:00:00").getDay();
 }
-function isWeekend(dateStr) {
-  const d = new Date(dateStr + "T00:00:00").getDay();
-  return d === 0 || d === 6;
+function halfOf(dateStr) {
+  return new Date(dateStr + "T00:00:00").getDate() <= 15 ? 1 : 2;
 }
-function jpStatus(s) {
-  if (s === "RECEIVING") return "受付中";
-  if (s === "DRAFTING")  return "作成中";
-  if (s === "CONFIRMED") return "確定";
-  return s;
+function fmtDay(dateStr) {
+  return `${dateStr.slice(5).replace("-", "/")}（${JP_WD[weekdayOf(dateStr)]}）`;
+}
+function normTime(t) {
+  return t ? String(t).slice(0, 5) : "";
 }
 function calcDuration(start, end) {
   if (!start || !end) return 0;
@@ -58,166 +70,411 @@ function buildTimeOptions() {
   return out;
 }
 const TIME_OPTIONS = buildTimeOptions();
-function getName() {
-  return localStorage.getItem("staffName") || "";
+
+// Снимок для отслеживания несохранённых изменений
+function serialize(days) {
+  return JSON.stringify(days.map(d => [d.date, !!d.off, d.startTime, d.endTime]));
 }
 
-/* ─── Component ─────────────────────────────────────────── */
-export default function StaffMonth({ onLogout }) {
+/* ─── icons ─────────────────────────────────────────────── */
+function CalendarIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="8" cy="14" r="1.1" fill="currentColor" /><circle cx="12" cy="14" r="1.1" fill="currentColor" />
+      <circle cx="16" cy="14" r="1.1" fill="currentColor" /><circle cx="8" cy="17.5" r="1.1" fill="currentColor" />
+      <circle cx="12" cy="17.5" r="1.1" fill="currentColor" /><circle cx="16" cy="17.5" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+function ChevronDown({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function ClockIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CheckIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function WarnIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3L2 20h20L12 3z" fill="#f5a524" />
+      <path d="M12 9v5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="12" cy="17" r="1.2" fill="#fff" />
+    </svg>
+  );
+}
+function LockIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function MenuIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function LogoutIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M14 4H7a2 2 0 00-2 2v12a2 2 0 002 2h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M11 12h9M17 8.5l3.5 3.5-3.5 3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function XIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ─── TimeButton: поле времени, открывает шторку выбора ──── */
+function TimeButton({ value, disabled, onClick, large, withIcon }) {
+  return (
+    <button
+      type="button"
+      className={cx(styles.timeBtn, large && styles.timeBtnLg, !value && styles.timeBtnEmpty)}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {withIcon && <ClockIcon className={styles.timeBtnClock} />}
+      <span className={styles.timeBtnValue}>{value || "--:--"}</span>
+      <ChevronDown className={styles.timeBtnChev} />
+    </button>
+  );
+}
+
+/* ─── TimeSheet: нижняя шторка с барабаном выбора времени ──
+   Барабан «бесконечный»: список повторяется LOOPS раз, открываемся на средней копии,
+   а после остановки прокрутки незаметно возвращаемся в середину на то же время */
+   const LOOPS = 7;
+   const MID   = Math.floor(LOOPS / 2);
+   
+   function TimeSheet({ title, value, options, onCancel, onConfirm }) {
+     const len       = options.length;
+     const listRef   = useRef(null);
+     const idleTimer = useRef(null);
+     const startIdx  = MID * len + Math.max(0, options.indexOf(value));
+   
+     const [idx, setIdx]         = useState(startIdx);
+     const [closing, setClosing] = useState(false);
+   
+     const items = useMemo(
+       () => Array.from({ length: len * LOOPS }, (_, i) => options[i % len]),
+       [options, len],
+     );
+   
+     // Сразу прокручиваем к текущему значению (до первой отрисовки, без «прыжка»)
+     useLayoutEffect(() => {
+       if (listRef.current) listRef.current.scrollTop = startIdx * ITEM_H;
+     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+   
+     // Блокируем прокрутку страницы под шторкой
+     useEffect(() => {
+       const prev = document.body.style.overflow;
+       document.body.style.overflow = "hidden";
+       return () => {
+         document.body.style.overflow = prev;
+         clearTimeout(idleTimer.current);
+       };
+     }, []);
+   
+     // После остановки — переносим позицию в среднюю копию (то же время, визуально ничего не меняется)
+     function recenter() {
+       const el = listRef.current;
+       if (!el) return;
+       const i = Math.round(el.scrollTop / ITEM_H);
+       if (Math.floor(i / len) === MID) return;
+       const target = MID * len + (((i % len) + len) % len);
+       el.scrollTop = target * ITEM_H;
+       setIdx(target);
+     }
+   
+     function onScroll() {
+       const el = listRef.current;
+       if (!el) return;
+       const i = Math.min(items.length - 1, Math.max(0, Math.round(el.scrollTop / ITEM_H)));
+       setIdx(i);
+       clearTimeout(idleTimer.current);
+       idleTimer.current = setTimeout(recenter, 150);
+     }
+   
+     function close(after) {
+       if (closing) return;
+       setClosing(true);
+       setTimeout(after, 200);
+     }
+   
+     return (
+       <div className={cx(styles.sheetOverlay, closing && styles.sheetOverlayOut)} onClick={() => close(onCancel)}>
+         <div
+           className={cx(styles.sheet, closing && styles.sheetOut)}
+           role="dialog"
+           aria-label={title}
+           onClick={e => e.stopPropagation()}
+         >
+           <div className={styles.sheetHead}>
+             <span className={styles.sheetTitle}>{title}</span>
+             <button type="button" className={styles.sheetX} aria-label="閉じる" onClick={() => close(onCancel)}>
+               <XIcon />
+             </button>
+           </div>
+   
+           <div className={styles.wheelWrap}>
+             <div className={styles.wheelBand} />
+             <div ref={listRef} className={styles.wheel} onScroll={onScroll}>
+               <div style={{ height: ITEM_H * 2 }} />
+               {items.map((t, i) => (
+                 <div
+                   key={i}
+                   className={styles.wheelItem}
+                   data-dist={Math.min(Math.abs(i - idx), 3)}
+                   onClick={() => listRef.current?.scrollTo({ top: i * ITEM_H, behavior: "smooth" })}
+                 >
+                   {t}
+                 </div>
+               ))}
+               <div style={{ height: ITEM_H * 2 }} />
+             </div>
+           </div>
+   
+           <div className={styles.sheetBtns}>
+             <button type="button" className={styles.sheetCancel} onClick={() => close(onCancel)}>キャンセル</button>
+             <button type="button" className={styles.sheetOk} onClick={() => close(() => onConfirm(options[idx % len]))}>決定</button>
+           </div>
+         </div>
+       </div>
+     );
+   }
+
+/* ─── StaffMonth ────────────────────────────────────────── */
+export default function StaffMonth({ onLogout, embedded = false }) {
   const monthOptions = useMemo(() => build5Months(), []);
+  const name = localStorage.getItem("staffName") || "";
 
-  const [month, setMonth] = useState(() => {
-    const saved = localStorage.getItem("staffSelectedMonth");
-    return saved && monthOptions.includes(saved) ? saved : monthOptions[0];
-  });
+  // Месяц не выбран — всегда начинаем со стартового экрана
+  const [month, setMonth]           = useState("");
+  const [monthOpen, setMonthOpen]   = useState(false);
+  const [activeHalf, setActiveHalf] = useState(1);
+  const [status1, setStatus1]       = useState(null);
+  const [status2, setStatus2]       = useState(null);
+  const [days, setDays]             = useState([]);
+  const [snapshot, setSnapshot]     = useState("[]");
+  const [loading, setLoading]       = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [msg, setMsg]               = useState(null);
+  const [savedOverlay, setSavedOverlay] = useState(false);
+  const [fillStart, setFillStart]   = useState("10:00");
+  const [fillEnd, setFillEnd]       = useState("21:00");
+  const [lastFill, setLastFill]     = useState(null);   // { half, kind } — подсветка последней кнопки быстрого заполнения
+  const [tip, setTip]               = useState(null);   // 1 | 2 — открытая подсказка статуса
+  const [picker, setPicker]         = useState(null);   // { title, value, onPick }
+  const [menuOpen, setMenuOpen]     = useState(false);
+  const [leaveConfirm, setLeaveConfirm] = useState(null); // { type: "month", ym } | { type: "logout" }
+  const [errorDate, setErrorDate]       = useState(null); // день с ошибкой — подсветка строки
+  const [errorTip, setErrorTip]         = useState(null); // текст подсказки под строкой с ошибкой
+  const errorTipTimer = useRef(null);
 
-  const [status1, setStatus1] = useState("RECEIVING");
-  const [status2, setStatus2] = useState("RECEIVING");
-  const [days, setDays]       = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [msg, setMsg]         = useState(null);
-  const [msgOk, setMsgOk]     = useState(false);
-  const [toast, setToast]     = useState(false);
+  const savedTimer = useRef(null);
+  const loadSeq    = useRef(0);
 
-  const name = getName();
+  const compact    = !!month;
+  const statusOf   = h => (h === 1 ? status1 : status2);
+  const editableOf = h => statusOf(h) === "RECEIVING";
+  const dirty      = useMemo(() => serialize(days) !== snapshot, [days, snapshot]);
 
-  const editable1 = status1 === "RECEIVING";
-  const editable2 = status2 === "RECEIVING";
-
-  function showToast() {
-    setToast(true);
-    setTimeout(() => setToast(false), 3000);
-  }
-
-  const [copying, setCopying]     = useState(false);
-  const [copyToast, setCopyToast] = useState(false);
-  const [fillStart, setFillStart] = useState("10:00");
-  const [fillEnd, setFillEnd]     = useState("21:00");
-
-  function showCopyToast() {
-    setCopyToast(true);
-    setTimeout(() => setCopyToast(false), 3000);
-  }
-
-  async function copyPrev() {
-    if (copying) return;
-    setCopying(true);
-    setMsg(null);
-    try {
-      // Вычисляем предыдущий месяц
-      const [y, m] = month.split("-").map(Number);
-      const prevDate = new Date(y, m - 2, 1);
-      const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
-  
-      // Загружаем данные прошлого месяца
-      const prev = await api.staffMonth(prevMonth);
-      const prevDays = prev.days;
-  
-      // Заполняем текущие дни по дню недели
-      setDays(cur => cur.map(d => {
-        const dow = new Date(d.date + "T00:00:00").getDay();
-        // Ищем первый день с таким же днём недели в прошлом месяце
-        const match = prevDays.find(p =>
-          new Date(p.date + "T00:00:00").getDay() === dow && !p.off && p.startTime
-        );
-        if (!match) return { ...d, off: true, startTime: "", endTime: "" };
-        return {
-          ...d,
-          off:       false,
-          startTime: match.startTime || "",
-          endTime:   match.endTime   || "",
-        };
-      }));
-  
-      showCopyToast();
-    } catch (e) {
-      setMsg(e.message || String(e));
-      setMsgOk(false);
-    } finally {
-      setCopying(false);
+  /* ── закрытие выпадающих элементов по тапу мимо ── */
+  useEffect(() => {
+    function onDown(e) {
+      if (e.target.closest?.("[data-keep-open]")) return;
+      setMonthOpen(false);
+      setTip(null);
+      setMenuOpen(false);
     }
-  }
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, []);
 
-  function fillAll(half) {
-    if (!fillStart || !fillEnd) return;
-    setDays(prev => prev.map(d => {
-      const h = new Date(d.date + "T00:00:00").getDate() <= 15 ? 1 : 2;
-      if (h !== half) return d;
-      return { ...d, off: false, startTime: fillStart, endTime: fillEnd };
-    }));
-  }
-  
-  function fillWeekdays(half) {
-    if (!fillStart || !fillEnd) return;
-    setDays(prev => prev.map(d => {
-      const h = new Date(d.date + "T00:00:00").getDate() <= 15 ? 1 : 2;
-      if (h !== half) return d;
-      const dow = new Date(d.date + "T00:00:00").getDay();
-      if (dow === 0 || dow === 6) return { ...d, off: true, startTime: "", endTime: "" };
-      return { ...d, off: false, startTime: fillStart, endTime: fillEnd };
-    }));
-  }
-  
-  function fillNone(half) {
-    setDays(prev => prev.map(d => {
-      const h = new Date(d.date + "T00:00:00").getDate() <= 15 ? 1 : 2;
-      if (h !== half) return d;
-      return { ...d, off: true, startTime: "", endTime: "" };
-    }));
-  }
+  /* ── цвет системной полосы телефона (часы/сеть/батарея) = цвет шапки ── */
+  useEffect(() => {
+    if (embedded) return;
+    const COLOR = "#0d2c4a";
+    let metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+    let created = false;
+    if (metas.length === 0) {
+      const m = document.createElement("meta");
+      m.name = "theme-color";
+      document.head.appendChild(m);
+      metas = [m];
+      created = true;
+    }
+    const prev = metas.map(m => m.getAttribute("content"));
+    metas.forEach(m => m.setAttribute("content", COLOR));
+    return () => {
+      if (created) metas.forEach(m => m.remove());
+      else metas.forEach((m, i) => m.setAttribute("content", prev[i]));
+    };
+  }, [embedded]);
 
-  async function load(silent = false) {
-    if (!silent) setLoading(true);
+  /* ── предупреждение браузера при закрытии вкладки с несохранёнными изменениями ── */
+  useEffect(() => {
+    if (!dirty) return;
+    function onBeforeUnload(e) { e.preventDefault(); e.returnValue = ""; }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  useEffect(() => () => {
+    clearTimeout(savedTimer.current);
+    clearTimeout(errorTipTimer.current);
+  }, []);
+
+  /* ── загрузка месяца ── */
+  async function load(ym) {
+    const seq = ++loadSeq.current;
+    setLoading(true);
     setMsg(null);
     try {
-      const res = await api.staffMonth(month);
+      const res = await api.staffMonth(ym);
+      if (seq !== loadSeq.current) return; // пришёл ответ на уже неактуальный месяц
+      const list = (res.days || []).map(d => ({
+        date:      d.date,
+        off:       !!d.off,
+        startTime: normTime(d.startTime),
+        endTime:   normTime(d.endTime),
+        last:      !!d.last,
+      }));
       setStatus1(res.status1);
       setStatus2(res.status2);
-      setDays(res.days.map(d => ({
-        date:      d.date,
-        off:       d.off,
-        startTime: d.startTime || "",
-        endTime:   d.endTime   || "",
-        last:      d.last      || false,
-      })));
+      setDays(list);
+      setSnapshot(serialize(list));
+      // Если первая половина уже закрыта, а вторая принимается — сразу открываем вторую
+      setActiveHalf(res.status1 !== "RECEIVING" && res.status2 === "RECEIVING" ? 2 : 1);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
+      setDays([]);
+      setSnapshot("[]");
       setMsg(e.message || String(e));
-      setMsgOk(false);
     } finally {
-      if (!silent) setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
-  useEffect(() => {
-    localStorage.setItem("staffSelectedMonth", month);
-    load();
-  }, [month]);
-
-  function updateDay(idx, patch) {
-    setDays(prev => {
-      const copy = [...prev];
-      copy[idx] = { ...copy[idx], ...patch };
-      if (copy[idx].off) {
-        copy[idx].startTime = "";
-        copy[idx].endTime   = "";
-      }
-      return copy;
-    });
+  function goToMonth(ym) {
+    setMonth(ym);
+    setTip(null);
+    setLastFill(null);
+    load(ym);
   }
 
-  async function save() {
-    if (saving) return;
+  function selectMonth(ym) {
+    setMonthOpen(false);
+    if (ym === month) return;
+    if (dirty) { setLeaveConfirm({ type: "month", ym }); return; }
+    goToMonth(ym);
+  }
+
+  function handleLogout() {
+    setMenuOpen(false);
+    if (dirty) { setLeaveConfirm({ type: "logout" }); return; }
+    onLogout?.();
+  }
+
+  // Окно «変更が保存されていません»: saveFirst=false — キャンセル (уходим без сохранения), true — 保存する
+  async function confirmLeave(saveFirst) {
+    const action = leaveConfirm;
+    if (!action || saving) return;
+    if (saveFirst) {
+      const ok = await save({ silent: true });
+      if (!ok) { setLeaveConfirm(null); return; } // ошибка — остаёмся, сообщение уже показано
+    }
+    setLeaveConfirm(null);
+    if (action.type === "month") goToMonth(action.ym);
+    else onLogout?.();
+  }
+
+  /* ── редактирование ── */
+  function updateDay(date, patch) {
+    setDays(prev => prev.map(d => {
+      if (d.date !== date) return d;
+      // edited — день трогали вручную (снимали 休, меняли время): для такого дня время обязательно
+      const n = { ...d, ...patch, edited: true };
+      if (n.off) { n.startTime = ""; n.endTime = ""; }
+      return n;
+    }));
+    if (errorDate === date) {
+      setErrorDate(null);
+      setErrorTip(null);
+    }
+  }
+
+  function applyFill(kind) {
+    if (!editableOf(activeHalf)) return;
+    setDays(prev => prev.map(d => {
+      if (halfOf(d.date) !== activeHalf) return d;
+      if (kind === "none") return { ...d, off: true, startTime: "", endTime: "" };
+      if (kind === "weekdays") {
+        const wd = weekdayOf(d.date);
+        if (wd === 0 || wd === 6) return { ...d, off: true, startTime: "", endTime: "" };
+      }
+      return { ...d, off: false, startTime: fillStart, endTime: fillEnd };
+    }));
+    setLastFill({ half: activeHalf, kind });
+  }
+
+  function openPicker(title, value, onPick) {
+    setPicker({ title, value, onPick });
+  }
+
+  /* ── сохранение ── */
+  // Возвращает true при успехе. silent — без окна «保存しました» (сохранение перед переходом)
+  async function save({ silent = false } = {}) {
+    if (saving || !month) return false;
     setMsg(null);
 
     for (const d of days) {
-      const half = new Date(d.date + "T00:00:00").getDate() <= 15 ? 1 : 2;
-      const editable = half === 1 ? editable1 : editable2;
-      if (!editable) continue;
-      if (!d.off && (d.startTime || d.endTime) && (!d.startTime || !d.endTime)) {
-        setMsg(`${d.date}：開始・終了時間を両方入力してください`);
-        setMsgOk(false);
-        return;
+      const h = halfOf(d.date);
+      if (!editableOf(h) || d.off) continue;
+
+      const partial = (d.startTime || d.endTime) && (!d.startTime || !d.endTime);
+      const empty   = !d.startTime && !d.endTime && d.edited; // сняли 休, но время не указали
+
+      if (partial || empty) {
+        setActiveHalf(h);
+        setErrorDate(d.date);
+        setErrorTip(empty
+          ? "時間を選択するか、「休」にチェックを入れてください"
+          : "開始・終了時間を両方選択してください");
+        clearTimeout(errorTipTimer.current);
+        errorTipTimer.current = setTimeout(() => setErrorTip(null), 5000);
+        // Прокручиваем к строке с ошибкой (после переключения вкладки и отрисовки)
+        setTimeout(() => {
+          document.querySelector(`[data-date="${d.date}"]`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+        return false;
       }
     }
 
@@ -229,313 +486,384 @@ export default function StaffMonth({ onLogout }) {
         startTime: d.startTime || null,
         endTime:   d.endTime   || null,
       })));
-      showToast();
+      setSnapshot(serialize(days));
+      if (!silent) {
+        setSavedOverlay(true);
+        clearTimeout(savedTimer.current);
+        savedTimer.current = setTimeout(() => setSavedOverlay(false), 2500);
+      }
+      return true;
     } catch (e) {
       setMsg(e.message || String(e));
-      setMsgOk(false);
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
+  /* ── derived ── */
+  const halfDays     = days.filter(d => halfOf(d.date) === activeHalf);
+  const activeStatus = statusOf(activeHalf);
+  const editable     = editableOf(activeHalf);
+  const canSave      = !!month && !loading && !saving && (editableOf(1) || editableOf(2));
+
+  const FILL_BUTTONS = [
+    { kind: "all",      label: "全日程" },
+    { kind: "weekdays", label: "平日のみ" },
+    { kind: "none",     label: "全て休み" },
+  ];
+
+  /* ── render ── */
   return (
-    <div className={styles.page}>
-      <div className={styles.card}>
+    <div className={cx(styles.page, embedded && styles.pageEmbedded)}>
 
-        {/* ── Header ── */}
-        <div className={styles.header}>
-          <div className={styles.headerLeft}>
-            <div className={styles.hotelName}>{HOTEL_NAME}</div>
-            <div className={styles.branchName}>{BRANCH_NAME}</div>
-            <div className={styles.staffName}>{name}</div>
-          </div>
-          <button className={styles.logoutBtn} onClick={onLogout}>Logout</button>
-        </div>
-
-        <div className={styles.divider} />
-
-        {/* ── Body ── */}
-        <div className={styles.body}>
-
-          <div className={styles.titleRow}>
-            <div>
-              <h2 className={styles.title}>希望シフト提出</h2>
-              <p className={styles.subtitle}>希望する出勤日と時間を設定してください</p>
-            </div>
-          </div>
-
-          {/* Month selector */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#475569" }}>月：</span>
-            <select
-              style={{
-                appearance: "none", WebkitAppearance: "none",
-                background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E\") no-repeat right 12px center",
-                border: "1.5px solid #e2e8f0", borderRadius: 10,
-                padding: "8px 36px 8px 14px",
-                fontSize: 15, fontWeight: 700, color: "#0f172a",
-                cursor: "pointer", outline: "none", minWidth: 150,
-              }}
-              value={month}
-              onChange={e => setMonth(e.target.value)}
-              disabled={loading}
-            >
-              {monthOptions.map(ym => (
-                <option key={ym} value={ym}>{monthLabelJa(ym)}</option>
-              ))}
-            </select>
-          </div>
-
-          {msg && (
-            <div className={`${styles.msg} ${msgOk ? styles.msgOk : styles.msgErr}`}>
-              {msg}
-            </div>
-          )}
-
-          {loading ? (
-            <div className={styles.loading}>読み込み中...</div>
-          ) : (
-            <>
-            {/* ── Блок 1: 1〜15日 ── */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: 10,
-              }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>1日〜15日</div>
-                  <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600 }}>
-                    ⚠️ 前月20日までに提出してください
-                  </div>
+      {/* ── App bar ── */}
+      {!embedded && (
+        <header className={styles.appBar}>
+          <div className={styles.menuWrap} data-keep-open>
+            <button type="button" className={styles.iconBtn} aria-label="メニュー" onClick={() => setMenuOpen(v => !v)}>
+              <MenuIcon className={styles.icon24} />
+            </button>
+            {menuOpen && (
+              <div className={styles.menu}>
+                <div className={styles.menuUser}>{name}</div>
+                <div className={cx(styles.menuItem, styles.menuItemActive)}>
+                  <CalendarIcon className={styles.icon18} />希望シフト提出
                 </div>
-                <span className={`${styles.badge} ${styles[`badge_${status1?.toLowerCase()}`]}`}>
-                  {jpStatus(status1)}
-                </span>
-              </div>
-
-              {editable1 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <select className={styles.timeSelect} value={fillStart}
-                      onChange={e => setFillStart(e.target.value)}>
-                      {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <span className={styles.tilde}>〜</span>
-                    <select className={styles.timeSelect} value={fillEnd}
-                      onChange={e => setFillEnd(e.target.value)}>
-                      {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className={styles.copyBtn} onClick={() => fillAll(1)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>全日程</button>
-                    <button className={styles.copyBtn} onClick={() => fillWeekdays(1)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>平日のみ</button>
-                    <button className={styles.copyBtn} onClick={() => fillNone(1)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>全て休み</button>
-                  </div>
-                </div>
-              )}
-
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th className={styles.th}>日付</th>
-                      <th className={styles.th}>休</th>
-                      <th className={styles.th}>時間（希望）</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {days.filter(d => new Date(d.date + "T00:00:00").getDate() <= 15).map((d, idx) => {
-                      const wknd = isWeekend(d.date);
-                      const dur  = calcDuration(d.startTime, d.endTime);
-                      return (
-                        <tr key={d.date} className={styles.tr}>
-                          <td className={`${styles.td} ${styles.tdDate} ${wknd ? styles.weekend : ""}`}>
-                            {d.date.slice(5).replace("-", "/")}（{dowJa(d.date)}）
-                          </td>
-                          <td className={styles.td}>
-                            <input type="checkbox" className={styles.checkbox}
-                              checked={d.off} disabled={!editable1}
-                              onChange={e => {
-                                const realIdx = days.findIndex(x => x.date === d.date);
-                                updateDay(realIdx, { off: e.target.checked });
-                              }}
-                            />
-                          </td>
-                          <td className={styles.td}>
-                            {!d.off && (
-                              <div className={styles.timeRow}>
-                                <select className={styles.timeSelect} value={d.startTime}
-                                  disabled={!editable1}
-                                  onChange={e => {
-                                    const realIdx = days.findIndex(x => x.date === d.date);
-                                    updateDay(realIdx, { startTime: e.target.value });
-                                  }}>
-                                  <option value="">--</option>
-                                  {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                                <span className={styles.tilde}>〜</span>
-                                {d.last ? (
-                                  <span className={styles.lastBadge}>L</span>
-                                ) : (
-                                  <select className={styles.timeSelect} value={d.endTime}
-                                    disabled={!editable1}
-                                    onChange={e => {
-                                      const realIdx = days.findIndex(x => x.date === d.date);
-                                      updateDay(realIdx, { endTime: e.target.value });
-                                    }}>
-                                    <option value="">--</option>
-                                    {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                                  </select>
-                                )}
-                              </div>
-                            )}
-                            {!d.off && d.startTime && d.endTime && (() => {
-                              if (dur > 16 * 60) return <div className={styles.warn}>※ 長すぎます</div>;
-                              if (dur < 30)      return <div className={styles.warn}>※ 短すぎます</div>;
-                              if (d.endTime <= d.startTime) return <div className={styles.note}>※ 夜勤</div>;
-                              return null;
-                            })()}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* ── Блок 2: 16〜末日 ── */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: 10,
-              }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>16日〜末日</div>
-                  <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600 }}>
-                    ⚠️ 当月5日までに提出してください
-                  </div>
-                </div>
-                <span className={`${styles.badge} ${styles[`badge_${status2?.toLowerCase()}`]}`}>
-                  {jpStatus(status2)}
-                </span>
-              </div>
-
-              {editable2 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <select className={styles.timeSelect} value={fillStart}
-                      onChange={e => setFillStart(e.target.value)}>
-                      {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <span className={styles.tilde}>〜</span>
-                    <select className={styles.timeSelect} value={fillEnd}
-                      onChange={e => setFillEnd(e.target.value)}>
-                      {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className={styles.copyBtn} onClick={() => fillAll(2)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>全日程</button>
-                    <button className={styles.copyBtn} onClick={() => fillWeekdays(2)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>平日のみ</button>
-                    <button className={styles.copyBtn} onClick={() => fillNone(2)}
-                      style={{ flex: 1, whiteSpace: "nowrap" }}>全て休み</button>
-                  </div>
-                </div>
-              )}
-
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th className={styles.th}>日付</th>
-                      <th className={styles.th}>休</th>
-                      <th className={styles.th}>時間（希望）</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {days.filter(d => new Date(d.date + "T00:00:00").getDate() > 15).map((d, idx) => {
-                      const wknd = isWeekend(d.date);
-                      const dur  = calcDuration(d.startTime, d.endTime);
-                      return (
-                        <tr key={d.date} className={styles.tr}>
-                          <td className={`${styles.td} ${styles.tdDate} ${wknd ? styles.weekend : ""}`}>
-                            {d.date.slice(5).replace("-", "/")}（{dowJa(d.date)}）
-                          </td>
-                          <td className={styles.td}>
-                            <input type="checkbox" className={styles.checkbox}
-                              checked={d.off} disabled={!editable2}
-                              onChange={e => {
-                                const realIdx = days.findIndex(x => x.date === d.date);
-                                updateDay(realIdx, { off: e.target.checked });
-                              }}
-                            />
-                          </td>
-                          <td className={styles.td}>
-                            {!d.off && (
-                              <div className={styles.timeRow}>
-                                <select className={styles.timeSelect} value={d.startTime}
-                                  disabled={!editable2}
-                                  onChange={e => {
-                                    const realIdx = days.findIndex(x => x.date === d.date);
-                                    updateDay(realIdx, { startTime: e.target.value });
-                                  }}>
-                                  <option value="">--</option>
-                                  {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                                <span className={styles.tilde}>〜</span>
-                                {d.last ? (
-                                  <span className={styles.lastBadge}>L</span>
-                                ) : (
-                                  <select className={styles.timeSelect} value={d.endTime}
-                                    disabled={!editable2}
-                                    onChange={e => {
-                                      const realIdx = days.findIndex(x => x.date === d.date);
-                                      updateDay(realIdx, { endTime: e.target.value });
-                                    }}>
-                                    <option value="">--</option>
-                                    {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                                  </select>
-                                )}
-                              </div>
-                            )}
-                            {!d.off && d.startTime && d.endTime && (() => {
-                              if (dur > 16 * 60) return <div className={styles.warn}>※ 長すぎます</div>;
-                              if (dur < 30)      return <div className={styles.warn}>※ 短すぎます</div>;
-                              if (d.endTime <= d.startTime) return <div className={styles.note}>※ 夜勤</div>;
-                              return null;
-                            })()}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            </>
-          )}
-
-          {!loading && (
-            <div className={styles.bottomBar}>
-              <div className={styles.bottomLeft}>
-                <button
-                  className={styles.saveBtn}
-                  onClick={save}
-                  disabled={(!editable1 && !editable2) || saving}
-                >
-                  {saving ? "..." : "更新"}
+                <button type="button" className={styles.menuItem} onClick={handleLogout}>
+                  <LogoutIcon className={styles.icon18} />ログアウト
                 </button>
-                {toast && <span className={styles.toast}>✓ 更新しました</span>}
               </div>
+            )}
+          </div>
+
+          <div className={styles.appTitle}>
+            <div className={styles.appName}>HannoSHIFT</div>
+            <div className={styles.appUser}>{name}</div>
+          </div>
+
+          <button type="button" className={styles.iconBtn} aria-label="ログアウト" onClick={handleLogout}>
+            <LogoutIcon className={styles.icon24} />
+          </button>
+        </header>
+      )}
+
+      <div className={styles.scroller}>
+      <main className={styles.content}>
+
+        {/* ── Hero: заголовок + выбор месяца (после выбора — сжимается в одну строку) ── */}
+        <div className={cx(styles.hero, compact && styles.heroCompact)}>
+          <div className={styles.heroTitle}>
+            <CalendarIcon className={styles.heroIcon} />
+            <h1 className={styles.heroText}>希望シフト提出</h1>
+          </div>
+          <p className={styles.heroSub}>希望する出勤日と時間を設定してください</p>
+
+          <div className={styles.monthPicker} data-keep-open>
+            <button
+              type="button"
+              className={styles.monthBtn}
+              onClick={() => setMonthOpen(v => !v)}
+              disabled={saving}
+              aria-haspopup="listbox"
+              aria-expanded={monthOpen}
+            >
+              <span className={cx(styles.monthValue, !month && styles.monthPlaceholder)}>
+                {month ? monthLabelJa(month) : "— 年 — 月"}
+              </span>
+              <ChevronDown className={cx(styles.monthChev, monthOpen && styles.monthChevOpen)} />
+            </button>
+
+            {monthOpen && (
+              <ul className={styles.monthList} role="listbox">
+                {monthOptions.map(ym => (
+                  <li key={ym}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={ym === month}
+                      className={cx(styles.monthOption, ym === month && styles.monthOptionActive)}
+                      onClick={() => selectMonth(ym)}
+                    >
+                      <span>{monthLabelJa(ym)}</span>
+                      {ym === month && <CheckIcon className={styles.icon18} />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* ── Tabs ── */}
+        <div className={styles.tabs} role="tablist">
+          {[1, 2].map(h => {
+            const st   = month && !loading ? statusOf(h) : null;
+            const info = st ? STATUS_INFO[st] : null;
+            return (
+              <div
+                key={h}
+                role="tab"
+                aria-selected={activeHalf === h}
+                className={cx(styles.tab, activeHalf === h && styles.tabActive, !month && styles.tabDisabled)}
+                onClick={() => { if (month) { setActiveHalf(h); setMsg(null); setErrorTip(null); } }}
+              >
+                <span className={styles.tabLabel}>{h === 1 ? "1日〜15日" : "16日〜末日"}</span>
+
+                {info && (
+                  <span className={styles.statusWrap} data-keep-open>
+                    <button
+                      type="button"
+                      className={styles.statusBtn}
+                      onClick={e => { e.stopPropagation(); setTip(t => (t === h ? null : h)); }}
+                      aria-label={`${info.label}の説明`}
+                    >
+                      <span className={styles.dot} style={{ background: info.dot }} />
+                      <span style={{ color: info.color }}>{info.label}</span>
+                    </button>
+                    {tip === h && (
+                      <div className={cx(styles.tip, h === 2 && styles.tipRight)} role="tooltip">
+                        <div className={styles.tipTitle}>
+                          <span className={styles.tipDot} style={{ background: info.dot }} />
+                          {info.label}
+                        </div>
+                        <div className={styles.tipText}>{info.text}</div>
+                      </div>
+                    )}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Panel ── */}
+        <section className={styles.panel}>
+          {!month ? (
+            <div className={styles.empty}>
+              <CalendarIcon className={styles.emptyIcon} />
+              <div>月を選択してください</div>
+            </div>
+          ) : loading ? (
+            <div className={styles.skeletons}>
+              {Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}
+            </div>
+          ) : (
+            <div className={styles.panelBody} key={`${month}-${activeHalf}`}>
+              {msg && <div className={styles.error}>{msg}</div>}
+
+              {/* Баннер по статусу */}
+              {activeStatus === "RECEIVING" && (
+                <div className={cx(styles.banner, styles.bannerWarn)}>
+                  <WarnIcon className={styles.icon18} />
+                  {DEADLINE[activeHalf]}
+                </div>
+              )}
+              {activeStatus === "DRAFTING" && (
+                <div className={cx(styles.banner, styles.bannerDraft)}>
+                  <LockIcon className={styles.icon18} />
+                  シフト作成中のため、この期間は変更できません
+                </div>
+              )}
+              {activeStatus === "CONFIRMED" && (
+                <div className={cx(styles.banner, styles.bannerOk)}>
+                  <span className={styles.bannerOkIcon}><CheckIcon /></span>
+                  <div>
+                    この期間はすでに確定しています
+                    <div className={styles.bannerSub}>都合が悪い場合は必ず店長に連絡をお願いします。</div>
+                  </div>
+                </div>
+              )}
+
+              {days.length > 0 && (
+                <>
+                  {/* Быстрое заполнение */}
+                  <div className={styles.fill}>
+                    <div className={cx(styles.rangePill, !editable && styles.rangePillDisabled)}>
+                      <ClockIcon className={styles.rangeClock} />
+                      <TimeButton
+                        large
+                        value={fillStart}
+                        disabled={!editable}
+                        onClick={() => openPicker("開始時間を選択", fillStart, setFillStart)}
+                      />
+                      <span className={styles.tilde}>〜</span>
+                      <TimeButton
+                        large
+                        value={fillEnd}
+                        disabled={!editable}
+                        onClick={() => openPicker("終了時間を選択", fillEnd, setFillEnd)}
+                      />
+                    </div>
+                    <div className={styles.fillBtns}>
+                      {FILL_BUTTONS.map(b => (
+                        <button
+                          key={b.kind}
+                          type="button"
+                          disabled={!editable}
+                          className={cx(
+                            styles.fillBtn,
+                            lastFill?.half === activeHalf && lastFill?.kind === b.kind && styles.fillBtnActive,
+                          )}
+                          onClick={() => applyFill(b.kind)}
+                        >
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Таблица дней */}
+                  <div className={styles.table}>
+                    <div className={styles.thead}>
+                      <span>日付</span>
+                      <span className={styles.thCenter}>休</span>
+                      <span>時間（希望）</span>
+                    </div>
+
+                    {halfDays.map(d => {
+                      const wd  = weekdayOf(d.date);
+                      const dur = calcDuration(d.startTime, d.endTime);
+                      let note = null;
+                      if (!d.off && d.startTime && d.endTime) {
+                        if (dur > 16 * 60)                 note = <div className={styles.warn}>※ 長すぎます（最大16時間）</div>;
+                        else if (dur < 30)                 note = <div className={styles.warn}>※ 短すぎます（30分以上）</div>;
+                        else if (d.endTime <= d.startTime) note = <div className={styles.note}>※ 翌日まで（夜勤）</div>;
+                      }
+                      return (
+                        <div
+                          key={d.date}
+                          data-date={d.date}
+                          className={cx(styles.row, d.off && styles.rowOff, errorDate === d.date && styles.rowError)}
+                        >
+                          <span className={cx(styles.date, (wd === 0 || wd === 6) && styles.dateWeekend)}>
+                            {fmtDay(d.date)}
+                          </span>
+
+                          <span className={styles.offCell}>
+                            <button
+                              type="button"
+                              className={cx(styles.offBtn, d.off && styles.offBtnOn)}
+                              disabled={!editable}
+                              aria-pressed={d.off}
+                              aria-label="休み"
+                              onClick={() => updateDay(d.date, { off: !d.off })}
+                            >
+                              {d.off && <CheckIcon />}
+                            </button>
+                          </span>
+
+                          <div className={styles.times}>
+                            <div className={styles.timeRow}>
+                              <TimeButton
+                                withIcon
+                                value={d.startTime}
+                                disabled={!editable || d.off}
+                                onClick={() => openPicker(
+                                  "開始時間を選択",
+                                  d.startTime || fillStart,
+                                  v => updateDay(d.date, { startTime: v, off: false }),
+                                )}
+                              />
+                              <span className={styles.tilde}>〜</span>
+                              {d.last ? (
+                                <span className={styles.lastBadge}>L</span>
+                              ) : (
+                                <TimeButton
+                                  value={d.endTime}
+                                  disabled={!editable || d.off}
+                                  onClick={() => openPicker(
+                                    "終了時間を選択",
+                                    d.endTime || fillEnd,
+                                    v => updateDay(d.date, { endTime: v, off: false }),
+                                  )}
+                                />
+                              )}
+                              </div>
+                              {note}
+                            </div>
+  
+                            {errorDate === d.date && errorTip && (
+                              <div className={styles.rowTip} role="alert">
+                                <WarnIcon className={styles.rowTipIcon} />
+                                {errorTip}
+                              </div>
+                            )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
-        </div>
+
+          {/* Сообщение о сохранении */}
+          {savedOverlay && (
+            <div className={styles.saved} onClick={() => setSavedOverlay(false)}>
+              <div className={styles.savedCheck}><CheckIcon /></div>
+              <div className={styles.savedTitle}>保存しました</div>
+              <div className={styles.savedText}>マネージャーの確認をお待ちください。</div>
+            </div>
+          )}
+        </section>
+        </main>
       </div>
+
+      {/* ── Save bar ── */}
+      <div className={styles.saveBar}>
+        <button type="button" className={styles.saveBtn} onClick={save} disabled={!canSave}>
+          {saving ? "保存中..." : "保存する"}
+        </button>
+      </div>
+
+      {/* ── Несохранённые изменения ── */}
+      {leaveConfirm && (
+        <div className={styles.confirmOverlay} onClick={() => !saving && setLeaveConfirm(null)}>
+          <div
+            className={styles.confirmCard}
+            role="alertdialog"
+            aria-labelledby="leave-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={styles.confirmX}
+              aria-label="閉じる"
+              disabled={saving}
+              onClick={() => setLeaveConfirm(null)}
+            >
+              <XIcon />
+            </button>
+            <div className={styles.confirmIcon}><WarnIcon /></div>
+            <div id="leave-title" className={styles.confirmTitle}>変更が保存されていません</div>
+            <div className={styles.confirmText}>
+              {leaveConfirm.type === "month"
+                ? "保存せずに月を切り替えると、入力した内容は失われます。"
+                : "保存せずにログアウトすると、入力した内容は失われます。"}
+            </div>
+            <div className={styles.confirmBtns}>
+              <button type="button" className={styles.sheetCancel} disabled={saving} onClick={() => confirmLeave(false)}>
+                キャンセル
+              </button>
+              <button type="button" className={styles.sheetOk} disabled={saving} onClick={() => confirmLeave(true)}>
+                {saving ? "保存中..." : "保存する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Time picker ── */}
+      {picker && (
+        <TimeSheet
+          title={picker.title}
+          value={picker.value}
+          options={TIME_OPTIONS}
+          onCancel={() => setPicker(null)}
+          onConfirm={v => { picker.onPick(v); setPicker(null); }}
+        />
+      )}
     </div>
   );
 }

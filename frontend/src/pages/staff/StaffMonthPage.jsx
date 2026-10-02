@@ -13,8 +13,8 @@ export default function StaffMonthPage({ onLogout, managerNav }) {
         onNavigate={managerNav.onNavigate}
         onLogout={onLogout}
       >
-        <StaffMonth onLogout={onLogout} />
-      </ManagerLayout>
+        <StaffMonth onLogout={onLogout} embedded />
+        </ManagerLayout>
     );
   }
 
