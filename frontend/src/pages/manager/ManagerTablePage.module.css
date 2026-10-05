@@ -203,6 +203,21 @@
     font-family: inherit; font-size: 13px; color: var(--text);
   }
   .search:focus-within { border-color: var(--green); }
+  .searchClear {
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-right: -4px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #e8edf3;
+    color: #64768b;
+    cursor: pointer;
+  }
+  .searchClear svg { width: 12px; height: 12px; }
+  .searchClear:hover { background: #d5dee8; color: var(--text); }
+  .searchClearHidden { visibility: hidden; }
   
   .check {
     display: flex; align-items: center; gap: 6px;

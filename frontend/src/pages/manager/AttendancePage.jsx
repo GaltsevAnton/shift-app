@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
 import styles from "./AttendancePage.module.css";
@@ -353,6 +354,21 @@ function IcoLogout()   { return (<svg {...TB_ICON}><path d="M14 4H7a2 2 0 00-2 2
 function IcoSearch()   { return (<svg {...TB_ICON}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></svg>); }
 function IcoPrev()     { return (<svg {...TB_ICON}><path d="M15 6l-6 6 6 6" /></svg>); }
 function IcoNext()     { return (<svg {...TB_ICON}><path d="M9 6l6 6-6 6" /></svg>); }
+function IcoClear()    { return (<svg {...TB_ICON} strokeWidth={2.4}><path d="M7 7l10 10M17 7L7 17" /></svg>); }
+function IcoEdit()     { return (<svg {...TB_ICON}><path d="M4 20h4l10.5-10.5a2.1 2.1 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>); }
+function IcoTrash()    { return (<svg {...TB_ICON}><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5a1 1 0 001 .9h7a1 1 0 001-.9l1-12.5M9.5 7V4.5h5V7" /></svg>); }
+function IcoClock()    { return (<svg {...TB_ICON}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>); }
+
+// Плашка типа 打刻 — цвета как на киоске
+const TYPE_CLASS = { CLOCK_IN: "dpTypeIn", CLOCK_OUT: "dpTypeOut", BREAK_START: "dpTypeBreak", BREAK_END: "dpTypeBack" };
+const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+// "2026-09-23" → "2026年9月23日（水）"
+function fmtJpDate(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const wd = JP_WEEKDAYS[new Date(y, m - 1, d).getDay()];
+  return `${y}年${m}月${d}日（${wd}）`;
+}
 
 // Закрытие выпадающего списка по клику мимо
 function useOutsideClose(open, setOpen, ref) {
@@ -615,6 +631,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [editErr,     setEditErr]     = useState(null);
   const [deletingId,  setDeletingId]  = useState(null);
   const [deleteErr,   setDeleteErr]   = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // запись 打刻, ожидающая подтверждения удаления
   const [photoPopup, setPhotoPopup] = useState(null);
   const [reportLoading, setReportLoading]   = useState(false);
   const [alertMsg, setAlertMsg]             = useState(null);
@@ -1291,13 +1308,15 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     setVisibleDepartments(new Set(departments.map(d => d.name)));
     setVisibleStatuses(new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
     setVisibleColors(new Set(COLOR_FILTER_ITEMS.map(i => i.value)));
+    setColVisibility({ number: true, position: true, department: true });   // 表示列 — тоже сбрасываем
   }
 
   const _f1 = positionOptions.some(p => !visiblePositions.has(p));
   const _f2 = allDepartmentItems.some(d => !visibleDepartments.has(d.value));
   const _f3 = STATUS_FILTER_ITEMS.some(i => !visibleStatuses.has(i.value));
   const _f4 = COLOR_FILTER_ITEMS.some(i => !visibleColors.has(i.value));
-  const isFiltered = _f1 || _f2 || _f3 || _f4;
+  const _f5 = COL_ITEMS.some(c => !colVisibility[c.value]);   // 表示列
+  const isFiltered = _f1 || _f2 || _f3 || _f4 || _f5;
 
   /* ── period validation ── */
   const pDays    = periodDays(periodFrom, periodTo);
@@ -1417,9 +1436,52 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     }
   }
 
+  /* ── окно 打刻: открытие / закрытие ── */
+  function closeDetail() {
+    setDetailPopup(null); setEditRecord(null); setEditErr(null); setDeleteErr(null);
+  }
+  function startEditRecord(r) {
+    const local = toJstDatetimeLocal(r.recordedAt); // "YYYY-MM-DDTHH:mm" (JST)
+    setEditErr(null);
+    setEditRecord({
+      id: r.id,
+      recordType: r.recordType,
+      date: local.slice(0, 10),
+      time: local.slice(11, 16),
+      note: r.note || "",
+    });
+  }
+  // Esc: в редактировании — назад к списку, в просмотре — закрыть окно
+  useEffect(() => {
+    if (!detailPopup || confirmDelete || photoPopup) return;
+    function onKey(e) {
+      if (e.key !== "Escape" || editLoading) return;
+      if (editRecord) { setEditRecord(null); setEditErr(null); }
+      else closeDetail();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [detailPopup, editRecord, confirmDelete, photoPopup, editLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!confirmDelete) return;
+    function onKey(e) { if (e.key === "Escape" && deletingId == null) setConfirmDelete(null); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [confirmDelete, deletingId]);
+
+  // Переход в シフト管理 на месяц этого дня + сразу открыть окно смены сотрудника
+  function goToShiftDay(userId, date) {
+    try {
+      localStorage.setItem("managerViewMode", "month");
+      localStorage.setItem("managerSelectedMonth", date.slice(0, 7));
+      sessionStorage.setItem("mgrJumpTo", JSON.stringify({ userId, date }));
+    } catch { /* ignore */ }
+    closeDetail();
+    onNavigate("SHIFTS");
+  }
+
   /* ── delete ── */
   async function handleDeleteRecord(record) {
-    if (!window.confirm(`この打刻記録を削除しますか？\n${getTypeLabel(record.recordType)} ${fmtTime(record.recordedAt)}\n\nこの操作は取り消せません。`)) return;
     setDeletingId(record.id); setDeleteErr(null);
     try {
       await api.attendanceDelete(record.id);
@@ -1432,6 +1494,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
       setDeleteErr(e.message);
     } finally {
       setDeletingId(null);
+      setConfirmDelete(null);
     }
   }
 
@@ -1442,7 +1505,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     try {
       const updated = await api.attendanceEdit(editRecord.id, {
         recordType: editRecord.recordType || null,
-        recordedAt: fromJstDatetimeLocal(editRecord.recordedAt),
+        recordedAt: fromJstDatetimeLocal(`${editRecord.date}T${editRecord.time}`),
         note:       editRecord.note || null,
       });
       await load(true);
@@ -1653,6 +1716,14 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="氏名で検索..."
               />
+              {/* ✕ — очистить поиск (место зарезервировано, поле не «прыгает») */}
+              <button type="button"
+                className={cx(styles.searchClear, !searchQuery && styles.searchClearHidden)}
+                onClick={e => { e.preventDefault(); setSearchQuery(""); }}
+                tabIndex={searchQuery ? 0 : -1}
+                aria-label="検索をクリア">
+                <IcoClear />
+              </button>
             </label>
 
             {/* Фильтры */}
@@ -1685,9 +1756,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             </DropdownShell>
 
             {/* На широком экране — отдельными кнопками */}
-            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
-              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
-            </DropdownShell>
             <DropdownShell label="表示列" filtered={colsFiltered} width={180} className={styles.wideOnly}>
               <CheckGroup items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
             </DropdownShell>
@@ -1695,15 +1763,18 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               <CheckGroup items={ROW_ITEMS} set={visibleRows}
                 onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
             </DropdownShell>
+            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+            </DropdownShell>
 
             {/* На узком экране — всё в «その他» */}
             <DropdownShell label="その他" filtered={sortChanged || colsFiltered || rowsFiltered} width={220} className={styles.narrowOnly}>
-              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
-              <div className={styles.wpDropdownDivider} />
               <CheckGroup title="表示列" items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
               <div className={styles.wpDropdownDivider} />
               <CheckGroup title="表示行" items={ROW_ITEMS} set={visibleRows}
                 onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
+              <div className={styles.wpDropdownDivider} />
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
             </DropdownShell>
 
             <label className={styles.check}>
@@ -1711,11 +1782,10 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               色分け表示
             </label>
 
-            <div className={styles.filterRight}>
-              {isFiltered && (
-                <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
-              )}
-            </div>
+            {/* リセット — сразу за фильтрами, не в правом углу */}
+            {isFiltered && (
+              <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
+            )}
           </div>
 
           {viewMode === "period" && periodWarn && (
@@ -2008,13 +2078,13 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
               {listMode === "week" && (
                 <select className={styles.monthSelect} value={listWeek}
-                onChange={e => setListWeek(e.target.value)}>
-                {!listWeekOptions.some(w => w.weekStart === listWeek) && (
-                  <option value={listWeek}>
-                    {listWeek.slice(5).replace("-","/")} 〜 {addDays(listWeek, 6).slice(5).replace("-","/")}
-                  </option>
-                )}
-                {listWeekOptions.map(w => (
+                  onChange={e => setListWeek(e.target.value)}>
+                  {!listWeekOptions.some(w => w.weekStart === listWeek) && (
+                    <option value={listWeek}>
+                      {listWeek.slice(5).replace("-","/")} 〜 {addDays(listWeek, 6).slice(5).replace("-","/")}
+                    </option>
+                  )}
+                  {listWeekOptions.map(w => (
                     <option key={w.weekStart} value={w.weekStart}>
                       {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
                     </option>
@@ -2036,16 +2106,16 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                       {listPDays}日{listPWarn ? `（${listPWarn}）` : ""}
                     </span>
                   )}
-                  </div>
-                )}
-  
-                {listMode !== "period" && (
-                  <button type="button" className={styles.navBtn} onClick={() => shiftListPeriod(1)} aria-label="次へ"><IcoNext /></button>
-                )}
-              </div>
-  
-              <div className={styles.segment}>
-                {LIST_VIEW_MODES.map(m => (
+                </div>
+              )}
+
+              {listMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftListPeriod(1)} aria-label="次へ"><IcoNext /></button>
+              )}
+            </div>
+
+            <div className={styles.segment}>
+              {LIST_VIEW_MODES.map(m => (
                 <button key={m.value} type="button"
                   className={cx(styles.segBtn, styles.segBtnSm, listMode === m.value && styles.segBtnGreen)}
                   onClick={() => setListMode(m.value)}>
@@ -2257,205 +2327,185 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         </div>
       </div>
 
-      {/* ── Detail popup ── */}
-      {detailPopup && (
-        <div style={{
-          position:"fixed", inset:0, zIndex:2000,
-          background:"rgba(0,0,0,0.4)",
-          display:"flex", alignItems:"center", justifyContent:"center",
-        }}
-          onClick={e => { if (e.target === e.currentTarget) { setDetailPopup(null); setEditRecord(null); } }}
-        >
-          <div style={{
-            background:"#fff", borderRadius:16, padding:24,
-            minWidth:400, maxWidth:480,
-            boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
-          }}>
-            {(() => {
-              const shift = shiftMap[`${detailPopup.userId}_${detailPopup.date}`];
-              if (!shift) return null;
-              return (
-                <div style={{
-                  padding: "10px 14px", borderRadius: 10,
-                  background: "#f0f7ff", border: "1px solid #bfdbfe",
-                  marginBottom: 12,
-                }}>
-                  <div style={{ fontSize: 12, color: "#1e40af", fontWeight: 700, marginBottom: 6 }}>
-                    📅 シフト予定
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>
-                    {shift.startTime?.slice(0,5)} 〜 {shift.endTime?.slice(0,5)}
-                  </div>
-                  {shift.slots.map((sl, i) => sl.workplace && (
-                    <div key={i} style={{ fontSize: 12, color: "#64748b" }}>{sl.workplace}</div>
-                  ))}
-                  <button
-                    onClick={() => onNavigate("SHIFTS")}
-                    style={{
-                      marginTop: 8, fontSize: 12, color: "#2563eb",
-                      background: "none", border: "none", cursor: "pointer",
-                      padding: 0, textDecoration: "underline",
-                    }}
-                  >
-                    シフト管理で確認 →
-                  </button>
-                </div>
-              );
-            })()}
-            <div style={{ fontSize:16, fontWeight:800, color:"#1e293b", marginBottom:4 }}>
-              {detailPopup.userName}
+      {/* ── Окно 打刻 за день: просмотр ⇄ редактирование ── */}
+      {detailPopup && createPortal(
+        <div className={styles.dpOverlay}
+          onMouseDown={e => { if (e.target === e.currentTarget && !editRecord) closeDetail(); }}>
+          <div className={styles.dpModal} role="dialog" aria-modal="true"
+            aria-label={editRecord ? "打刻の編集" : "打刻の詳細"}>
+
+            {/* Шапка */}
+            <div className={styles.dpHead}>
+              <span className={cx(styles.dpHeadIcon, editRecord && styles.dpHeadIconEdit)}>
+                {editRecord ? <IcoEdit /> : <IcoCalendar />}
+              </span>
+              <div className={styles.dpHeadText}>
+                {editRecord && <div className={styles.dpHeadTitle}>編集</div>}
+                <div className={editRecord ? styles.dpHeadSub : styles.dpHeadDate}>{fmtJpDate(detailPopup.date)}</div>
+              </div>
+              <button type="button" className={styles.dpClose} onClick={closeDetail} aria-label="閉じる"><IcoClear /></button>
             </div>
-            <div style={{ fontSize:13, color:"#94a3b8", marginBottom:16 }}>{detailPopup.date}</div>
 
-            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-              {(() => {
-                // Группируем по фактической дате записи
-                const groups = [];
-                let currentDate = null;
-                for (const r of detailPopup.dayRecords) {
-                  const recDate = new Date(r.recordedAt).toLocaleDateString("ja-JP", {
-                    year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo",
-                  });
-                  if (recDate !== currentDate) {
-                    currentDate = recDate;
-                    groups.push({ date: recDate, records: [] });
-                  }
-                  groups[groups.length - 1].records.push(r);
-                }
-
-                return groups.map((group, gi) => (
-                  <div key={gi}>
-                    {/* Показываем дату только если она отличается от даты попапа или группа не первая */}
-                    {(() => {
-                      const popupDateStr = new Date(detailPopup.date + "T00:00:00").toLocaleDateString("ja-JP", {
-                        year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Tokyo",
-                      });
-                      return group.date !== popupDateStr || gi > 0 ? (
-                        <div style={{
-                          fontSize: 12, color: "#94a3b8", fontWeight: 600,
-                          marginBottom: 6, marginTop: gi > 0 ? 8 : 0,
-                          paddingBottom: 4, borderBottom: "1px solid #f1f5f9",
-                        }}>
-                          {group.date}
-                        </div>
-                      ) : null;
-                    })()}
-
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      {group.records.map(r => (
-                        <div key={r.id} style={{
-                          display:"flex", alignItems:"center", justifyContent:"space-between",
-                          padding:"10px 14px", borderRadius:10,
-                          background:"#f8fafc", border:"1px solid #e2e8f0",
-                        }}>
-                          <div>
-                            <div style={{ fontSize:13, fontWeight:700, color:getTypeColor(r.recordType) }}>
-                              {getTypeLabel(r.recordType)}
-                            </div>
-                            <div style={{ fontSize:15, fontWeight:700, fontFamily:"monospace", color:"#1e293b" }}>
-                              {fmtTime(r.recordedAt)}
-                            </div>
-                            {r.note   && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>📝 {r.note}</div>}
-                            {r.edited && <div style={{ fontSize:11, color:"#f59e0b", marginTop:2 }}>✏️ 編集済み</div>}
-                          </div>
-                          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                            {r.photoPath && (
-                              <img
-                              src={r.photoPath}
-                              alt=""
-                              onClick={() => setPhotoPopup(r.photoPath)}
-                              style={{
-                                width: 130, height: 100,
-                                objectFit: "cover",
-                                borderRadius: 6,
-                                border: "1px solid #e2e8f0",
-                                cursor: "pointer",
-                                flexShrink: 0,
-                              }}
-                            />
-                            )}
-                            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                            <button onClick={() => setEditRecord({
-                                id: r.id,
-                                recordType: r.recordType,
-                                recordedAt: toJstDatetimeLocal(r.recordedAt),
-                                note: r.note || "",
-                              })} style={{ padding:"4px 10px", fontSize:12, background:"#f1f5f9", border:"none", borderRadius:6, cursor:"pointer", color:"#475569" }}>
-                                編集
-                              </button>
-                              <button onClick={() => handleDeleteRecord(r)}
-                                disabled={deletingId === r.id}
-                                style={{ padding:"4px 10px", fontSize:12, background:"#fee2e2", border:"none", borderRadius:6, cursor: deletingId === r.id ? "not-allowed" : "pointer", color:"#dc2626", opacity: deletingId === r.id ? 0.6 : 1 }}>
-                                {deletingId === r.id ? "..." : "削除"}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ));
+            {/* Сотрудник + плановая смена */}
+            <div className={styles.dpStaff}>
+              <div className={styles.dpStaffName}>{detailPopup.userName}</div>
+              {positions[detailPopup.userId] && <div className={styles.dpStaffPos}>{positions[detailPopup.userId]}</div>}
+              {!editRecord && (() => {
+                const shift = shiftMap[`${detailPopup.userId}_${detailPopup.date}`];
+                if (!shift) return null;
+                const places = [...new Set(shift.slots.map(sl => sl.workplace).filter(Boolean))];
+                return (
+                  <button type="button" className={styles.dpShift}
+                    onClick={() => goToShiftDay(detailPopup.userId, detailPopup.date)}
+                    title="シフト管理でこの日を開く">
+                    <IcoCalendar />
+                    <span className={styles.dpShiftLabel}>シフト予定</span>
+                    <b>{shift.startTime?.slice(0, 5)}〜{shift.endTime?.slice(0, 5)}</b>
+                    {places.length > 0 && <span className={styles.dpShiftPlace}>· {places.join("、")}</span>}
+                    <IcoNext />
+                  </button>
+                );
               })()}
             </div>
 
-            {deleteErr && (
-              <div style={{ padding:"10px 14px", borderRadius:8, background:"#fee2e2", color:"#dc2626", fontSize:12, marginBottom:12 }}>
-                削除エラー: {deleteErr}
-              </div>
-            )}
+            {!editRecord ? (
+              <>
+                {/* ── Просмотр ── */}
+                <div className={styles.dpBody}>
+                  {detailPopup.dayRecords.length === 0 && (
+                    <div className={styles.dpEmpty}>打刻記録がありません</div>
+                  )}
+                  {(() => {
+                    // Группируем по фактической дате записи (ночная смена → запись на следующий день)
+                    const groups = [];
+                    for (const r of detailPopup.dayRecords) {
+                      const d = jstDateStr(r.recordedAt);
+                      if (!groups.length || groups[groups.length - 1].date !== d) groups.push({ date: d, records: [] });
+                      groups[groups.length - 1].records.push(r);
+                    }
+                    return groups.map((g, gi) => (
+                      <div key={g.date || gi} className={styles.dpGroup}>
+                        {(g.date !== detailPopup.date || gi > 0) && (
+                          <div className={styles.dpGroupDate}>{fmtJpDate(g.date)}{g.date > detailPopup.date && "（翌日）"}</div>
+                        )}
+                        {g.records.map(r => (
+                          <div key={r.id} className={styles.dpCard}>
+                            <div className={styles.dpCardTop}>
+                              <span className={cx(styles.dpType, styles[TYPE_CLASS[r.recordType]])}>
+                                <IcoClock />{getTypeLabel(r.recordType)}
+                              </span>
+                              {r.edited && <span className={styles.dpEdited}>編集済み</span>}
+                              <span className={styles.dpTime}>{fmtTime(r.recordedAt)}</span>
+                            </div>
+                            <div className={styles.dpCardBottom}>
+                              {r.photoPath ? (
+                                <img className={styles.dpPhoto} src={r.photoPath} alt=""
+                                  onClick={() => setPhotoPopup(r.photoPath)} />
+                              ) : (
+                                <span className={styles.dpNoPhoto}>写真なし</span>
+                              )}
+                              <div className={styles.dpCardSide}>
+                                {r.note && <div className={styles.dpNote}>{r.note}</div>}
+                                <div className={styles.dpOps}>
+                                  <button type="button" className={styles.dpOpBtn} title="編集" aria-label="編集"
+                                    onClick={() => startEditRecord(r)}>
+                                    <IcoEdit />
+                                  </button>
+                                  <button type="button" className={cx(styles.dpOpBtn, styles.dpOpDanger)} title="削除" aria-label="削除"
+                                    onClick={() => { setDeleteErr(null); setConfirmDelete(r); }}>
+                                    <IcoTrash />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()}
+                </div>
 
-            {editRecord && (
-              <div style={{ padding:14, borderRadius:10, background:"#fffbeb", border:"1px solid #fcd34d", marginBottom:16 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:10 }}>✏️ 時刻を修正</div>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <label style={{ fontSize:12, fontWeight:600, color:"#555" }}>
-                    種別
-                    <select value={editRecord.recordType}
-                      onChange={e => setEditRecord({ ...editRecord, recordType: e.target.value })}
-                      style={{ display:"block", width:"100%", marginTop:4, padding:"6px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13, boxSizing:"border-box", background:"#fff" }}
-                    >
+                {deleteErr && <div className={styles.dpErr}>削除エラー: {deleteErr}</div>}
+
+                <div className={styles.dpFoot}>
+                  <button type="button" className={styles.dpBtnGhost} onClick={closeDetail}>閉じる</button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* ── Редактирование ── */}
+                <div className={cx(styles.dpBody, styles.dpForm)}>
+                  <label className={styles.dpField}>
+                    <span>種別</span>
+                    <select className={styles.dpInput} value={editRecord.recordType}
+                      onChange={e => setEditRecord({ ...editRecord, recordType: e.target.value })}>
                       <option value="CLOCK_IN">出勤</option>
                       <option value="CLOCK_OUT">退勤</option>
                       <option value="BREAK_START">休憩開始</option>
                       <option value="BREAK_END">休憩終了</option>
                     </select>
                   </label>
-                  <label style={{ fontSize:12, fontWeight:600, color:"#555" }}>
-                    時刻
-                    <input type="datetime-local" value={editRecord.recordedAt}
-                      onChange={e => setEditRecord({ ...editRecord, recordedAt: e.target.value })}
-                      style={{ display:"block", width:"100%", marginTop:4, padding:"6px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13, boxSizing:"border-box" }}
-                    />
-                  </label>
-                  <label style={{ fontSize:12, fontWeight:600, color:"#555" }}>
-                    コメント
-                    <input type="text" value={editRecord.note}
-                      onChange={e => setEditRecord({ ...editRecord, note: e.target.value })}
-                      placeholder="修正理由など"
-                      style={{ display:"block", width:"100%", marginTop:4, padding:"6px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13, boxSizing:"border-box" }}
-                    />
-                  </label>
-                  {editErr && <div style={{ color:"#dc2626", fontSize:12 }}>{editErr}</div>}
-                  <div style={{ display:"flex", gap:8, marginTop:4 }}>
-                    <button onClick={handleEditSave} disabled={editLoading}
-                      style={{ padding:"7px 16px", background:"#2F5496", color:"#fff", border:"none", borderRadius:7, fontSize:13, fontWeight:700, cursor:"pointer" }}>
-                      {editLoading ? "..." : "保存"}
-                    </button>
-                    <button onClick={() => { setEditRecord(null); setEditErr(null); }}
-                      style={{ padding:"7px 16px", background:"#f1f5f9", color:"#475569", border:"none", borderRadius:7, fontSize:13, cursor:"pointer" }}>
-                      キャンセル
-                    </button>
+                  <div className={styles.dpRow2}>
+                    <label className={styles.dpField}>
+                      <span>日付</span>
+                      <input type="date" className={styles.dpInput} value={editRecord.date}
+                        onChange={e => setEditRecord({ ...editRecord, date: e.target.value })} />
+                    </label>
+                    <label className={styles.dpField}>
+                      <span>時刻</span>
+                      <input type="time" className={styles.dpInput} value={editRecord.time}
+                        onChange={e => setEditRecord({ ...editRecord, time: e.target.value })} />
+                    </label>
                   </div>
+                  <label className={styles.dpField}>
+                    <span>コメント</span>
+                    <textarea className={cx(styles.dpInput, styles.dpTextarea)} value={editRecord.note}
+                      placeholder="修正理由など"
+                      onChange={e => setEditRecord({ ...editRecord, note: e.target.value })} />
+                  </label>
+                  {editErr && <div className={styles.dpFormErr}>{editErr}</div>}
                 </div>
-              </div>
-            )}
 
-            <button onClick={() => { setDetailPopup(null); setEditRecord(null); }}
-              style={{ width:"100%", padding:10, background:"#f1f5f9", border:"none", borderRadius:10, fontSize:14, cursor:"pointer", color:"#475569" }}>
-              閉じる
-            </button>
+                <div className={styles.dpFoot}>
+                  <button type="button" className={styles.dpBtnGhost}
+                    onClick={() => { setEditRecord(null); setEditErr(null); }} disabled={editLoading}>
+                    キャンセル
+                  </button>
+                  <button type="button" className={styles.dpBtnSave} onClick={handleEditSave}
+                    disabled={editLoading || !editRecord.date || !editRecord.time}>
+                    {editLoading ? "保存中..." : "保存"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Подтверждение удаления 打刻 ── */}
+      {confirmDelete && createPortal(
+        <div className={styles.dlOverlay}
+          onMouseDown={e => { if (e.target === e.currentTarget && deletingId == null) setConfirmDelete(null); }}>
+          <div className={styles.dlModal} role="alertdialog" aria-modal="true" aria-label="打刻記録の削除">
+            <span className={styles.dlIcon}><IcoTrash /></span>
+            <div className={styles.dlTitle}>この打刻記録を削除しますか？</div>
+            <div className={styles.dlItem}>
+              <span className={styles.dlItemName}>{getTypeLabel(confirmDelete.recordType)}　{fmtTime(confirmDelete.recordedAt)}</span>
+              <span className={styles.dlItemSub}>{detailPopup?.userName}・{fmtJpDate(jstDateStr(confirmDelete.recordedAt))}</span>
+            </div>
+            <div className={styles.dlWarn}>この操作は取り消せません。</div>
+            <div className={styles.dlFoot}>
+              <button type="button" className={styles.dpBtnGhost} onClick={() => setConfirmDelete(null)}
+                disabled={deletingId != null}>キャンセル</button>
+              <button type="button" className={styles.dlDelete} onClick={() => handleDeleteRecord(confirmDelete)}
+                disabled={deletingId != null}>
+                <IcoTrash />{deletingId != null ? "削除中..." : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {photoPopup && (

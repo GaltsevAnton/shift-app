@@ -594,6 +594,15 @@ const COL_ITEMS = [
   { value: "department", label: "部署" },
 ];
 
+// 表示行: строки внутри смены (порядок = порядок в ячейке)
+const ROW_ITEMS = [
+  { value: "in",    label: "出勤" },
+  { value: "out",   label: "退勤" },
+  { value: "work",  label: "実働" },
+  { value: "break", label: "休憩" },
+  { value: "place", label: "場所" },
+];
+
 const STATUS_ITEMS = [
   { value: "RECEIVING", label: "受付中", color: "#b8c4d0" },
   { value: "DRAFTING",  label: "作成中", color: "#f0b23c" },
@@ -620,6 +629,7 @@ function IcoLogout()   { return (<svg {...TB_ICON}><path d="M14 4H7a2 2 0 00-2 2
 function IcoSearch()   { return (<svg {...TB_ICON}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></svg>); }
 function IcoPrev()     { return (<svg {...TB_ICON}><path d="M15 6l-6 6 6 6" /></svg>); }
 function IcoNext()     { return (<svg {...TB_ICON}><path d="M9 6l6 6-6 6" /></svg>); }
+function IcoClear()    { return (<svg {...TB_ICON} strokeWidth={2.4}><path d="M7 7l10 10M17 7L7 17" /></svg>); }
 function IcoSelectAll() { return (<svg {...TB_ICON}><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /><path d="M8.5 14.5l2.3 2.3 4.7-4.7" /></svg>); }
 function IcoEdit()     { return (<svg {...TB_ICON}><path d="M4 20h4l10.5-10.5a2.1 2.1 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>); }
 function IcoClose()    { return (<svg {...TB_ICON}><path d="M6 6l12 12M18 6L6 18" /></svg>); }
@@ -798,6 +808,10 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     } catch { return { number: true, position: true, department: true }; }
   });
   const [visibleWorkplaces, setVisibleWorkplaces]   = useState(() => loadFilterSet("mgrFilterWp")   || new Set());
+  // 表示行 — какие строки смены показывать (хотя бы одна остаётся)
+  const [visibleRows, setVisibleRows] = useState(
+    () => loadFilterSet("mgrRowVisibility") || new Set(ROW_ITEMS.map(i => i.value))
+  );
   const [visiblePositions, setVisiblePositions]     = useState(() => loadFilterSet("mgrFilterPos")  || new Set());
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("mgrFilterDept") || new Set());
   const [attendanceMap, setAttendanceMap] = useState({});
@@ -945,6 +959,16 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     load(false);
   }, [viewMode, selectedWeek, periodFrom, periodTo, ym]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── переход из 勤怠管理 («シフト予定 ›»): открыть окно смены сотрудника на этот день ── */
+  useEffect(() => {
+    if (loading || allStaff.length === 0) return;
+    let jump = null;
+    try { jump = JSON.parse(sessionStorage.getItem("mgrJumpTo") || "null"); } catch { /* ignore */ }
+    if (!jump) return;
+    sessionStorage.removeItem("mgrJumpTo");
+    if (allStaff.some(s => s.userId === jump.userId)) setOpenCell({ userId: jump.userId, date: jump.date });
+  }, [loading, allStaff]);
+
   /* ── автообновление каждые 60 сек ── */
   useEffect(() => {
     const interval = setInterval(() => { if (!openCell) load(true); }, 60000);
@@ -958,6 +982,9 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   useEffect(() => {
     try { localStorage.setItem("mgrColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
   }, [colVisibility]);
+  useEffect(() => {
+    saveFilterSet("mgrRowVisibility", visibleRows);
+  }, [visibleRows]);
 
   /* ── close context menu on outside click ── */
   useEffect(() => {
@@ -1171,7 +1198,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const _f2 = allDepartmentItems.some(d => !visibleDepartments.has(d.value));
   const _f3 = workplaces.some(w => !visibleWorkplaces.has(w.name));
   const _f4 = workplaces.length > 0 && (!visibleWorkplaces.has("__none__") || !visibleWorkplaces.has("__off__"));
-  const isFiltered = _f1 || _f2 || _f3 || _f4;
+  const _f5 = COL_ITEMS.some(c => !colVisibility[c.value]);   // 表示列
+  const isFiltered = _f1 || _f2 || _f3 || _f4 || _f5;
 
   /* ── handlers ── */
   async function changeStatus(weekStart, newStatus) {
@@ -1259,6 +1287,25 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     setVisiblePositions(new Set(positionOptions));
     setVisibleDepartments(new Set(departments.map(d => d.name)));
     setVisibleWorkplaces(new Set([...workplaces.map(w => w.name), "__none__", "__off__"]));
+    setColVisibility({ number: true, position: true, department: true });   // 表示列 — тоже сбрасываем
+  }
+
+  // 表示行: хотя бы одна строка должна оставаться
+  function handleRowToggle(key) {
+    setVisibleRows(prev => {
+      const n = new Set(prev);
+      if (n.has(key)) {
+        if (n.size === 1) return prev;
+        n.delete(key);
+      } else {
+        n.add(key);
+      }
+      return n;
+    });
+  }
+  function handleRowToggleAll(allKeys, turnOn) {
+    if (!turnOn) return;
+    setVisibleRows(new Set(allKeys));
   }
 
   function selectWholeMonth(userId) {
@@ -1363,6 +1410,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const toggleCol     = k => setColVisibility(v => ({ ...v, [k]: !v[k] }));
   const toggleAllCols = (keys, on) => setColVisibility(v => ({ ...v, ...Object.fromEntries(keys.map(k => [k, on])) }));
   const sortChanged   = !(sortConfig.field === "sortOrder" && sortConfig.dir === "asc");
+  const rowsFiltered  = ROW_ITEMS.some(i => !visibleRows.has(i.value));
+  const shownRows     = ROW_ITEMS.filter(i => visibleRows.has(i.value));
   /* ── render ── */
   return (
     <ManagerLayout name={getName()} view={view} onNavigate={onNavigate} onLogout={onLogout}>
@@ -1482,6 +1531,14 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
               <input type="text" value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="氏名で検索..." />
+              {/* ✕ — очистить поиск (место зарезервировано, поле не «прыгает») */}
+              <button type="button"
+                className={cx(styles.searchClear, !searchQuery && styles.searchClearHidden)}
+                onClick={e => { e.preventDefault(); setSearchQuery(""); }}
+                tabIndex={searchQuery ? 0 : -1}
+                aria-label="検索をクリア">
+                <IcoClear />
+              </button>
             </label>
 
             {departmentItems.length > 0 && (
@@ -1497,32 +1554,38 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
               </DropdownShell>
             )}
             {wpAllItems.length > 0 && (
-              <DropdownShell label="表示フィルター" filtered={wpFiltered} width={220}>
-                <CheckGroup title="勤務場所" items={wpAllItems} set={visibleWorkplaces}
+              <DropdownShell label="勤務場所" filtered={wpFiltered} width={220}>
+                <CheckGroup items={wpAllItems} set={visibleWorkplaces}
                   onToggle={handleWpToggle} onToggleAll={handleWpToggleAll} />
               </DropdownShell>
             )}
 
             {/* На широком экране — отдельными кнопками */}
-            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
-              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
-            </DropdownShell>
             <DropdownShell label="表示列" filtered={colsFiltered} width={180} className={styles.wideOnly}>
               <CheckGroup items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
             </DropdownShell>
-
-            {/* На узком экране — всё в «その他» */}
-            <DropdownShell label="その他" filtered={sortChanged || colsFiltered} width={220} className={styles.narrowOnly}>
+            <DropdownShell label="表示行" filtered={rowsFiltered} width={180} className={styles.wideOnly}>
+              <CheckGroup items={ROW_ITEMS} set={visibleRows}
+                onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
+            </DropdownShell>
+            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
               <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
-              <div className={styles.wpDropdownDivider} />
-              <CheckGroup title="表示列" items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
             </DropdownShell>
 
-            <div className={styles.filterRight}>
-              {isFiltered && (
-                <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
-              )}
-            </div>
+            {/* На узком экране — всё в «その他» */}
+            <DropdownShell label="その他" filtered={sortChanged || colsFiltered || rowsFiltered} width={220} className={styles.narrowOnly}>
+              <CheckGroup title="表示列" items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
+              <div className={styles.wpDropdownDivider} />
+              <CheckGroup title="表示行" items={ROW_ITEMS} set={visibleRows}
+                onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
+              <div className={styles.wpDropdownDivider} />
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+            </DropdownShell>
+
+            {/* リセット — сразу за фильтрами, не в правом углу */}
+            {isFiltered && (
+              <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
+            )}
           </div>
 
           {viewMode === "period" && periodWarn && (
@@ -1622,8 +1685,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                           <td className={cx(styles.td, styles.tdLabels, styles.stickyLabels)}>
                             {Array.from({ length: maxSlots }, (_, si) => (
                               <div key={si} className={cx(styles.slot, si < maxSlots - 1 && styles.slotSep)}>
-                                {["出勤", "退勤", "実働", "休憩", "場所"].map(l => (
-                                  <div key={l} className={cx(styles.line, styles.lineLabel)}>{l}</div>
+                                {shownRows.map(r => (
+                                  <div key={r.value} className={cx(styles.line, styles.lineLabel)}>{r.label}</div>
                                 ))}
                               </div>
                             ))}
@@ -1686,16 +1749,26 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
                                       const breakStr = fmtBreakMinutes(breakMin);
                                       return (
                                         <div key={si} className={cx(styles.slot, si < visibleSlots.length - 1 && styles.slotSep)}>
-                                          <div className={styles.line}><span className={styles.time}>{formatTime(s.startTime)}</span></div>
-                                          <div className={styles.line}>
-                                            <span className={cx(styles.time, nd && styles.nextDayText)}>{formatTime(s.endTime)}</span>
-                                            {s.last && <span className={styles.lastBadge}>L</span>}
-                                          </div>
-                                          <div className={styles.line}><span className={styles.work}>{workStr || ""}</span></div>
-                                          <div className={styles.line}><span className={styles.dur}>{breakStr || ""}</span></div>
-                                          <div className={styles.line}>
-                                            {s.workplace && <span className={styles.place} title={s.workplace}>{s.workplace}</span>}
-                                          </div>
+                                          {visibleRows.has("in") && (
+                                            <div className={styles.line}><span className={styles.time}>{formatTime(s.startTime)}</span></div>
+                                          )}
+                                          {visibleRows.has("out") && (
+                                            <div className={styles.line}>
+                                              <span className={cx(styles.time, nd && styles.nextDayText)}>{formatTime(s.endTime)}</span>
+                                              {s.last && <span className={styles.lastBadge}>L</span>}
+                                            </div>
+                                          )}
+                                          {visibleRows.has("work") && (
+                                            <div className={styles.line}><span className={styles.work}>{workStr || ""}</span></div>
+                                          )}
+                                          {visibleRows.has("break") && (
+                                            <div className={styles.line}><span className={styles.dur}>{breakStr || ""}</span></div>
+                                          )}
+                                          {visibleRows.has("place") && (
+                                            <div className={styles.line}>
+                                              {s.workplace && <span className={styles.place} title={s.workplace}>{s.workplace}</span>}
+                                            </div>
+                                          )}
                                         </div>
                                       );
                                     })

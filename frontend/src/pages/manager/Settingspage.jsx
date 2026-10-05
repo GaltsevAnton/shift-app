@@ -1,656 +1,418 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
-import shellStyles from "../../app/layouts/AppShell.module.css";
+import styles from "./SettingsPage.module.css";
 
-/* ─── shared styles ─────────────────────────────────────── */
-const cardStyle = {
-  background: "#fff",
-  border: "1px solid rgba(0,0,0,0.06)",
-  borderRadius: 14,
-  boxShadow: "0 6px 20px rgba(20,20,40,0.06)",
-  padding: 20,
-  marginBottom: 16,
-};
-const cardTitleStyle = {
-  fontSize: 15, fontWeight: 800, color: "#1a1d2e", marginBottom: 14,
-};
-const inputStyle = {
-  width: "100%", padding: "8px 10px", border: "1px solid #e0e0e8",
-  borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box",
-};
-const btnPrimaryStyle = {
-  padding: "8px 16px",
-  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-  color: "#fff", border: "none", borderRadius: 8,
-  fontSize: 13, fontWeight: 700, cursor: "pointer",
-};
-const btnSecondaryStyle = {
-  padding: "8px 14px", background: "#f0f1f6", color: "#444",
-  border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
-};
-const btnDangerStyle = {
-  padding: "6px 12px", background: "#fee2e2", color: "#c0392b",
-  border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
-};
-const thStyle = {
-  textAlign: "left", padding: "8px 10px", fontSize: 12,
-  fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
-};
-const tdStyle = { padding: "10px 10px", verticalAlign: "middle" };
+/* ═══════════════════════════════════════════════════════════
+   設定 — новый дизайн (2026-10-05)
+   Без вкладок: все справочники блоками на одной странице (masonry 3/2/1 колонки),
+   под ними отдельной строкой «システム設定» — 通知設定 и 権限 (ADMIN).
+   ═══════════════════════════════════════════════════════════ */
 
-/* ─── Generic CRUD panel ────────────────────────────────── */
-function MasterPanel({ title, hint, items, loading, err, onCreate, onUpdate, onDelete, onMove }) {
-  const [newName, setNewName]   = useState("");
-  const [editId, setEditId]     = useState(null);
-  const [editName, setEditName] = useState("");
+const cx = (...a) => a.filter(Boolean).join(" ");
+const SCROLL_AFTER = 10; // больше N элементов — внутренняя прокрутка списка
 
-  function startEdit(item) {
-    setEditId(item.id);
-    setEditName(item.name);
-  }
-  function cancelEdit() {
-    setEditId(null);
-    setEditName("");
+/* ─── Иконки ────────────────────────────────────────────── */
+const TB_ICON = {
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+  strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+};
+function IcoGear()   { return (<svg {...TB_ICON}><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2" /><circle cx="12" cy="12" r="7" /></svg>); }
+function IcoBell()   { return (<svg {...TB_ICON}><path d="M6 16.5V11a6 6 0 0112 0v5.5l1.5 1.5h-15z" /><path d="M10 20.5a2 2 0 004 0" /></svg>); }
+function IcoUser()   { return (<svg {...TB_ICON}><circle cx="12" cy="8.5" r="3.8" /><path d="M4.5 20c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5" /></svg>); }
+function IcoLogout() { return (<svg {...TB_ICON}><path d="M14 4H7a2 2 0 00-2 2v12a2 2 0 002 2h7" /><path d="M11 12h9M17 8.5l3.5 3.5-3.5 3.5" /></svg>); }
+function IcoPin()    { return (<svg {...TB_ICON}><path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0113 0C18.5 14.8 12 21 12 21z" /><circle cx="12" cy="9.8" r="2.3" /></svg>); }
+function IcoBag()    { return (<svg {...TB_ICON}><rect x="3.5" y="7.5" width="17" height="12.5" rx="2" /><path d="M9 7.5V5.5a1.5 1.5 0 011.5-1.5h3A1.5 1.5 0 0115 5.5v2M3.5 12.5h17" /></svg>); }
+function IcoUsers()  { return (<svg {...TB_ICON}><circle cx="9" cy="8.5" r="3.2" /><path d="M3.5 19c0-3.2 2.5-5.5 5.5-5.5s5.5 2.3 5.5 5.5" /><circle cx="16.8" cy="9.5" r="2.5" /><path d="M16.5 13.6c2.3.2 4 2 4 4.6" /></svg>); }
+function IcoList()   { return (<svg {...TB_ICON}><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M8.5 10h7M8.5 13.5h7M8.5 17h4" /></svg>); }
+function IcoCup()    { return (<svg {...TB_ICON}><path d="M4.5 9h12v5a5 5 0 01-5 5h-2a5 5 0 01-5-5V9z" /><path d="M16.5 10.5h1.5a2.5 2.5 0 010 5h-1.8M8 3.5v2.5M12 3.5v2.5" /></svg>); }
+function IcoShield() { return (<svg {...TB_ICON}><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8-7.5 9.5-4.3-1.5-7.5-4.9-7.5-9.5V6L12 3z" /><path d="M9 12l2.2 2.2L15.5 10" /></svg>); }
+function IcoDb()     { return (<svg {...TB_ICON}><ellipse cx="12" cy="6" rx="7" ry="2.8" /><path d="M5 6v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6M5 12v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6" /></svg>); }
+function IcoClock()  { return (<svg {...TB_ICON}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>); }
+function IcoEdit()   { return (<svg {...TB_ICON}><path d="M4 20h4l10.5-10.5a2.1 2.1 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>); }
+function IcoTrash()  { return (<svg {...TB_ICON}><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5a1 1 0 001 .9h7a1 1 0 001-.9l1-12.5M9.5 7V4.5h5V7" /></svg>); }
+function IcoCheck()  { return (<svg {...TB_ICON} strokeWidth={2.4}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>); }
+function IcoClear()  { return (<svg {...TB_ICON} strokeWidth={2.4}><path d="M7 7l10 10M17 7L7 17" /></svg>); }
+function IcoUp()     { return (<svg {...TB_ICON} strokeWidth={2.2}><path d="M6 14.5l6-6 6 6" /></svg>); }
+function IcoDown()   { return (<svg {...TB_ICON} strokeWidth={2.2}><path d="M6 9.5l6 6 6-6" /></svg>); }
+function IcoPlus()   { return (<svg {...TB_ICON} strokeWidth={2.3}><path d="M12 5v14M5 12h14" /></svg>); }
+function IcoSave()   { return (<svg {...TB_ICON}><path d="M5 4h11l3 3v12a1 1 0 01-1 1H6a1 1 0 01-1-1V4z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></svg>); }
+
+/* Esc закрывает окно */
+function useEsc(active, onEsc) {
+  const ref = useRef(onEsc);
+  ref.current = onEsc;
+  useEffect(() => {
+    if (!active) return;
+    function onKey(e) { if (e.key === "Escape") ref.current(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [active]);
+}
+
+/* ─── Раздел страницы (マスターデータ / システム設定) ─────── */
+// Свёрнутые разделы запоминаются в localStorage (settingsCollapsed: ["master", ...])
+function loadCollapsed() {
+  try {
+    const v = JSON.parse(localStorage.getItem("settingsCollapsed") || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
+function Section({ id, icon, title, sub, children }) {
+  const [open, setOpen] = useState(() => !loadCollapsed().includes(id));
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    try {
+      const list = loadCollapsed().filter(k => k !== id);
+      if (!next) list.push(id);
+      localStorage.setItem("settingsCollapsed", JSON.stringify(list));
+    } catch { /* ignore */ }
   }
 
   return (
-    <div>
-      {err && (
-        <div style={{
-          background: "#ffe5e5", color: "#c0392b", padding: "10px 14px",
-          borderRadius: 10, marginBottom: 16, fontSize: 13,
-        }}>
-          {err}
+    <section className={cx(styles.section, !open && styles.sectionClosed)}>
+      <button type="button" className={styles.sectionHead} onClick={toggle} aria-expanded={open}>
+        <span className={styles.sectionIcon}>{icon}</span>
+        <span className={styles.sectionText}>
+          <span className={styles.sectionTitle}>{title}</span>
+          {sub && <span className={styles.sectionSub}>{sub}</span>}
+        </span>
+        <span className={styles.sectionChevron} aria-label={open ? "折りたたむ" : "展開する"}>
+          <IcoDown />
+        </span>
+      </button>
+      {open && <div className={styles.sectionBody}>{children}</div>}
+    </section>
+  );
+}
+
+/* ─── Общий каркас блока ────────────────────────────────── */
+function Block({ icon, title, count, hint, err, ok, className, children, foot }) {
+  return (
+    <section className={cx(styles.block, className)}>
+      <div className={styles.blockHead}>
+        <div className={styles.blockHeadRow}>
+          <span className={styles.blockIcon}>{icon}</span>
+          <span className={styles.blockTitle}>{title}</span>
+          {count != null && <span className={styles.blockCount}>{count}</span>}
+          {ok && <span className={styles.blockOk}><IcoCheck />{ok}</span>}
         </div>
+        {hint && <div className={styles.blockHint}>{hint}</div>}
+      </div>
+      {err && <div className={styles.blockErr}>{err}</div>}
+      <div className={styles.blockBody}>{children}</div>
+      {foot && <div className={styles.blockFoot}>{foot}</div>}
+    </section>
+  );
+}
+
+function RowOps({ canEdit, canDelete, onEdit, onDelete, disabled }) {
+  if (!canEdit && !canDelete) return null;
+  return (
+    <div className={styles.rowOps}>
+      {canEdit && (
+        <button type="button" className={styles.opBtn} onClick={onEdit} disabled={disabled}
+          title="編集" aria-label="編集">
+          <IcoEdit />
+        </button>
       )}
-
-      {/* Create */}
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>新規追加</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-              名前 *
-            </label>
-            <input
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              style={inputStyle}
-              placeholder={hint}
-              onKeyDown={e => {
-                if (e.key === "Enter" && newName.trim()) {
-                  onCreate(newName.trim());
-                  setNewName("");
-                }
-              }}
-            />
-          </div>
-          <button
-            style={btnPrimaryStyle}
-            type="button"
-            disabled={!newName.trim()}
-            onClick={() => { onCreate(newName.trim()); setNewName(""); }}
-          >
-            ＋ 追加
-          </button>
-        </div>
-      </div>
-
-      {/* List */}
-      <div style={cardStyle}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={cardTitleStyle}>{title}一覧</div>
-        </div>
-
-        {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-            <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
-                {onMove && <th style={{ ...thStyle, width: 60 }}></th>}
-                <th style={thStyle}>ID</th>
-                <th style={thStyle}>名前</th>
-                <th style={{ ...thStyle, textAlign: "right" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, index) => (
-                editId === item.id ? (
-                  <tr key={item.id} style={{ background: "#f8f8ff", borderBottom: "1px solid #f0f1f6" }}>
-                    {onMove && <td style={tdStyle}></td>}
-                    <td style={tdStyle}>
-                      <span style={{ color: "#aaa", fontSize: 12 }}>#{item.id}</span>
-                    </td>
-                    <td style={tdStyle} colSpan={2}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <input
-                          value={editName}
-                          onChange={e => setEditName(e.target.value)}
-                          style={{ ...inputStyle, maxWidth: 300 }}
-                          onKeyDown={e => {
-                            if (e.key === "Enter" && editName.trim()) {
-                              onUpdate(item.id, editName.trim());
-                              cancelEdit();
-                            }
-                            if (e.key === "Escape") cancelEdit();
-                          }}
-                          autoFocus
-                        />
-                        <button
-                          style={btnPrimaryStyle}
-                          type="button"
-                          disabled={!editName.trim()}
-                          onClick={() => { onUpdate(item.id, editName.trim()); cancelEdit(); }}
-                        >
-                          保存
-                        </button>
-                        <button style={btnSecondaryStyle} type="button" onClick={cancelEdit}>
-                          キャンセル
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr
-                    key={item.id}
-                    style={{ borderBottom: "1px solid #f0f1f6" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
-                    onMouseLeave={e => e.currentTarget.style.background = ""}
-                  >
-                    {onMove && (
-                      <td style={tdStyle}>
-                        <div style={{ display: "flex", gap: 2 }}>
-                          <button
-                            type="button"
-                            disabled={index === 0}
-                            onClick={() => onMove(index, -1)}
-                            style={{ ...btnSecondaryStyle, padding: "2px 8px", opacity: index === 0 ? 0.3 : 1 }}
-                          >↑</button>
-                          <button
-                            type="button"
-                            disabled={index === items.length - 1}
-                            onClick={() => onMove(index, 1)}
-                            style={{ ...btnSecondaryStyle, padding: "2px 8px", opacity: index === items.length - 1 ? 0.3 : 1 }}
-                          >↓</button>
-                        </div>
-                      </td>
-                    )}
-                    <td style={tdStyle}>
-                      <span style={{ color: "#aaa", fontSize: 12 }}>#{item.id}</span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{
-                        fontSize: 13, color: "#1a1d2e", background: "#f1f5f9",
-                        padding: "3px 10px", borderRadius: 20, fontWeight: 600,
-                      }}>
-                        {item.name}
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <button style={btnSecondaryStyle} type="button" onClick={() => startEdit(item)}>
-                          編集
-                        </button>
-                        <button style={btnDangerStyle} type="button" onClick={() => onDelete(item.id)}>
-                          削除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              ))}
-              {items.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={onMove ? 4 : 3} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
-                    まだ登録されていません
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {canDelete && (
+        <button type="button" className={cx(styles.opBtn, styles.opBtnDanger)} onClick={onDelete} disabled={disabled}
+          title="削除" aria-label="削除">
+          <IcoTrash />
+        </button>
+      )}
     </div>
   );
 }
 
-/* ─── Workplaces tab ────────────────────────────────────── */
-function WorkplacesTab() {
-  const [items, setItems]   = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr]       = useState("");
-
-  async function load() {
-    setLoading(true);
-    setErr("");
-    try { setItems(await api.settingsWorkplacesList()); }
-    catch (e) { setErr(e.message || "読み込みエラー"); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function onCreate(name) {
-    setErr("");
-    try { await api.settingsWorkplacesCreate({ name }); await load(); }
-    catch (e) { setErr(e.message || "作成エラー"); }
-  }
-
-  async function onUpdate(id, name) {
-    setErr("");
-    try { await api.settingsWorkplacesUpdate(id, { name }); await load(); }
-    catch (e) { setErr(e.message || "更新エラー"); }
-  }
-
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？")) return;
-    setErr("");
-    try { await api.settingsWorkplacesDelete(id); await load(); }
-    catch (e) { setErr(e.message || "削除エラー"); }
-  }
-
+function EditOps({ onSave, onCancel, saveDisabled }) {
   return (
-    <MasterPanel
-      title="勤務場所"
-      hint="例：ホール1、フロント..."
-      items={items}
-      loading={loading}
-      err={err}
-      onCreate={onCreate}
-      onUpdate={onUpdate}
-      onDelete={onDelete}
-    />
+    <div className={styles.rowOps}>
+      <button type="button" className={cx(styles.opBtn, styles.opBtnOk)} onClick={onSave} disabled={saveDisabled}
+        aria-label="保存">
+        <IcoCheck />
+      </button>
+      <button type="button" className={styles.opBtn} onClick={onCancel} aria-label="キャンセル">
+        <IcoClear />
+      </button>
+    </div>
   );
 }
 
-/* ─── Positions tab ─────────────────────────────────────── */
-function PositionsTab() {
-  const [items, setItems]   = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr]       = useState("");
-
-  async function load() {
-    setLoading(true);
-    setErr("");
-    try { setItems(await api.settingsPositionsList()); }
-    catch (e) { setErr(e.message || "読み込みエラー"); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function onCreate(name) {
-    setErr("");
-    try { await api.settingsPositionsCreate({ name }); await load(); }
-    catch (e) { setErr(e.message || "作成エラー"); }
-  }
-
-  async function onUpdate(id, name) {
-    setErr("");
-    try { await api.settingsPositionsUpdate(id, { name }); await load(); }
-    catch (e) { setErr(e.message || "更新エラー"); }
-  }
-
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？")) return;
-    setErr("");
-    try { await api.settingsPositionsDelete(id); await load(); }
-    catch (e) { setErr(e.message || "削除エラー"); }
-  }
-
-  return (
-    <MasterPanel
-      title="職種・役職"
-      hint="例：フロントスタッフ、料理長..."
-      items={items}
-      loading={loading}
-      err={err}
-      onCreate={onCreate}
-      onUpdate={onUpdate}
-      onDelete={onDelete}
-    />
-  );
-}
-
-/* ─── Departments tab ───────────────────────────────────── */
-function DepartmentsTab() {
+/* ─── Загрузка / CRUD для одного справочника ─────────────── */
+function useMaster(listFn) {
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState("");
-  const [reordering, setReordering] = useState(false);
 
   async function load() {
-    setLoading(true); setErr("");
-    try { setItems(await api.settingsDepartmentsList()); }
-    catch (e) { setErr(e.message || "読み込みエラー"); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function onCreate(name) {
-    setErr("");
-    try { await api.settingsDepartmentsCreate({ name }); await load(); }
-    catch (e) { setErr(e.message || "作成エラー"); }
-  }
-  async function onUpdate(id, name) {
-    setErr("");
-    try { await api.settingsDepartmentsUpdate(id, { name }); await load(); }
-    catch (e) { setErr(e.message || "更新エラー"); }
-  }
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？")) return;
-    setErr("");
-    try { await api.settingsDepartmentsDelete(id); await load(); }
-    catch (e) { setErr(e.message || "削除エラー"); }
-  }
-
-  async function onMove(index, dir) {
-    const swapIdx = index + dir;
-    if (swapIdx < 0 || swapIdx >= items.length || reordering) return;
-    const next = [...items];
-    [next[index], next[swapIdx]] = [next[swapIdx], next[index]];
-    setItems(next); // оптимистично, для мгновенного отклика
-    setReordering(true); setErr("");
+    setLoading(true);
     try {
-      await api.settingsDepartmentsReorder(next.map(d => d.id));
+      const data = await listFn();
+      setItems(Array.isArray(data) ? data : []);
     } catch (e) {
-      setErr(e.message || "並び替えエラー");
-      await load(); // откат к серверному состоянию при ошибке
+      setErr(e.message || "読み込みエラー");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // действие + перезагрузка; ошибка — в шапку блока. Возвращает true при успехе
+  async function run(fn, errLabel) {
+    setErr("");
+    try { await fn(); await load(); return true; }
+    catch (e) { setErr(e.message || errLabel); return false; }
+  }
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return { items, setItems, loading, err, setErr, load, run };
+}
+
+/* ─── Простой справочник (только «名前») ─────────────────── */
+function NameListBlock({ icon, title, hint, placeholder, fns, can, deleteWarn, onAskDelete }) {
+  const m = useMaster(fns.list);
+  const [newName, setNewName]   = useState("");
+  const [adding, setAdding]     = useState(false);
+  const [editId, setEditId]     = useState(null);
+  const [editName, setEditName] = useState("");
+  const [reordering, setReordering] = useState(false);
+  const addRef = useRef(null);
+
+  async function handleAdd() {
+    const name = newName.trim();
+    if (!name || adding) return;
+    setAdding(true);
+    const ok = await m.run(() => fns.create({ name }), "作成エラー");
+    setAdding(false);
+    if (ok) { setNewName(""); addRef.current?.focus(); }
+  }
+
+  function startEdit(item) { setEditId(item.id); setEditName(item.name); }
+  function cancelEdit()    { setEditId(null); setEditName(""); }
+
+  async function saveEdit() {
+    const name = editName.trim();
+    if (!name) return;
+    const item = m.items.find(i => i.id === editId);
+    if (item && item.name === name) { cancelEdit(); return; }
+    const ok = await m.run(() => fns.update(editId, { name }), "更新エラー");
+    if (ok) cancelEdit();
+  }
+
+  function askDelete(item) {
+    onAskDelete({
+      name: item.name,
+      warn: deleteWarn,
+      action: () => m.run(() => fns.remove(item.id), "削除エラー"),
+    });
+  }
+
+  async function move(index, dir) {
+    const swap = index + dir;
+    if (swap < 0 || swap >= m.items.length || reordering) return;
+    const next = [...m.items];
+    [next[index], next[swap]] = [next[swap], next[index]];
+    m.setItems(next);            // оптимистично
+    setReordering(true); m.setErr("");
+    try {
+      await fns.reorder(next.map(d => d.id));
+    } catch (e) {
+      m.setErr(e.message || "並び替えエラー");
+      await m.load();            // откат к серверному состоянию
     } finally {
       setReordering(false);
     }
   }
 
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-        矢印でキオスク画面に表示される部署の順序を変更できます（部署の非表示・除外はできません）。
-      </div>
-      <MasterPanel
-        title="部署"
-        hint="例：フロント、調理、事務所..."
-        items={items} loading={loading} err={err}
-        onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete}
-        onMove={onMove}
-      />
-    </div>
-  );
-}
-
-/* ─── Attendance statuses tab (勤務状況リスト) ───────────── */
-function AttendanceStatusesTab() {
-  const [items, setItems]     = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr]         = useState("");
-
-  async function load() {
-    setLoading(true); setErr("");
-    try { setItems(await api.settingsAttendanceStatusesList()); }
-    catch (e) { setErr(e.message || "読み込みエラー"); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function onCreate(name) {
-    setErr("");
-    try { await api.settingsAttendanceStatusesCreate({ name }); await load(); }
-    catch (e) { setErr(e.message || "作成エラー"); }
-  }
-  async function onUpdate(id, name) {
-    setErr("");
-    try { await api.settingsAttendanceStatusesUpdate(id, { name }); await load(); }
-    catch (e) { setErr(e.message || "更新エラー"); }
-  }
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？\n（勤怠管理で既に設定済みの表示はそのまま残ります）")) return;
-    setErr("");
-    try { await api.settingsAttendanceStatusesDelete(id); await load(); }
-    catch (e) { setErr(e.message || "削除エラー"); }
-  }
+  const movable = !!fns.reorder && can.edit;
+  const items = m.items;
 
   return (
-    <div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-        勤怠管理の「状況」欄で選択できる項目です。名称変更・削除をしても、既に設定済みの日の表示は変更前のまま残ります。
-      </div>
-      <MasterPanel
-        title="勤務状況"
-        hint="例：有給、欠勤、日時調整..."
-        items={items} loading={loading} err={err}
-        onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete}
-      />
-    </div>
-  );
-}
-
-/* ─── Break Rules tab ───────────────────────────────────── */
-function BreakRulesTab() {
-  const [items, setItems]     = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr]         = useState("");
-  const [form, setForm]       = useState({ name: "", thresholdMinutes: "", breakMinutes: "" });
-  const [editId, setEditId]   = useState(null);
-  const [editForm, setEditForm] = useState({});
-
-  async function load() {
-    setLoading(true); setErr("");
-    try { setItems(await api.settingsBreakRulesList()); }
-    catch (e) { setErr(e.message || "読み込みエラー"); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function onCreate() {
-    if (!form.name.trim() || !form.thresholdMinutes || !form.breakMinutes) return;
-    setErr("");
-    try {
-      await api.settingsBreakRulesCreate({
-        name: form.name.trim(),
-        thresholdMinutes: Number(form.thresholdMinutes),
-        breakMinutes: Number(form.breakMinutes),
-      });
-      setForm({ name: "", thresholdMinutes: "", breakMinutes: "" });
-      await load();
-    } catch (e) { setErr(e.message || "作成エラー"); }
-  }
-
-  async function onUpdate(id) {
-    setErr("");
-    try {
-      await api.settingsBreakRulesUpdate(id, {
-        name: editForm.name,
-        thresholdMinutes: Number(editForm.thresholdMinutes),
-        breakMinutes: Number(editForm.breakMinutes),
-      });
-      setEditId(null);
-      await load();
-    } catch (e) { setErr(e.message || "更新エラー"); }
-  }
-
-  async function onDelete(id) {
-    if (!window.confirm("削除しますか？")) return;
-    setErr("");
-    try { await api.settingsBreakRulesDelete(id); await load(); }
-    catch (e) { setErr(e.message || "削除エラー"); }
-  }
-
-  return (
-    <div>
-      {err && (
-        <div style={{
-          background: "#ffe5e5", color: "#c0392b", padding: "10px 14px",
-          borderRadius: 10, marginBottom: 16, fontSize: 13,
-        }}>
-          {err}
-        </div>
-      )}
-
-      {/* Create */}
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>新規追加</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, alignItems: "flex-end" }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-              名前 *
-            </label>
-            <input
-              value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              style={inputStyle}
-              placeholder="例：休憩1"
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-              しきい値（分以上）*
-            </label>
-            <input
-              type="number" min="1"
-              value={form.thresholdMinutes}
-              onChange={e => setForm({ ...form, thresholdMinutes: e.target.value })}
-              style={inputStyle}
-              placeholder="例：360"
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-              休憩時間（分）*
-            </label>
-            <input
-              type="number" min="1"
-              value={form.breakMinutes}
-              onChange={e => setForm({ ...form, breakMinutes: e.target.value })}
-              style={inputStyle}
-              placeholder="例：45"
-            />
-          </div>
-          <button
-            style={{ ...btnPrimaryStyle, whiteSpace: "nowrap" }}
-            type="button"
-            disabled={!form.name.trim() || !form.thresholdMinutes || !form.breakMinutes}
-            onClick={onCreate}
-          >
-            ＋ 追加
+    <Block icon={icon} title={title} count={m.loading && !items.length ? null : items.length}
+      hint={hint} err={m.err}
+      foot={can.create && (
+        <div className={styles.addRow}>
+          <input ref={addRef} className={styles.input} value={newName} placeholder={placeholder}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleAdd(); }} />
+          <button type="button" className={styles.addBtn} onClick={handleAdd} disabled={!newName.trim() || adding}>
+            <IcoPlus />追加
           </button>
         </div>
-      </div>
-
-      {/* List */}
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>休憩ルール一覧</div>
-        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-          勤務時間がしきい値を超えた場合、最も近いルールの休憩時間を差し引きます。
-        </div>
-        {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
-                <th style={thStyle}>名前</th>
-                <th style={thStyle}>勤務時間が X 分以上</th>
-                <th style={thStyle}>休憩時間（分）</th>
-                <th style={{ ...thStyle, textAlign: "right" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(item => (
-                editId === item.id ? (
-                  <tr key={item.id} style={{ background: "#f8f8ff", borderBottom: "1px solid #f0f1f6" }}>
-                    <td style={tdStyle}>
-                      <input
-                        value={editForm.name}
-                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                        style={{ ...inputStyle, maxWidth: 140 }}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" min="1"
-                        value={editForm.thresholdMinutes}
-                        onChange={e => setEditForm({ ...editForm, thresholdMinutes: e.target.value })}
-                        style={{ ...inputStyle, maxWidth: 100 }}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        type="number" min="1"
-                        value={editForm.breakMinutes}
-                        onChange={e => setEditForm({ ...editForm, breakMinutes: e.target.value })}
-                        style={{ ...inputStyle, maxWidth: 100 }}
-                      />
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <button style={btnPrimaryStyle} type="button" onClick={() => onUpdate(item.id)}>保存</button>
-                        <button style={btnSecondaryStyle} type="button" onClick={() => setEditId(null)}>キャンセル</button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={item.id} style={{ borderBottom: "1px solid #f0f1f6" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
-                    onMouseLeave={e => e.currentTarget.style.background = ""}>
-                    <td style={tdStyle}>
-                      <span style={{
-                        fontSize: 13, color: "#1a1d2e", background: "#f1f5f9",
-                        padding: "3px 10px", borderRadius: 20, fontWeight: 600,
-                      }}>
-                        {item.name}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{ fontWeight: 600, color: "#475569" }}>
-                        {item.thresholdMinutes} 分以上
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{ fontWeight: 600, color: "#6366f1" }}>
-                        {item.breakMinutes} 分
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <button style={btnSecondaryStyle} type="button"
-                          onClick={() => {
-                            setEditId(item.id);
-                            setEditForm({
-                              name: item.name,
-                              thresholdMinutes: item.thresholdMinutes,
-                              breakMinutes: item.breakMinutes,
-                            });
-                          }}>
-                          編集
-                        </button>
-                        <button style={btnDangerStyle} type="button" onClick={() => onDelete(item.id)}>
-                          削除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              ))}
-              {items.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>
-                    まだ登録されていません
-                  </td>
-                </tr>
+      )}>
+      {m.loading && !items.length ? (
+        <div className={styles.empty}>読み込み中...</div>
+      ) : items.length === 0 ? (
+        <div className={styles.empty}>まだ登録されていません</div>
+      ) : (
+        <ul className={cx(styles.list, items.length > SCROLL_AFTER && styles.listScroll)}>
+          {items.map((item, index) => (
+            <li key={item.id} className={cx(styles.row, editId === item.id && styles.rowEditing)}>
+              {movable && (
+                <div className={styles.moveBtns}>
+                  <button type="button" className={styles.moveBtn} aria-label="上へ"
+                    disabled={index === 0 || reordering || editId != null} onClick={() => move(index, -1)}>
+                    <IcoUp />
+                  </button>
+                  <button type="button" className={styles.moveBtn} aria-label="下へ"
+                    disabled={index === items.length - 1 || reordering || editId != null} onClick={() => move(index, 1)}>
+                    <IcoDown />
+                  </button>
+                </div>
               )}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+
+              {editId === item.id ? (
+                <>
+                  <input className={cx(styles.input, styles.inputEdit)} value={editName} autoFocus
+                    onChange={e => setEditName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) saveEdit();
+                      if (e.key === "Escape") cancelEdit();
+                    }} />
+                  <EditOps onSave={saveEdit} onCancel={cancelEdit} saveDisabled={!editName.trim()} />
+                </>
+              ) : (
+                <>
+                  <span className={styles.rowName}>{item.name}</span>
+                  <RowOps canEdit={can.edit} canDelete={can.del}
+                    disabled={editId != null}
+                    onEdit={() => startEdit(item)} onDelete={() => askDelete(item)} />
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Block>
   );
 }
 
-/* ─── Notifications tab ─────────────────────────────────── */
+/* ─── 休憩ルール ────────────────────────────────────────── */
+const emptyRule = { name: "", thresholdMinutes: "", breakMinutes: "" };
+
+function BreakRulesBlock({ can, onAskDelete }) {
+  const m = useMaster(api.settingsBreakRulesList);
+  const [form, setForm]         = useState(emptyRule);
+  const [adding, setAdding]     = useState(false);
+  const [editId, setEditId]     = useState(null);
+  const [editForm, setEditForm] = useState(emptyRule);
+
+  const valid = f => String(f.name).trim() && Number(f.thresholdMinutes) > 0 && Number(f.breakMinutes) > 0;
+  const toPayload = f => ({
+    name: String(f.name).trim(),
+    thresholdMinutes: Number(f.thresholdMinutes),
+    breakMinutes: Number(f.breakMinutes),
+  });
+
+  async function handleAdd() {
+    if (!valid(form) || adding) return;
+    setAdding(true);
+    const ok = await m.run(() => api.settingsBreakRulesCreate(toPayload(form)), "作成エラー");
+    setAdding(false);
+    if (ok) setForm(emptyRule);
+  }
+
+  function startEdit(item) {
+    setEditId(item.id);
+    setEditForm({ name: item.name, thresholdMinutes: item.thresholdMinutes, breakMinutes: item.breakMinutes });
+  }
+  function cancelEdit() { setEditId(null); setEditForm(emptyRule); }
+
+  async function saveEdit() {
+    if (!valid(editForm)) return;
+    const ok = await m.run(() => api.settingsBreakRulesUpdate(editId, toPayload(editForm)), "更新エラー");
+    if (ok) cancelEdit();
+  }
+
+  function askDelete(item) {
+    onAskDelete({
+      name: item.name,
+      sub: `${item.thresholdMinutes}分以上 → 休憩 ${item.breakMinutes}分`,
+      action: () => m.run(() => api.settingsBreakRulesDelete(item.id), "削除エラー"),
+    });
+  }
+
+  const onKey = (save, cancel) => e => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) save();
+    if (e.key === "Escape" && cancel) cancel();
+  };
+
+  // по возрастанию порога — так проще читать «какая ширина какому времени»
+  const items = [...m.items].sort((a, b) => (a.thresholdMinutes ?? 0) - (b.thresholdMinutes ?? 0));
+
+  return (
+    <Block icon={<IcoCup />} title="休憩ルール" count={m.loading && !items.length ? null : items.length}
+      hint="勤務時間がしきい値を超えた場合、最も近いルールの休憩時間を差し引きます。"
+      err={m.err}
+      foot={can.create && (
+        <div className={styles.ruleForm}>
+          <label className={styles.ruleField}>
+            <span>名前</span>
+            <input className={styles.input} value={form.name} placeholder="例：休憩1"
+              onChange={e => setForm({ ...form, name: e.target.value })} onKeyDown={onKey(handleAdd)} />
+          </label>
+          <label className={styles.ruleField}>
+            <span>分以上</span>
+            <input type="number" min="1" className={styles.input} value={form.thresholdMinutes} placeholder="例：360"
+              onChange={e => setForm({ ...form, thresholdMinutes: e.target.value })} onKeyDown={onKey(handleAdd)} />
+          </label>
+          <label className={styles.ruleField}>
+            <span>休憩（分）</span>
+            <input type="number" min="1" className={styles.input} value={form.breakMinutes} placeholder="例：45"
+              onChange={e => setForm({ ...form, breakMinutes: e.target.value })} onKeyDown={onKey(handleAdd)} />
+          </label>
+          <button type="button" className={styles.addBtn} onClick={handleAdd} disabled={!valid(form) || adding}>
+            <IcoPlus />追加
+          </button>
+        </div>
+      )}>
+      {m.loading && !items.length ? (
+        <div className={styles.empty}>読み込み中...</div>
+      ) : items.length === 0 ? (
+        <div className={styles.empty}>まだ登録されていません</div>
+      ) : (
+        <ul className={cx(styles.list, items.length > SCROLL_AFTER && styles.listScroll)}>
+          {items.map(item => (
+            editId === item.id ? (
+              <li key={item.id} className={cx(styles.row, styles.rowEditing)}>
+                <div className={styles.ruleEdit}>
+                  <input className={styles.input} value={editForm.name} autoFocus aria-label="名前"
+                    onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                    onKeyDown={onKey(saveEdit, cancelEdit)} />
+                  <input type="number" min="1" className={styles.input} value={editForm.thresholdMinutes} aria-label="分以上"
+                    onChange={e => setEditForm({ ...editForm, thresholdMinutes: e.target.value })}
+                    onKeyDown={onKey(saveEdit, cancelEdit)} />
+                  <input type="number" min="1" className={styles.input} value={editForm.breakMinutes} aria-label="休憩（分）"
+                    onChange={e => setEditForm({ ...editForm, breakMinutes: e.target.value })}
+                    onKeyDown={onKey(saveEdit, cancelEdit)} />
+                </div>
+                <EditOps onSave={saveEdit} onCancel={cancelEdit} saveDisabled={!valid(editForm)} />
+              </li>
+            ) : (
+              <li key={item.id} className={styles.row}>
+                <span className={styles.rowName}>{item.name}</span>
+                <span className={styles.ruleInfo}>
+                  <b>{item.thresholdMinutes}</b>分以上
+                  <span className={styles.ruleArrow}>→</span>
+                  休憩 <b className={styles.ruleBreak}>{item.breakMinutes}</b>分
+                </span>
+                <RowOps canEdit={can.edit} canDelete={can.del} disabled={editId != null}
+                  onEdit={() => startEdit(item)} onDelete={() => askDelete(item)} />
+              </li>
+            )
+          ))}
+        </ul>
+      )}
+    </Block>
+  );
+}
+
+/* ─── 通知設定 ──────────────────────────────────────────── */
 const NOTIFICATION_TYPES = [
   { key: "LATE_ARRIVAL",        label: "遅刻通知",         hint: "スタッフが出勤予定時刻に遅刻した場合に通知します。" },
   { key: "EARLY_DEPARTURE",     label: "早退通知",         hint: "スタッフが退勤予定時刻より早く退勤した場合に通知します。" },
@@ -662,13 +424,22 @@ const NOTIFICATION_TYPES = [
   { key: "PASSWORD_CHANGED",    label: "パスワード変更通知", hint: "従業員（自分以外）のパスワードが変更された場合に通知します。" },
 ];
 
-function NotificationsTab() {
-  const [prefs, setPrefs]     = useState({});
+function NotificationsBlock({ canEdit }) {
+  const [prefs, setPrefs]         = useState({});
   const [checkTime, setCheckTime] = useState("00:00");
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const [err, setErr]         = useState("");
-  const [savedMsg, setSavedMsg] = useState("");
+  const [savedTime, setSavedTime] = useState("00:00");
+  const [loading, setLoading]     = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [err, setErr]             = useState("");
+  const [savedMsg, setSavedMsg]   = useState("");
+  const msgTimer = useRef(null);
+
+  function flashSaved() {
+    setSavedMsg("保存しました");
+    clearTimeout(msgTimer.current);
+    msgTimer.current = setTimeout(() => setSavedMsg(""), 2000);
+  }
+  useEffect(() => () => clearTimeout(msgTimer.current), []);
 
   async function load() {
     setLoading(true); setErr("");
@@ -678,27 +449,27 @@ function NotificationsTab() {
         api.notificationSettingsGet(),
       ]);
       setPrefs(p || {});
-      setCheckTime((s?.forgotClockoutCheckTime || "00:00:00").slice(0, 5));
+      const t = (s?.forgotClockoutCheckTime || "00:00:00").slice(0, 5);
+      setCheckTime(t); setSavedTime(t);
     } catch (e) {
       setErr(e.message || "読み込みエラー");
     } finally {
       setLoading(false);
     }
   }
-
   useEffect(() => { load(); }, []);
 
   async function togglePref(key) {
-    const next = { ...prefs, [key]: !prefs[key] };
-    setPrefs(next);
+    const prev = prefs;
+    const val = prev[key] === false; // сейчас выкл → включаем
+    setPrefs({ ...prev, [key]: val });
     setErr(""); setSavedMsg("");
     try {
-      await api.notificationPreferencesSet({ [key]: next[key] });
-      setSavedMsg("保存しました");
-      setTimeout(() => setSavedMsg(""), 2000);
+      await api.notificationPreferencesSet({ [key]: val });
+      flashSaved();
     } catch (e) {
       setErr(e.message || "保存エラー");
-      setPrefs(prefs); // revert
+      setPrefs(prev); // откат
     }
   }
 
@@ -706,8 +477,8 @@ function NotificationsTab() {
     setSaving(true); setErr(""); setSavedMsg("");
     try {
       await api.notificationSettingsSet(checkTime);
-      setSavedMsg("保存しました");
-      setTimeout(() => setSavedMsg(""), 2000);
+      setSavedTime(checkTime);
+      flashSaved();
     } catch (e) {
       setErr(e.message || "保存エラー");
     } finally {
@@ -715,90 +486,55 @@ function NotificationsTab() {
     }
   }
 
-  if (loading) {
-    return <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>;
-  }
-
   return (
-    <div>
-      {err && (
-        <div style={{
-          background: "#ffe5e5", color: "#c0392b", padding: "10px 14px",
-          borderRadius: 10, marginBottom: 16, fontSize: 13,
-        }}>
-          {err}
-        </div>
-      )}
-      {savedMsg && (
-        <div style={{
-          background: "#dcfce7", color: "#166534", padding: "8px 14px",
-          borderRadius: 10, marginBottom: 16, fontSize: 13, fontWeight: 600,
-        }}>
-          ✓ {savedMsg}
-        </div>
-      )}
-
-      {/* 自分が受け取る通知 */}
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>受け取る通知（自分用）</div>
-        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 14 }}>
-          ここでの設定はあなた自身のメールアドレスへの通知にのみ適用されます。他のマネージャーには影響しません。
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {NOTIFICATION_TYPES.map(t => (
-            <label key={t.key} style={{
-              display: "flex", alignItems: "flex-start", gap: 12,
-              padding: "12px 14px", borderRadius: 10, cursor: "pointer",
-              border: "1px solid #f0f1f6",
-            }}>
-              <input
-                type="checkbox"
-                checked={prefs[t.key] !== false}
-                onChange={() => togglePref(t.key)}
-                style={{ width: 18, height: 18, marginTop: 2, accentColor: "#6366f1", cursor: "pointer" }}
-              />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1d2e" }}>{t.label}</div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{t.hint}</div>
-              </div>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* 退勤忘れチェック時刻（全体設定） */}
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>退勤忘れチェック時刻</div>
-        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 14 }}>
-          毎日この時刻に、前日分の未退勤（打刻忘れ）をチェックします。この設定は全マネージャー共通です。
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-              チェック時刻
-            </label>
-            <input
-              type="time"
-              value={checkTime}
-              onChange={e => setCheckTime(e.target.value)}
-              style={{ ...inputStyle, width: 140 }}
-            />
+    <Block icon={<IcoBell />} title="通知設定" err={err} ok={savedMsg} className={styles.blockWide}>
+      {loading ? (
+        <div className={styles.empty}>読み込み中...</div>
+      ) : (
+        <div className={styles.ntWrap}>
+          <div className={styles.ntSection}>
+            <div className={styles.subTitle}>受け取る通知（自分用）</div>
+            <div className={styles.subHint}>
+              ここでの設定はあなた自身のメールアドレスへの通知にのみ適用されます。他のマネージャーには影響しません。
+            </div>
+            <div className={styles.ntGrid}>
+              {NOTIFICATION_TYPES.map(t => (
+                <label key={t.key} className={styles.toggle}>
+                  <input type="checkbox" checked={prefs[t.key] !== false} onChange={() => togglePref(t.key)} />
+                  <span className={styles.switch} />
+                  <span className={styles.toggleText}>
+                    {t.label}
+                    <small>{t.hint}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
-          <button
-            style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }}
-            type="button"
-            disabled={saving}
-            onClick={saveCheckTime}
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+
+          <div className={styles.ntSide}>
+            <div className={styles.subTitle}><IcoClock />退勤忘れチェック時刻</div>
+            <div className={styles.subHint}>
+              毎日この時刻に、前日分の未退勤（打刻忘れ）をチェックします。この設定は全マネージャー共通です。
+            </div>
+            <div className={styles.timeRow}>
+              <input type="time" className={cx(styles.input, styles.timeInput)} value={checkTime}
+                disabled={!canEdit} onChange={e => setCheckTime(e.target.value)} aria-label="チェック時刻" />
+              {canEdit && (
+                <button type="button" className={styles.saveBtn} onClick={saveCheckTime}
+                  disabled={saving || !checkTime || checkTime === savedTime}>
+                  <IcoSave />{saving ? "保存中..." : "保存"}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+    </Block>
   );
 }
 
-/* ─── Roles tab (権限, ADMIN専用) ────────────────────────── */
+/* ─── 権限 (ADMIN専用) ──────────────────────────────────── */
+// ВНИМАНИЕ: синхронизируется вручную с enum Permission на бэкенде
 const PERMISSION_GROUPS = [
   { label: "シフト", items: [
       { key: "SHIFT_VIEW", label: "閲覧・作成・編集・削除" },
@@ -839,12 +575,12 @@ const PERMISSION_GROUPS = [
       { key: "BREAK_RULE_DELETE", label: "削除" },
   ]},
   { label: "勤務状況リスト", items: [
-    { key: "ATTENDANCE_STATUS_VIEW",   label: "閲覧" },
-    { key: "ATTENDANCE_STATUS_CREATE", label: "作成" },
-    { key: "ATTENDANCE_STATUS_EDIT",   label: "編集" },
-    { key: "ATTENDANCE_STATUS_DELETE", label: "削除" },
-]},
-{ label: "通知設定", items: [
+      { key: "ATTENDANCE_STATUS_VIEW",   label: "閲覧" },
+      { key: "ATTENDANCE_STATUS_CREATE", label: "作成" },
+      { key: "ATTENDANCE_STATUS_EDIT",   label: "編集" },
+      { key: "ATTENDANCE_STATUS_DELETE", label: "削除" },
+  ]},
+  { label: "通知設定", items: [
       { key: "NOTIFICATION_VIEW", label: "閲覧" },
       { key: "NOTIFICATION_EDIT", label: "編集" },
   ]},
@@ -855,26 +591,22 @@ const PERMISSION_GROUPS = [
 
 const emptyRoleForm = { name: "", permissions: [] };
 
-function RolesTab() {
-  const [roles, setRoles]         = useState([]);
-  const [allPerms, setAllPerms]   = useState([]); // серверный список Permission — источник истины
-  const [loading, setLoading]     = useState(false);
-  const [err, setErr]             = useState("");
+function RolesBlock({ onAskDelete }) {
+  const [roles, setRoles]       = useState([]);
+  const [allPerms, setAllPerms] = useState([]); // серверный список Permission — источник истины
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState("");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId]       = useState(null);
   const [form, setForm]           = useState(emptyRoleForm);
   const [saving, setSaving]       = useState(false);
   const [formErr, setFormErr]     = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   async function load() {
-    setLoading(true); setErr("");
+    setLoading(true);
     try {
-      const [r, p] = await Promise.all([
-        api.settingsRolesList(),
-        api.settingsPermissionsList(),
-      ]);
+      const [r, p] = await Promise.all([api.settingsRolesList(), api.settingsPermissionsList()]);
       setRoles(Array.isArray(r) ? r : []);
       setAllPerms(Array.isArray(p) ? p : []);
     } catch (e) {
@@ -883,39 +615,23 @@ function RolesTab() {
       setLoading(false);
     }
   }
-
   useEffect(() => { load(); }, []);
 
-  function openCreate() {
-    setEditId(null);
-    setForm(emptyRoleForm);
-    setFormErr("");
-    setModalOpen(true);
-  }
-
+  function openCreate() { setEditId(null); setForm(emptyRoleForm); setFormErr(""); setModalOpen(true); }
   function openEdit(role) {
     setEditId(role.id);
     setForm({ name: role.name, permissions: role.permissions || [] });
-    setFormErr("");
-    setModalOpen(true);
+    setFormErr(""); setModalOpen(true);
   }
-
-  function closeModal() {
-    setModalOpen(false);
-    setEditId(null);
-    setForm(emptyRoleForm);
-    setFormErr("");
-  }
+  function closeModal() { setModalOpen(false); setEditId(null); setForm(emptyRoleForm); setFormErr(""); }
+  useEsc(modalOpen && !saving, closeModal);
 
   function togglePerm(key) {
     setForm(f => ({
       ...f,
-      permissions: f.permissions.includes(key)
-        ? f.permissions.filter(p => p !== key)
-        : [...f.permissions, key],
+      permissions: f.permissions.includes(key) ? f.permissions.filter(p => p !== key) : [...f.permissions, key],
     }));
   }
-
   function toggleGroup(group, checked) {
     const keys = group.items.map(i => i.key);
     setForm(f => {
@@ -932,6 +648,7 @@ function RolesTab() {
       if (editId) await api.settingsRolesUpdate(editId, payload);
       else        await api.settingsRolesCreate(payload);
       closeModal();
+      setErr("");
       await load();
     } catch (e) {
       setFormErr(e.message || "保存に失敗しました");
@@ -940,257 +657,281 @@ function RolesTab() {
     }
   }
 
-  async function handleDeleteConfirmed() {
-    if (!deleteConfirm) return;
-    setErr("");
-    try {
-      await api.settingsRolesDelete(deleteConfirm);
-      setDeleteConfirm(null);
-      await load();
-    } catch (e) {
-      setErr(e.message || "削除エラー");
-      setDeleteConfirm(null);
-    }
+  function askDelete(role) {
+    onAskDelete({
+      title: "ロールを削除しますか？",
+      name: role.name,
+      warn: "このロールを削除すると、割り当てられている従業員は「ロールなし」（権限なし）になります。",
+      action: async () => {
+        setErr("");
+        try { await api.settingsRolesDelete(role.id); await load(); }
+        catch (e) { setErr(e.message || "削除エラー"); }
+      },
+    });
   }
 
   const visibleGroups = PERMISSION_GROUPS
     .map(g => ({ ...g, items: g.items.filter(i => allPerms.length === 0 || allPerms.includes(i.key)) }))
     .filter(g => g.items.length > 0);
 
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-        ロールごとに操作可能な範囲を設定します。従業員にロールを割り当てると、そのロールの権限のみが有効になります（未割り当ての場合は権限なし）。
-      </div>
+  // краткая сводка роли: группы, где есть хотя бы одно право (частично — с n/m)
+  function roleSummary(role) {
+    const set = new Set(role.permissions || []);
+    return visibleGroups
+      .map(g => ({ label: g.label, n: g.items.filter(i => set.has(i.key)).length, total: g.items.length }))
+      .filter(g => g.n > 0);
+  }
 
-      {err && (
-        <div style={{ background: "#ffe5e5", color: "#c0392b", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
-          {err}
+  return (
+    <Block icon={<IcoShield />} title="権限" count={loading && !roles.length ? null : roles.length}
+      hint="ロールごとに操作可能な範囲を設定します。従業員にロールを割り当てると、そのロールの権限のみが有効になります（未割り当ての場合は権限なし）。"
+      err={err} className={styles.blockWide}
+      foot={
+        <div className={styles.addRow}>
+          <button type="button" className={cx(styles.addBtn, styles.addBtnWide)} onClick={openCreate}>
+            <IcoPlus />新規ロール
+          </button>
         </div>
+      }>
+      {loading && !roles.length ? (
+        <div className={styles.empty}>読み込み中...</div>
+      ) : roles.length === 0 ? (
+        <div className={styles.empty}>まだ登録されていません</div>
+      ) : (
+        <ul className={cx(styles.list, roles.length > SCROLL_AFTER && styles.listScroll)}>
+          {roles.map(role => {
+            const sum = roleSummary(role);
+            return (
+              <li key={role.id} className={cx(styles.row, styles.roleRow)}>
+                <div className={styles.roleMain}>
+                  <span className={styles.rowName}>{role.name}</span>
+                  <span className={styles.roleCount}>{(role.permissions || []).length} 件</span>
+                </div>
+                <div className={styles.roleChips}>
+                  {sum.length === 0
+                    ? <span className={styles.roleNone}>権限なし</span>
+                    : sum.map(g => (
+                      <span key={g.label} className={cx(styles.roleChip, g.n < g.total && styles.roleChipPart)}>
+                        {g.label}{g.n < g.total && <small>{g.n}/{g.total}</small>}
+                      </span>
+                    ))}
+                </div>
+                <RowOps canEdit canDelete onEdit={() => openEdit(role)} onDelete={() => askDelete(role)} />
+              </li>
+            );
+          })}
+        </ul>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-        <button style={btnPrimaryStyle} type="button" onClick={openCreate}>＋ 新規ロール</button>
-      </div>
-
-      <div style={cardStyle}>
-        <div style={cardTitleStyle}>ロール一覧</div>
-        {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#aaa" }}>読み込み中...</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr style={{ borderBottom: "2px solid #f0f1f6" }}>
-                <th style={thStyle}>名前</th>
-                <th style={thStyle}>権限数</th>
-                <th style={{ ...thStyle, textAlign: "right" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map(role => (
-                <tr key={role.id} style={{ borderBottom: "1px solid #f0f1f6" }}
-                  onMouseEnter={e => e.currentTarget.style.background = "#fafafe"}
-                  onMouseLeave={e => e.currentTarget.style.background = ""}>
-                  <td style={tdStyle}>
-                    <span style={{ fontSize: 13, color: "#1a1d2e", background: "#f1f5f9", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
-                      {role.name}
-                    </span>
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{ color: "#64748b" }}>{(role.permissions || []).length} 件</span>
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right" }}>
-                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                      <button style={btnSecondaryStyle} type="button" onClick={() => openEdit(role)}>編集</button>
-                      <button style={btnDangerStyle} type="button" onClick={() => setDeleteConfirm(role.id)}>削除</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {roles.length === 0 && !loading && (
-                <tr><td colSpan={3} style={{ padding: 24, textAlign: "center", color: "#aaa" }}>まだ登録されていません</td></tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* ── Modal: create/edit ── */}
-      {modalOpen && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 2000,
-          background: "rgba(15,23,42,0.5)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 20,
-        }}>
-          <div style={{
-            background: "#fff", borderRadius: 18, padding: 28,
-            width: 640, maxHeight: "90vh", overflowY: "auto",
-            boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
-          }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d2e", marginBottom: 16 }}>
-              {editId ? "ロールを編集" : "ロールを新規作成"}
-            </div>
-
-            {formErr && (
-              <div style={{ background: "#ffe5e5", color: "#c0392b", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
-                {formErr}
+      {modalOpen && createPortal(
+        <div className={styles.rmOverlay}>
+          <div className={styles.rmModal} role="dialog" aria-modal="true"
+            aria-label={editId ? "ロールを編集" : "ロールを新規作成"}>
+            <div className={styles.rmHead}>
+              <span className={styles.rmHeadIcon}><IcoShield /></span>
+              <div className={styles.rmHeadText}>
+                <div className={styles.rmTitle}>{editId ? "ロールを編集" : "ロールを新規作成"}</div>
+                <div className={styles.rmSub}>選択中の権限：{form.permissions.length} 件</div>
               </div>
-            )}
+              <button type="button" className={styles.rmClose} onClick={closeModal} aria-label="閉じる"><IcoClear /></button>
+            </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-                ロール名 *
+            <div className={styles.rmBody}>
+              <label className={styles.rmField}>
+                <span className={styles.rmLabel}>ロール名 <span className={styles.req}>*</span></span>
+                <input className={styles.input} value={form.name} placeholder="例：ホールリーダー" autoFocus
+                  onChange={e => setForm({ ...form, name: e.target.value })} />
               </label>
-              <input
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                style={inputStyle}
-                placeholder="例：ホールリーダー"
-              />
-            </div>
 
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 10 }}>権限</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {visibleGroups.map(group => {
-                const allChecked = group.items.every(i => form.permissions.includes(i.key));
-                return (
-                  <div key={group.label} style={{ border: "1px solid #f0f1f6", borderRadius: 10, padding: "10px 14px" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#1a1d2e", marginBottom: 8, cursor: "pointer" }}>
-                      <input type="checkbox" checked={allChecked} onChange={e => toggleGroup(group, e.target.checked)} />
-                      {group.label}
-                    </label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", paddingLeft: 24 }}>
-                      {group.items.map(item => (
-                        <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#475569", cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            checked={form.permissions.includes(item.key)}
-                            onChange={() => togglePerm(item.key)}
-                          />
-                          {item.label}
-                        </label>
-                      ))}
+              <div className={styles.rmLabel}>権限</div>
+              <div className={styles.rmGroups}>
+                {visibleGroups.map(group => {
+                  const n = group.items.filter(i => form.permissions.includes(i.key)).length;
+                  const all = n === group.items.length;
+                  return (
+                    <div key={group.label} className={cx(styles.rmGroup, n > 0 && styles.rmGroupOn)}>
+                      <label className={styles.rmGroupHead}>
+                        <input type="checkbox" checked={all}
+                          ref={el => { if (el) el.indeterminate = n > 0 && !all; }}
+                          onChange={e => toggleGroup(group, e.target.checked)} />
+                        {group.label}
+                        <span className={styles.rmGroupCount}>{n}/{group.items.length}</span>
+                      </label>
+                      <div className={styles.rmItems}>
+                        {group.items.map(item => (
+                          <label key={item.key}
+                            className={cx(styles.rmItem, form.permissions.includes(item.key) && styles.rmItemOn)}>
+                            <input type="checkbox" checked={form.permissions.includes(item.key)}
+                              onChange={() => togglePerm(item.key)} />
+                            {item.label}
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
-              <button onClick={closeModal} style={btnSecondaryStyle} type="button">キャンセル</button>
-              <button onClick={handleSave} disabled={saving} style={{ ...btnPrimaryStyle, opacity: saving ? 0.6 : 1 }} type="button">
-                {saving ? "保存中..." : "保存"}
+            <div className={styles.rmFoot}>
+              <div className={styles.rmErr}>{formErr}</div>
+              <button type="button" className={styles.btnCancel} onClick={closeModal} disabled={saving}>キャンセル</button>
+              <button type="button" className={styles.btnSave} onClick={handleSave} disabled={saving}>
+                <IcoSave />{saving ? "保存中..." : "保存"}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-
-      {/* ── Delete confirm ── */}
-      {deleteConfirm && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 3000,
-          background: "rgba(15,23,42,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 420, width: "90%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", textAlign: "center" }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1d2e", marginBottom: 12 }}>本当に削除しますか？</div>
-            <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.7, marginBottom: 24 }}>
-              このロールを削除すると、割り当てられている従業員は「ロールなし」（権限なし）になります。
-            </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button onClick={() => setDeleteConfirm(null)} style={{ ...btnSecondaryStyle, padding: "10px 24px", fontSize: 14 }} type="button">キャンセル</button>
-              <button onClick={handleDeleteConfirmed} style={{ padding: "10px 24px", fontSize: 14, fontWeight: 700, background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }} type="button">削除する</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </Block>
   );
 }
 
-/* ─── Main page ─────────────────────────────────────────── */
-const BASE_TABS = [
-  { key: "workplaces",     label: "勤務場所" },
-  { key: "positions",      label: "職種・役職" },
-  { key: "departments",    label: "部署" },
-  { key: "breakrules",     label: "休憩ルール" },
-  { key: "attstatuses",    label: "勤務状況リスト" },
-  { key: "notifications",  label: "通知設定" },
-];
+/* ─── Окно подтверждения удаления (общее) ───────────────── */
+function DeleteConfirm({ data, onClose }) {
+  const [busy, setBusy] = useState(false);
+  useEsc(!!data && !busy, onClose);
+  if (!data) return null;
 
-// Какое право нужно для таба
-const TAB_PERMISSION = {
-  workplaces:    "WORKPLACE_VIEW",
-  positions:     "POSITION_VIEW",
-  departments:   "DEPARTMENT_VIEW",
-  breakrules:    "BREAK_RULE_VIEW",
-  attstatuses:   "ATTENDANCE_STATUS_VIEW",
-  notifications: "NOTIFICATION_VIEW",
-};
+  async function confirm() {
+    setBusy(true);
+    try { await data.action(); }
+    finally { setBusy(false); onClose(); }
+  }
 
+  return createPortal(
+    <div className={styles.dlOverlay}
+      onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <div className={styles.dlModal} role="alertdialog" aria-modal="true" aria-label="削除の確認">
+        <span className={styles.dlIcon}><IcoTrash /></span>
+        <div className={styles.dlTitle}>{data.title || "削除しますか？"}</div>
+        <div className={styles.dlItem}>
+          <span className={styles.dlItemName}>{data.name}</span>
+          {data.sub && <span className={styles.dlItemSub}>{data.sub}</span>}
+        </div>
+        {data.warn && <div className={styles.dlWarn}>{data.warn}</div>}
+        <div className={styles.dlFoot}>
+          <button type="button" className={styles.btnCancel} onClick={onClose} disabled={busy}>キャンセル</button>
+          <button type="button" className={styles.dlDelete} onClick={confirm} disabled={busy}>
+            <IcoTrash />{busy ? "削除中..." : "削除する"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ─── Страница ──────────────────────────────────────────── */
 export default function SettingsPage({ view, onNavigate, onLogout, permissions = [] }) {
   const name = localStorage.getItem("staffName") || "manager";
   const isAdmin = localStorage.getItem("appRole") === "ADMIN";
-  const allowedTabs = BASE_TABS.filter(t => isAdmin || permissions.includes(TAB_PERMISSION[t.key]));
-  const TABS = isAdmin ? [...allowedTabs, { key: "roles", label: "権限" }] : allowedTabs;
-  const [tab, setTab] = useState("workplaces");
-  // если выбранный таб недоступен — показываем первый доступный
-  const activeTab = TABS.some(t => t.key === tab) ? tab : (TABS[0]?.key ?? null);
+  const has = perm => isAdmin || permissions.includes(perm);
+  const canSet = prefix => ({ create: has(`${prefix}_CREATE`), edit: has(`${prefix}_EDIT`), del: has(`${prefix}_DELETE`) });
+
+  const [confirm, setConfirm] = useState(null);
+
+  const masterBlocks = [
+    has("WORKPLACE_VIEW") && (
+      <NameListBlock key="wp" icon={<IcoPin />} title="勤務場所" placeholder="例：ホール1、フロント..."
+        fns={{
+          list: api.settingsWorkplacesList, create: api.settingsWorkplacesCreate,
+          update: api.settingsWorkplacesUpdate, remove: api.settingsWorkplacesDelete,
+        }}
+        can={canSet("WORKPLACE")} onAskDelete={setConfirm} />
+    ),
+    has("POSITION_VIEW") && (
+      <NameListBlock key="pos" icon={<IcoBag />} title="職種・役職" placeholder="例：フロントスタッフ、料理長..."
+        fns={{
+          list: api.settingsPositionsList, create: api.settingsPositionsCreate,
+          update: api.settingsPositionsUpdate, remove: api.settingsPositionsDelete,
+        }}
+        can={canSet("POSITION")} onAskDelete={setConfirm} />
+    ),
+    has("DEPARTMENT_VIEW") && (
+      <NameListBlock key="dep" icon={<IcoUsers />} title="部署" placeholder="例：フロント、調理、事務所..."
+        hint="矢印でキオスク画面に表示される部署の順序を変更できます（部署の非表示・除外はできません）。"
+        fns={{
+          list: api.settingsDepartmentsList, create: api.settingsDepartmentsCreate,
+          update: api.settingsDepartmentsUpdate, remove: api.settingsDepartmentsDelete,
+          reorder: api.settingsDepartmentsReorder,
+        }}
+        can={canSet("DEPARTMENT")} onAskDelete={setConfirm} />
+    ),
+    has("ATTENDANCE_STATUS_VIEW") && (
+      <NameListBlock key="ast" icon={<IcoList />} title="勤務状況リスト" placeholder="例：有給、欠勤、日時調整..."
+        hint="勤怠管理の「状況」欄で選択できる項目です。名称変更・削除をしても、既に設定済みの日の表示は変更前のまま残ります。"
+        deleteWarn="勤怠管理で既に設定済みの表示はそのまま残ります。"
+        fns={{
+          list: api.settingsAttendanceStatusesList, create: api.settingsAttendanceStatusesCreate,
+          update: api.settingsAttendanceStatusesUpdate, remove: api.settingsAttendanceStatusesDelete,
+        }}
+        can={canSet("ATTENDANCE_STATUS")} onAskDelete={setConfirm} />
+    ),
+    has("BREAK_RULE_VIEW") && (
+      <BreakRulesBlock key="br" can={canSet("BREAK_RULE")} onAskDelete={setConfirm} />
+    ),
+  ].filter(Boolean);
+
+  const showNotifications = has("NOTIFICATION_VIEW");
+  const showRoles = isAdmin;
+  const nothing = masterBlocks.length === 0 && !showNotifications && !showRoles;
 
   return (
     <ManagerLayout name={name} view={view} onNavigate={onNavigate} onLogout={onLogout}>
-      <div className={shellStyles.centeredContent}>
-      <div style={{ maxWidth: 760, width: "100%" }}>
+      <div className={styles.page}>
 
-        {/* Header */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#1a1d2e" }}>設定</div>
-          <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
-            マスターデータの管理
+        {/* ══ Шапка ══ */}
+        <div className={styles.headRow}>
+          <div className={styles.headTitle}>
+            <span className={styles.headIcon}><IcoGear /></span>
+            <div>
+              <div className={styles.title}>設定</div>
+              <div className={styles.subtitle}>マスターデータの管理</div>
+            </div>
+          </div>
+
+          <div className={styles.headActions}>
+            <button type="button" className={styles.iconBtn} data-tip="お知らせ（準備中）" aria-label="お知らせ" disabled>
+              <IcoBell />
+            </button>
+            <button type="button" className={styles.iconBtn} data-tip="設定" aria-label="設定" onClick={() => onNavigate("SETTINGS")}>
+              <IcoGear />
+            </button>
+            <button type="button" className={styles.iconBtn} data-tip="希望シフト" aria-label="希望シフト" onClick={() => onNavigate("PREFS")}>
+              <IcoUser />
+            </button>
+            <button type="button" className={styles.iconBtn} data-tip="ログアウト" aria-label="ログアウト" onClick={onLogout}>
+              <IcoLogout />
+            </button>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div style={{
-          display: "flex", gap: 4, marginBottom: 20,
-          background: "#f0f1f6", borderRadius: 10, padding: 4, width: "fit-content",
-        }}>
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              style={{
-                padding: "7px 18px",
-                borderRadius: 7,
-                border: "none",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
-                transition: "all 0.15s",
-                background: activeTab === t.key ? "#fff" : "transparent",
-                color: activeTab === t.key ? "#6366f1" : "#64748b",
-                boxShadow: activeTab === t.key ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* ══ Контент ══ */}
+        <div className={styles.content}>
+          {nothing && <div className={styles.empty}>表示できる設定項目がありません</div>}
 
-        {/* Tab content */}
-        {activeTab === "workplaces"    && <WorkplacesTab />}
-        {activeTab === "positions"     && <PositionsTab />}
-        {activeTab === "departments"   && <DepartmentsTab />}
-        {activeTab === "breakrules"    && <BreakRulesTab />}
-        {activeTab === "attstatuses"   && <AttendanceStatusesTab />}
-        {activeTab === "notifications" && <NotificationsTab />}
-        {activeTab === "roles" && isAdmin && <RolesTab />}
+          {masterBlocks.length > 0 && (
+            <Section id="master" icon={<IcoDb />} title="マスターデータ"
+              sub="勤務場所・職種・部署など、各画面で選択する項目のリストです">
+              <div className={styles.grid}>{masterBlocks}</div>
+            </Section>
+          )}
+
+          {(showNotifications || showRoles) && (
+            <Section id="system" icon={<IcoGear />} title="システム設定"
+              sub={showRoles ? "メール通知と、ロールごとの権限の設定です" : "メール通知の設定です"}>
+              <div className={cx(styles.systemRow, showNotifications && showRoles && styles.systemRowTwo)}>
+                {showNotifications && <NotificationsBlock canEdit={has("NOTIFICATION_EDIT")} />}
+                {showRoles && <RolesBlock onAskDelete={setConfirm} />}
+              </div>
+            </Section>
+          )}
+        </div>
       </div>
-      </div>
+
+      <DeleteConfirm data={confirm} onClose={() => setConfirm(null)} />
     </ManagerLayout>
   );
 }
