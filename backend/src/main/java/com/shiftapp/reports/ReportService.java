@@ -115,6 +115,16 @@ public class ReportService {
         return callPython("/generate/shift/all/range", payload);
     }
 
+    // Excel シフト管理 «как на экране»: сотрудники/порядок, 表示列, 表示フィルター
+    @Transactional(readOnly = true)
+    public byte[] generateShiftScreen(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds,
+                                      List<String> columns, List<String> workplaces) {
+        Map<String, Object> payload = buildPayloadForUsersRange(restaurantId, from, to, userIds);
+        payload.put("columns",    columns);     // null = все колонки
+        payload.put("workplaces", workplaces);  // null = все места / 休み
+        return callPython("/generate/shift/screen", payload);
+    }
+
     @Transactional(readOnly = true)
     public byte[] generateAttendanceTimesheet(Long restaurantId, String ym) {
         Map<String, Object> payload = buildAttendancePayload(restaurantId, ym);
@@ -317,11 +327,14 @@ public class ReportService {
     }
 
     private Map<String, Object> buildPayloadForUsersRange(Long restaurantId, LocalDate from, LocalDate to, List<Long> userIds) {
-        List<User> allStaff = userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)
-                .stream()
-                .filter(u -> (u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && u.isActive())
-                .filter(u -> userIds.contains(u.getId()))
-                .toList();
+        // Явный список с экрана — берём как есть (в т.ч. неактивных) и в порядке экрана
+        Map<Long, User> byId = new HashMap<>();
+        for (User u : userRepository.findAllByRestaurant_IdOrderByIdDesc(restaurantId)) {
+            if ((u.getRole() == UserRole.STAFF || u.getRole() == UserRole.MANAGER) && userIds.contains(u.getId())) {
+                byId.put(u.getId(), u);
+            }
+        }
+        List<User> allStaff = userIds.stream().distinct().map(byId::get).filter(Objects::nonNull).toList();
 
         List<Preference> allPrefs = preferenceRepository
                 .findByRestaurant_IdAndWorkDateBetweenWithSlots(restaurantId, from, to);
@@ -344,6 +357,7 @@ public class ReportService {
 
             Map<String, Object> staffEntry = new LinkedHashMap<>();
             staffEntry.put("userId",      u.getId());
+            staffEntry.put("sortOrder",   u.getSortOrder());   // колонка № в Excel
             staffEntry.put("userName",    u.getFullName());
             staffEntry.put("position",    u.getPosition());
             staffEntry.put("departments", u.getDepartments().stream()
@@ -879,6 +893,8 @@ public class ReportService {
             slot.put("endTime",   s.getEndTime() != null ? s.getEndTime().toString() : null);
             slot.put("last",      s.isLast());
             slot.put("workplace", s.getWorkplace());
+            slot.put("nextDay",   s.isNextDay());
+            slot.put("breakOverrideMinutes", s.getBreakOverrideMinutes());
             slots.add(slot);
         }
 

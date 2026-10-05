@@ -177,6 +177,28 @@ public class ReportController {
     }
 
     /**
+     * POST /api/manager/reports/shift/screen?from=&to=
+     * Excel экрана シフト管理 — сотрудники в порядке экрана, 表示列 и 表示フィルター
+     */
+    @PostMapping("/shift/screen")
+    @PreAuthorize("hasAuthority('SHIFT_VIEW')")
+    public ResponseEntity<byte[]> shiftScreen(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestBody ShiftScreenExportRequest body) {
+
+        List<Long> userIds = body.userIds() != null ? body.userIds() : List.of();
+        byte[] data = reportService.generateShiftScreen(
+                user.getRestaurantId(), from, to, userIds, body.columns(), body.workplaces());
+        String filename = "シフト_" + from + "_" + to + ".xlsx";
+        return xlsxResponse(data, filename);
+    }
+
+    /** userIds — в порядке экрана; columns — number/position/department; workplaces — места + __none__ + __off__ */
+    public record ShiftScreenExportRequest(List<Long> userIds, List<String> columns, List<String> workplaces) {}
+
+    /**
      * GET /api/manager/reports/attendance/timesheet?ym=2026-07
      * Табель фактического времени (по打刻)
      */

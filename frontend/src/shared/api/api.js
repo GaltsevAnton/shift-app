@@ -279,6 +279,17 @@ export const api = {
       body: JSON.stringify(userIds),
     }),
   
+  // Excel シフト管理 «как на экране»: { userIds, columns, workplaces }
+  reportShiftScreen: (from, to, { userIds, columns, workplaces } = {}) =>
+    fetchBlob(`/api/manager/reports/shift/screen?from=${from}&to=${to}`, {
+      method: "POST",
+      body: JSON.stringify({
+        userIds:    userIds || [],
+        columns:    columns ?? null,
+        workplaces: workplaces ?? null,
+      }),
+    }),
+
   reportAttendanceTimesheet: (ym) =>
     fetchBlob(`/api/manager/reports/attendance/timesheet?ym=${ym}`),
 

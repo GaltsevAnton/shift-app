@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
 import styles from "./ManagerTablePage.module.css";
@@ -94,36 +95,6 @@ function getAutoBreakMinutes(startTime, endTime, breakRules = []) {
   return rule ? rule.breakMinutes : 0;
 }
 
-function getBreakHint(startTime, endTime, breakOverride, breakRules = []) {
-  if (!startTime || !endTime) return null;
-  let start = toMinutesLocal(startTime);
-  let end   = toMinutesLocal(endTime);
-  if (end <= start) end += 24 * 60;
-  const duration = end - start;
-  if (duration <= 0) return null;
-
-  if (breakOverride !== null && breakOverride !== undefined) {
-    if (breakOverride === 0) {
-      return { text: "⏱ 休憩: なし（手動）", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
-    }
-    const rule = breakRules.find(r => r.breakMinutes === breakOverride);
-    return {
-      text: `⏱ 休憩: ${breakOverride}分${rule ? `（${rule.name}・手動）` : "（手動）"}`,
-      color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
-    };
-  }
-
-  const rule = [...breakRules]
-    .filter(r => duration > r.thresholdMinutes)
-    .sort((a, b) => b.thresholdMinutes - a.thresholdMinutes)[0];
-
-  if (!rule) return { text: "⏱ 休憩: なし", color: "#94a3b8", bg: "#f8fafc", border: "#e2e8f0" };
-  return {
-    text: `⏱ 休憩: ${rule.breakMinutes}分（${rule.name}）`,
-    color: "#6366f1", bg: "#f5f3ff", border: "#e0d9ff"
-  };
-}
-
 function getWorkHint(startTime, endTime, breakOverride, breakRules = []) {
   if (!startTime || !endTime) return null;
   let start = toMinutesLocal(startTime);
@@ -145,17 +116,6 @@ function fmtBreakMinutes(mins) {
   if (mins === null || mins === undefined) return null;
   if (mins === 0) return "0分";
   const h = Math.floor(mins / 60), m = mins % 60;
-  return m > 0 ? `${h}時${m}分` : `${h}時`;
-}
-function getTotalHint(startTime, endTime) {
-  if (!startTime || !endTime) return null;
-  let start = toMinutesLocal(startTime);
-  let end   = toMinutesLocal(endTime);
-  if (end <= start) end += 24 * 60;
-  const duration = end - start;
-  if (duration <= 0) return null;
-  const h = Math.floor(duration / 60);
-  const m = duration % 60;
   return m > 0 ? `${h}時${m}分` : `${h}時`;
 }
 // Вернуть список недель (monday) для данного месяца ym
@@ -201,12 +161,6 @@ function currentMondayLocal() {
   const m   = String(now.getMonth() + 1).padStart(2, "0");
   const d   = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-// Форматировать дату для заголовка недели в шапке таблицы
-function fmtWeekLabel(ws, we) {
-  const wsD = new Date(ws), weD = new Date(we);
-  const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
-  return `${fmt(wsD)}〜${fmt(weD)}`;
 }
 
 /* ─── localStorage helpers ──────────────────────────────── */
@@ -268,226 +222,6 @@ function ContextMenu({ x, y, copiedPattern, selectedCount, onEdit, onCopy, onPas
           📅 {selectedCount > 1 ? `${selectedCount}日に適用` : "コピーを適用"}
         </button>
       )}
-    </div>
-  );
-}
-
-/* ─── BulkPopover ───────────────────────────────────────── */
-function BulkPopover({ onClose, onSave, workplaces, breakRules = [] }) {
-  const [off, setOff]     = useState(false);
-  const [slots, setSlots] = useState([emptySlot()]);
-
-  function updateSlot(i, field, value) {
-    setSlots(prev => {
-      const next = [...prev];
-      next[i] = { ...next[i], [field]: value };
-      return next;
-    });
-  }
-  function addSlot() {
-    if (slots.length >= MAX_SLOTS) return;
-    setSlots(prev => [...prev, emptySlot()]);
-  }
-  function removeSlot(i) {
-    if (slots.length <= 1) return;
-    setSlots(prev => prev.filter((_, idx) => idx !== i));
-  }
-
-  function handleSave() {
-    if (off) { onSave({ off: true, slots: [] }); return; }
-
-    const incomplete = slots.some(s => s.startTime && !s.endTime);
-    if (incomplete) {
-      alert("終了時間を入力してください");
-      return;
-    }
-
-    const validSlots = slots
-      .filter(s => s.startTime)
-      .map(s => ({
-        startTime: s.startTime,
-        endTime:   s.endTime,
-        last:      s.last,
-        workplace: s.workplace || null,
-        nextDay:   isNextDay(s.startTime, s.endTime),
-        breakOverrideMinutes: s.breakOverride,
-      }));
-
-    onSave(validSlots.length === 0
-      ? { off: true, slots: [] }
-      : { off: false, slots: validSlots });
-  }
-
-  const saveDisabled = !off && slots.some(s => !s.startTime || !s.endTime);
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 2000,
-      background: "rgba(0,0,0,0.15)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className={styles.popover} style={{ position: "relative", top: "auto", left: "auto" }}>
-        <label className={styles.popRow}>
-          <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck} />
-          <span className={styles.popRowLabel}>公休</span>
-        </label>
-        {!off && (
-          <>
-            {slots.map((slot, i) => {
-              const nd = isNextDay(slot.startTime, slot.endTime);
-              return (
-                <div key={i} className={styles.slotBlock}>
-                  <div className={styles.slotHeader}>
-                    <span className={styles.slotNum}>#{i + 1}</span>
-                    {slots.length > 1 && (
-                      <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
-                    )}
-                  </div>
-
-                  <div className={styles.popRow}>
-                    <span className={styles.popLabel}>場所</span>
-                    <select className={styles.popSelect} value={slot.workplace} onChange={e => updateSlot(i, "workplace", e.target.value)}>
-                      <option value="">— 未選択 —</option>
-                      {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                    </select>
-                  </div>
-
-                  <div className={styles.popRow}>
-                    <span className={styles.popLabel}>
-                      <span style={{ fontSize: 10, color: "#6B7280", display: "block", marginBottom: 1 }}>当日</span>
-                      開始
-                    </span>
-                    <select className={styles.popSelect} value={slot.startTime} onChange={e => updateSlot(i, "startTime", e.target.value)}>
-                      <option value="">--</option>
-                      {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-
-                  <div className={styles.popRow}>
-                    <span className={styles.popLabel}>
-                      <span style={{
-                        fontSize: 10, display: "block", marginBottom: 1,
-                        color:      nd ? "#dc2626" : "#6B7280",
-                        fontWeight: nd ? "bold"    : "normal",
-                      }}>
-                        {nd ? "翌日" : "当日"}
-                      </span>
-                      終了
-                    </span>
-                    <select className={styles.popSelect} value={slot.endTime} onChange={e => updateSlot(i, "endTime", e.target.value)}>
-                      <option value="">--</option>
-                      {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-
-                  {(() => {
-                    const total = getTotalHint(slot.startTime, slot.endTime);
-                    const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
-                    const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
-                    if (!total && !hint && !work) return null;
-                    return (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: -4 }}>
-                        {total && (
-                          <div style={{
-                            fontSize: 11, color: "#475569", background: "#f8fafc",
-                            border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px",
-                          }}>
-                            🕐 合計: {total}
-                          </div>
-                        )}
-
-                        {hint && (
-                          <div style={{ position: "relative" }}>
-                            <div
-                              onClick={() => updateSlot(i, "_breakOpen", !slot._breakOpen)}
-                              style={{
-                                fontSize: 11, color: hint.color, background: hint.bg,
-                                border: `1px solid ${hint.border}`, borderRadius: 6,
-                                padding: "4px 8px", cursor: "pointer",
-                                display: "flex", alignItems: "center", justifyContent: "space-between",
-                              }}
-                            >
-                              <span>{hint.text}</span>
-                              <span style={{ fontSize: 10, opacity: 0.6 }}>▼</span>
-                            </div>
-
-                            {slot._breakOpen && (
-                              <div style={{
-                                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
-                                background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
-                                boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden",
-                              }}>
-                                <div
-                                  onClick={() => { updateSlot(i, "breakOverride", 0); updateSlot(i, "_breakOpen", false); }}
-                                  style={{
-                                    padding: "8px 12px", fontSize: 12, cursor: "pointer",
-                                    color: "#64748b",
-                                    background: (slot.breakOverride === 0) ? "#f1f5f9" : "#fff",
-                                  }}
-                                >
-                                  なし（0分）
-                                </div>
-                                {breakRules.map(r => (
-                                  <div
-                                    key={r.id}
-                                    onClick={() => { updateSlot(i, "breakOverride", r.breakMinutes); updateSlot(i, "_breakOpen", false); }}
-                                    style={{
-                                      padding: "8px 12px", fontSize: 12, cursor: "pointer",
-                                      background: (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff",
-                                      color: "#475569",
-                                      borderTop: "1px solid #f1f5f9",
-                                    }}
-                                  >
-                                    {r.name}（{r.breakMinutes}分）
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {work && (
-                          <div style={{
-                            fontSize: 11, color: "#0369a1", background: "#f0f9ff",
-                            border: "1px solid #bae6fd", borderRadius: 6, padding: "4px 8px",
-                          }}>
-                            ⏰ 実働: {work}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  <label className={styles.popRow}>
-                    <input type="checkbox" checked={slot.last} onChange={e => updateSlot(i, "last", e.target.checked)} className={styles.popCheck} />
-                    <span className={styles.popRowLabel}>
-                      <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
-                    </span>
-                  </label>
-                </div>
-              );
-            })}
-            {slots.length < MAX_SLOTS && (
-              <button type="button" className={styles.slotAddBtn} onClick={addSlot}>
-                ＋ 勤務場所を追加
-              </button>
-            )}
-          </>
-        )}
-        <div className={styles.popActions}>
-          <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
-          <button
-            className={styles.popSave}
-            onClick={handleSave}
-            disabled={saveDisabled}
-            style={{ opacity: saveDisabled ? 0.4 : 1, cursor: saveDisabled ? "not-allowed" : "pointer" }}
-          >
-            保存
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -555,9 +289,46 @@ function ReportLoader() {
   );
 }
 
-/* ─── CellPopover ───────────────────────────────────────── */
+/* ─── CellPopover → модальное окно «シフト編集» по центру экрана ─── */
+const CP_ICON = {
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+  strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+};
+function CpIcoCalendar() { return (<svg {...CP_ICON}><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /><path d="M9 15.5l2 2 4-4" /></svg>); }
+function CpIcoClose()    { return (<svg {...CP_ICON}><path d="M6 6l12 12M18 6L6 18" /></svg>); }
+function CpIcoPin()      { return (<svg {...CP_ICON}><path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0113 0C18.5 14.8 12 21 12 21z" /><circle cx="12" cy="9.8" r="2.3" /></svg>); }
+function CpIcoClock()    { return (<svg {...CP_ICON}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>); }
+function CpIcoCup()      { return (<svg {...CP_ICON}><path d="M4.5 9h11v5.5a4.5 4.5 0 01-4.5 4.5H9a4.5 4.5 0 01-4.5-4.5V9z" /><path d="M15.5 10.5h1.5a2.5 2.5 0 010 5h-1.5" /><path d="M4 21h12" /></svg>); }
+function CpIcoAlarm()    { return (<svg {...CP_ICON}><circle cx="12" cy="13" r="7" /><path d="M12 9.5V13l2.5 1.5M5 4.5L3 6.5M19 4.5l2 2" /></svg>); }
+function CpIcoSave()     { return (<svg {...CP_ICON}><path d="M5 4h11l3 3v12a1 1 0 01-1 1H6a1 1 0 01-1-1V4z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></svg>); }
+function CpIcoTrash()    { return (<svg {...CP_ICON}><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5a1 1 0 001 .9h7a1 1 0 001-.9l1-12.5M9.5 7V4.5h5V7" /></svg>); }
+
+// «9時間00分» / «40分»
+function fmtJpDuration(mins) {
+  if (mins === null || mins === undefined || mins < 0) return "";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h === 0 ? `${m}分` : `${h}時間${String(m).padStart(2, "0")}分`;
+}
+// «2026年 9月 23日 (水)»
+function fmtJpDate(ds) {
+  if (!ds) return "";
+  const [y, m, d] = ds.split("-").map(Number);
+  const wd = new Date(y, m - 1, d).getDay();
+  return `${y}年 ${m}月 ${d}日 (${WD_JA[wd]})`;
+}
+function slotDurationMinutes(start, end) {
+  if (!start || !end) return null;
+  let s = toMinutesLocal(start), e = toMinutesLocal(end);
+  if (e <= s) e += 24 * 60;
+  return e - s;
+}
+
+// bulkDates — массовое редактирование (Shift+клик / «全日を選択»): одна и та же смена на все выбранные дни
 function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
-                       anchorRef, onClose, onSave, workplaces, breakRules = [] }) {
+                       staffName, staffPosition, staffDepartments = [], bulkDates = null,
+                       onClose, onSave, workplaces, breakRules = [] }) {
+  const isBulk    = Array.isArray(bulkDates) && bulkDates.length > 0;
+  const bulkSorted = isBulk ? [...bulkDates].sort() : [];
   const isOff = day.off && (!day.slots || day.slots.length === 0);
   const [off, setOff]     = useState(isOff);
   const [slots, setSlots] = useState(() => {
@@ -570,40 +341,15 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
       breakOverride: (s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined)
         ? s.breakOverrideMinutes
         : null,
-      _breakOpen:    false,
     }));
   });
-  const popRef = useRef();
-  const [pos, setPos] = useState({ top: 0, left: 0 });
 
+  // Esc — закрыть
   useEffect(() => {
-    if (!anchorRef.current || !popRef.current) return;
-    const anchor = anchorRef.current.getBoundingClientRect();
-    const pop    = popRef.current.getBoundingClientRect();
-    const vw = window.innerWidth, vh = window.innerHeight, margin = 8;
-    let top;
-    const spaceBelow = vh - anchor.bottom, spaceAbove = anchor.top;
-    if (spaceBelow >= pop.height + margin || spaceBelow >= spaceAbove) {
-      top = anchor.bottom + margin;
-    } else {
-      top = anchor.top - pop.height - margin;
-    }
-    top = Math.max(margin, Math.min(top, vh - pop.height - margin));
-    let left = anchor.left + anchor.width / 2 - pop.width / 2;
-    left = Math.max(margin, Math.min(left, vw - pop.width - margin));
-    setPos({ top, left });
-  }, [slots, off, anchorRef]);
-
-  useEffect(() => {
-    function onDown(e) {
-      if (
-        popRef.current && !popRef.current.contains(e.target) &&
-        anchorRef.current && !anchorRef.current.contains(e.target)
-      ) onClose();
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [onClose, anchorRef]);
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   function updateSlot(i, field, value) {
     setSlots(prev => {
@@ -622,13 +368,13 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
   }
   function handleSave() {
     if (off) { onSave({ off: true, slots: [] }); return; }
-  
+
     const incomplete = slots.some(s => s.startTime && !s.endTime);
     if (incomplete) {
       alert("終了時間を入力してください");
       return;
     }
-  
+
     const validSlots = slots
       .filter(s => s.startTime)
       .map(s => ({
@@ -639,471 +385,327 @@ function CellPopover({ day, currentDate, prevDaySlots, onGoToPrevDay,
         nextDay:       isNextDay(s.startTime, s.endTime),
         breakOverrideMinutes: s.breakOverride,
       }));
-  
+
     onSave(validSlots.length === 0
       ? { off: true, slots: [] }
       : { off: false, slots: validSlots });
   }
 
-  // シフト番号 например "2026/06/22 №1"
-  function shiftLabel(idx) {
-    if (!currentDate) return `#${idx + 1}`;
-    return `${currentDate.replace(/-/g, "/")} №${idx + 1}`;
-  }
-
   const saveDisabled = !off && slots.some(s => !s.startTime || !s.endTime);
 
-  return (
-    <div ref={popRef} className={styles.popover}
+  // Варианты перерыва: "" = авто по правилам, "0" = なし, иначе минуты правила
+  const breakOptions = useMemo(() => {
+    const seen = new Set();
+    return breakRules
+      .filter(r => r.breakMinutes > 0 && !seen.has(r.breakMinutes) && seen.add(r.breakMinutes))
+      .map(r => ({ value: String(r.breakMinutes), label: `${fmtJpDuration(r.breakMinutes)}${r.name ? `（${r.name}）` : ""}` }));
+  }, [breakRules]);
+
+  function autoBreakLabel(slot) {
+    const auto = getAutoBreakMinutes(slot.startTime, slot.endTime, breakRules) || 0;
+    if (!auto) return "なし（自動）";
+    return `${fmtJpDuration(auto)}（自動）`;
+  }
+
+  const modal = (
+    <div className={styles.cpOverlay}
+      onMouseDown={e => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }}
       onClick={e => e.stopPropagation()}
-      style={{ position:"fixed", top:pos.top, left:pos.left, transform:"none" }}>
+      onContextMenu={e => e.stopPropagation()}>
+      <div className={styles.cpModal} role="dialog" aria-modal="true" aria-label="シフト編集">
 
-      {/* ── 前日からの引き続き ── */}
-      {prevDaySlots && prevDaySlots.length > 0 && (
-        <div
-          onClick={onGoToPrevDay}
-          style={{
-            margin: "0 0 10px 0", padding: "8px 10px",
-            background: "#EBF3FF", border: "1px solid #BFDBFE",
-            borderRadius: 6, cursor: "pointer",
-            transition: "background 0.15s",
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = "#DBEAFE"}
-          onMouseLeave={e => e.currentTarget.style.background = "#EBF3FF"}
-        >
-          <div style={{ fontSize: 11, color: "#1e40af", fontWeight: "bold", marginBottom: 5 }}>
-            ← 前日からの引き続き（クリックで前日を編集）
-          </div>
-          {prevDaySlots.map((s, i) => (
-            <div key={i} style={{
-              fontSize: 12, color: "#374151",
-              display: "flex", gap: 5, alignItems: "center",
-            }}>
-              <span style={{
-                fontSize: 10, background: "#DBEAFE",
-                padding: "1px 5px", borderRadius: 3, color: "#1e40af",
-              }}>前日</span>
-              {formatTime(s.startTime)}
-              <span style={{ color: "#9CA3AF" }}>→</span>
-              <span style={{
-                fontSize: 10, background: "#DBEAFE",
-                padding: "1px 5px", borderRadius: 3, color: "#1e40af",
-              }}>当日</span>
-              {formatTime(s.endTime)}
-              {s.workplace && (
-                <span style={{ color: "#6B7280", marginLeft: 2 }}>{s.workplace}</span>
-              )}
+        {/* ── Заголовок ── */}
+        <div className={styles.cpHead}>
+          <span className={styles.cpHeadIcon}><CpIcoCalendar /></span>
+          <div className={styles.cpHeadText}>
+            <div className={styles.cpTitle}>
+              {isBulk ? "シフト一括編集" : "シフト編集"}
+              {isBulk && <span className={styles.cpBulkCount}>{bulkSorted.length}日選択中</span>}
             </div>
-          ))}
+            <div className={styles.cpDate}>
+              {isBulk
+                ? (bulkSorted.length === 1
+                    ? fmtJpDate(bulkSorted[0])
+                    : `${fmtJpDate(bulkSorted[0])} 〜 ${fmtJpDate(bulkSorted[bulkSorted.length - 1])}`)
+                : fmtJpDate(currentDate)}
+            </div>
+          </div>
+          <button type="button" className={styles.cpClose} onClick={onClose} aria-label="閉じる"><CpIcoClose /></button>
         </div>
-      )}
 
-      <label className={styles.popRow}>
-        <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} className={styles.popCheck}/>
-        <span className={styles.popRowLabel}>公休</span>
-      </label>
-
-      {!off && (
-        <>
-          {slots.map((slot, i) => {
-            const nd = isNextDay(slot.startTime, slot.endTime);
-            return (
-              <div key={i} className={styles.slotBlock}>
-                <div className={styles.slotHeader}>
-                  <span className={styles.slotNum} style={{ fontFamily: "monospace", fontSize: 11 }}>
-                    {shiftLabel(i)}
-                  </span>
-                  {slots.length > 1 && (
-                    <button type="button" className={styles.slotRemove} onClick={() => removeSlot(i)}>✕</button>
-                  )}
-                </div>
-
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>場所</span>
-                  <select className={styles.popSelect} value={slot.workplace}
-                    onChange={e => updateSlot(i,"workplace",e.target.value)}>
-                    <option value="">— 未選択 —</option>
-                    {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                  </select>
-                </div>
-
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>
-                    <span style={{ fontSize: 10, color: "#6B7280", display: "block", marginBottom: 1 }}>当日</span>
-                    開始
-                  </span>
-                  <select className={styles.popSelect} value={slot.startTime}
-                    onChange={e => updateSlot(i,"startTime",e.target.value)}>
-                    <option value="">--</option>
-                    {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-
-                <div className={styles.popRow}>
-                  <span className={styles.popLabel}>
-                    <span style={{
-                      fontSize: 10, display: "block", marginBottom: 1,
-                      color:      nd ? "#dc2626" : "#6B7280",
-                      fontWeight: nd ? "bold"    : "normal",
-                    }}>
-                      {nd ? "翌日" : "当日"}
-                    </span>
-                    終了
-                  </span>
-                    <select className={styles.popSelect} value={slot.endTime}
-                      onChange={e => updateSlot(i,"endTime",e.target.value)}>
-                      <option value="">--</option>
-                      {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                </div>
-
-                {(() => {
-                  const total = getTotalHint(slot.startTime, slot.endTime);
-                  const hint  = getBreakHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
-                  const autoBreak = getAutoBreakMinutes(slot.startTime, slot.endTime, breakRules);
-                  const work  = getWorkHint(slot.startTime, slot.endTime, slot.breakOverride, breakRules);
-                  if (!total && !hint && !work) return null;
-                  return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: -4 }}>
-                      {total && (
-                        <div style={{
-                          fontSize: 11, color: "#475569", background: "#f8fafc",
-                          border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 8px",
-                        }}>
-                          🕐 合計: {total}
-                        </div>
-                      )}
-
-                      {/* 休憩 — автоматически + выбор вручную */}
-                      {hint && (
-                        <div style={{ position: "relative" }}>
-                          <div
-                            onClick={() => updateSlot(i, "_breakOpen", !slot._breakOpen)}
-                            style={{
-                              fontSize: 11, color: hint.color, background: hint.bg,
-                              border: `1px solid ${hint.border}`, borderRadius: 6,
-                              padding: "4px 8px", cursor: "pointer",
-                              display: "flex", alignItems: "center", justifyContent: "space-between",
-                            }}
-                          >
-                            <span>{hint.text}</span>
-                            <span style={{ fontSize: 10, opacity: 0.6 }}>▼</span>
-                          </div>
-
-                          {slot._breakOpen && (
-                            <div style={{
-                              position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
-                              background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
-                              boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, overflow: "hidden",
-                            }}>
-                              <div
-                                onClick={() => { updateSlot(i, "breakOverride", 0); updateSlot(i, "_breakOpen", false); }}
-                                style={{
-                                  padding: "8px 12px", fontSize: 12, cursor: "pointer",
-                                  color: "#64748b",
-                                  background: (slot.breakOverride === 0) ? "#f1f5f9" : "#fff",
-                                }}
-                                onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
-                                onMouseLeave={e => e.currentTarget.style.background = (slot.breakOverride === 0) ? "#f1f5f9" : "#fff"}
-                              >
-                                なし（0分）
-                              </div>
-                              {breakRules.map(r => (
-                                <div
-                                  key={r.id}
-                                  onClick={() => { updateSlot(i, "breakOverride", r.breakMinutes); updateSlot(i, "_breakOpen", false); }}
-                                  style={{
-                                    padding: "8px 12px", fontSize: 12, cursor: "pointer",
-                                    background: (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff",
-                                    color: "#475569",
-                                    borderTop: "1px solid #f1f5f9",
-                                  }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
-                                  onMouseLeave={e => e.currentTarget.style.background = (slot.breakOverride === r.breakMinutes) ? "#f5f3ff" : "#fff"}
-                                >
-                                  {r.name}（{r.breakMinutes}分）
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {work && (
-                        <div style={{
-                          fontSize: 11, color: "#0369a1", background: "#f0f9ff",
-                          border: "1px solid #bae6fd", borderRadius: 6, padding: "4px 8px",
-                        }}>
-                          ⏰ 実働: {work}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                <label className={styles.popRow}>
-                  <input type="checkbox" checked={slot.last}
-                    onChange={e => updateSlot(i,"last",e.target.checked)} className={styles.popCheck}/>
-                  <span className={styles.popRowLabel}>
-                    <span className={styles.popLastLabel}>L</span> ラスト（終了未定）
-                  </span>
-                </label>
+        <div className={styles.cpBody}>
+          {/* ── Сотрудник ── */}
+          <div className={styles.cpStaff}>
+            <div className={styles.cpStaffText}>
+              <div className={styles.cpStaffName}>{staffName}</div>
+              {staffPosition && <div className={styles.cpStaffPos}>{staffPosition}</div>}
+            </div>
+            {staffDepartments.length > 0 && (
+              <div className={styles.cpChips}>
+                {staffDepartments.map(d => <span key={d} className={styles.cpChip}>{d}</span>)}
               </div>
-            );
-          })}
-          {slots.length < MAX_SLOTS && (
-            <button type="button" className={styles.slotAddBtn} onClick={addSlot}>
-              ＋ シフトを追加
+            )}
+          </div>
+
+          {/* ── 前日からの引き続き ── */}
+          {prevDaySlots && prevDaySlots.length > 0 && (
+            <button type="button" className={styles.cpPrev} onClick={onGoToPrevDay}>
+              <span className={styles.cpPrevTitle}>← 前日からの引き続き（クリックで前日を編集）</span>
+              {prevDaySlots.map((s, i) => (
+                <span key={i} className={styles.cpPrevRow}>
+                  <span className={styles.cpPrevTag}>前日</span>{formatTime(s.startTime)}
+                  <span className={styles.cpPrevArrow}>→</span>
+                  <span className={styles.cpPrevTag}>当日</span>{formatTime(s.endTime)}
+                  {s.workplace && <span className={styles.cpPrevPlace}>{s.workplace}</span>}
+                </span>
+              ))}
             </button>
           )}
-        </>
-      )}
-      <div className={styles.popActions}>
-        <button className={styles.popCancel} onClick={onClose}>キャンセル</button>
-        <button
-          className={styles.popSave}
-          onClick={handleSave}
-          disabled={saveDisabled}
-          style={{ opacity: saveDisabled ? 0.4 : 1, cursor: saveDisabled ? "not-allowed" : "pointer" }}
-        >
-          保存
-        </button>
+
+          {isBulk && (
+            <div className={styles.cpBulkNote}>選択した {bulkSorted.length} 日すべてに同じシフトを設定します（既存のシフトは上書きされます）。</div>
+          )}
+
+          <div className={styles.cpCard}>
+            {/* Переключает только сама галочка — клик по строке ничего не делает */}
+            <div className={styles.cpOffRow}>
+              <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)}
+                className={styles.cpCheck} aria-label="公休" />
+              <span>公休</span>
+            </div>
+
+            {off ? (
+              <div className={styles.cpOffNote}>
+                {isBulk ? "選択した日はすべて公休になります。" : "この日は公休です。シフト情報はありません。"}
+              </div>
+            ) : (
+              <>
+                {slots.map((slot, i) => {
+                  const nd    = isNextDay(slot.startTime, slot.endTime);
+                  const dur   = slotDurationMinutes(slot.startTime, slot.endTime);
+                  const brk   = dur === null ? null
+                    : (slot.breakOverride !== null && slot.breakOverride !== undefined)
+                      ? slot.breakOverride
+                      : (getAutoBreakMinutes(slot.startTime, slot.endTime, breakRules) || 0);
+                  const work  = dur === null ? null : dur - (brk || 0);
+                  return (
+                    <div key={i} className={styles.cpSlot}>
+                      {slots.length > 1 && (
+                        <div className={styles.cpSlotHead}>
+                          <span>シフト {i + 1}</span>
+                          <button type="button" className={styles.cpSlotRemove} onClick={() => removeSlot(i)} aria-label="削除">
+                            <CpIcoTrash />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className={styles.cpField}>
+                        <span className={styles.cpLabel}><CpIcoPin />場所</span>
+                        <select className={styles.cpSelect} value={slot.workplace}
+                          onChange={e => updateSlot(i, "workplace", e.target.value)}>
+                          <option value="">— 未選択 —</option>
+                          {workplaces.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
+                        </select>
+                      </div>
+
+                      <div className={styles.cpField}>
+                        <span className={styles.cpLabel}><CpIcoClock />開始</span>
+                        <select className={styles.cpSelect} value={slot.startTime}
+                          onChange={e => updateSlot(i, "startTime", e.target.value)}>
+                          <option value="">--:--</option>
+                          {START_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+
+                      <div className={styles.cpField}>
+                        <span className={styles.cpLabel}>
+                          <CpIcoClock />終了
+                          {nd && <span className={styles.cpNextDay}>翌日</span>}
+                        </span>
+                        <select className={styles.cpSelect} value={slot.endTime}
+                          onChange={e => updateSlot(i, "endTime", e.target.value)}>
+                          <option value="">--:--</option>
+                          {END_TIME_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+
+                      {dur !== null && (
+                        <>
+                          <div className={styles.cpTotal}><CpIcoClock />合計: {fmtJpDuration(dur)}</div>
+
+                          <div className={styles.cpField}>
+                            <span className={styles.cpLabel}><CpIcoCup />休憩</span>
+                            <select className={cx(styles.cpSelect, styles.cpSelectBreak)}
+                              value={slot.breakOverride === null || slot.breakOverride === undefined ? "" : String(slot.breakOverride)}
+                              onChange={e => updateSlot(i, "breakOverride", e.target.value === "" ? null : Number(e.target.value))}>
+                              <option value="">{autoBreakLabel(slot)}</option>
+                              <option value="0">なし（0分）</option>
+                              {breakOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                          </div>
+
+                          <div className={styles.cpField}>
+                            <span className={cx(styles.cpLabel, styles.cpLabelWork)}><CpIcoAlarm />実働</span>
+                            <div className={styles.cpWork}>{fmtJpDuration(work)}</div>
+                          </div>
+                        </>
+                      )}
+
+                      <label className={styles.cpLastRow}>
+                        <input type="checkbox" checked={slot.last} className={styles.cpCheckSm}
+                          onChange={e => updateSlot(i, "last", e.target.checked)} />
+                        <span className={styles.cpLastBadge}>L</span>
+                        ラスト（終了未定）
+                      </label>
+                    </div>
+                  );
+                })}
+
+                {slots.length < MAX_SLOTS && (
+                  <button type="button" className={styles.cpAddSlot} onClick={addSlot}>＋ シフトを追加</button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Кнопки ── */}
+        <div className={styles.cpFoot}>
+          <button type="button" className={styles.cpCancel} onClick={onClose}>キャンセル</button>
+          <button type="button" className={styles.cpSave} onClick={handleSave} disabled={saveDisabled}>
+            <CpIcoSave />保存
+          </button>
+        </div>
       </div>
     </div>
   );
+
+  // Портал в body — окно поверх всего (боковое меню, шапка), а не внутри ячейки таблицы
+  return createPortal(modal, document.body);
 }
 
-/* ─── ColToggleDropdown ─────────────────────────────────── */
-function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef();
+/* ─── small UI helpers (новый дизайн 2026-10-02, как в 勤怠管理) ─── */
+const cx = (...a) => a.filter(Boolean).join(" ");
 
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => {
-      function onDown(e) {
-        if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-      }
-      document.addEventListener("mousedown", onDown);
-      return () => document.removeEventListener("mousedown", onDown);
-    }, 50);
-    return () => clearTimeout(t);
-  }, [open]);
+// 表示列: строки под именем + колонка №
+const COL_ITEMS = [
+  { value: "number",     label: "№" },
+  { value: "position",   label: "職種・役職" },
+  { value: "department", label: "部署" },
+];
 
-  const COL_TOGGLES = [
-    { key: "number",     label: "№" },
-    { key: "position",   label: "職種・役職" },
-    { key: "department", label: "部署" },
-  ];
-  const allOn = COL_TOGGLES.every(c => colVisibility[c.key]);
+const STATUS_ITEMS = [
+  { value: "RECEIVING", label: "受付中", color: "#b8c4d0" },
+  { value: "DRAFTING",  label: "作成中", color: "#f0b23c" },
+  { value: "CONFIRMED", label: "確定",   color: "#1a8a5f" },
+];
 
+function Chevron({ open }) {
   return (
-    <div ref={ref} className={styles.wpDropdownWrap}>
-      <button
-        type="button"
-        className={`${styles.wpDropdownBtn} ${open ? styles.wpDropdownBtnActive : ""}`}
-        onClick={() => setOpen(v => !v)}
-      >
-        表示列
-        <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div className={styles.wpDropdownPanel}>
-          <label className={styles.wpDropdownAll}>
-            <input type="checkbox" className={styles.colToggleCheck}
-              checked={allOn}
-              onChange={() => {
-                const next = !allOn;
-                onColVisibilityChange({ number: next, position: next, department: next });
-              }}
-            />
-            <span>すべて</span>
-          </label>
-          <div className={styles.wpDropdownDivider} />
-          {COL_TOGGLES.map(c => (
-            <label key={c.key} className={styles.wpDropdownItem}>
-              <input type="checkbox" className={styles.colToggleCheck}
-                checked={colVisibility[c.key]}
-                onChange={() => onColVisibilityChange({ ...colVisibility, [c.key]: !colVisibility[c.key] })}
-              />
-              <span>{c.label}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
+    <svg className={cx(styles.chev, open && styles.chevOpen)} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
-/* ─── CheckDropdown ─────────────────────────────────────── */
-function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef();
+const TB_ICON = {
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+  strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+};
+function IcoDownload() { return (<svg {...TB_ICON}><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" /><path d="M4.5 19.5h15" /></svg>); }
+function IcoBell()     { return (<svg {...TB_ICON}><path d="M6 16.5V11a6 6 0 0112 0v5.5l1.5 1.5h-15z" /><path d="M10 20.5a2 2 0 004 0" /></svg>); }
+function IcoGear()     { return (<svg {...TB_ICON}><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2" /><circle cx="12" cy="12" r="7" /></svg>); }
+function IcoUser()     { return (<svg {...TB_ICON}><circle cx="12" cy="8.5" r="3.8" /><path d="M4.5 20c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5" /></svg>); }
+function IcoLogout()   { return (<svg {...TB_ICON}><path d="M14 4H7a2 2 0 00-2 2v12a2 2 0 002 2h7" /><path d="M11 12h9M17 8.5l3.5 3.5-3.5 3.5" /></svg>); }
+function IcoSearch()   { return (<svg {...TB_ICON}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></svg>); }
+function IcoPrev()     { return (<svg {...TB_ICON}><path d="M15 6l-6 6 6 6" /></svg>); }
+function IcoNext()     { return (<svg {...TB_ICON}><path d="M9 6l6 6-6 6" /></svg>); }
+function IcoSelectAll() { return (<svg {...TB_ICON}><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /><path d="M8.5 14.5l2.3 2.3 4.7-4.7" /></svg>); }
+function IcoEdit()     { return (<svg {...TB_ICON}><path d="M4 20h4l10.5-10.5a2.1 2.1 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>); }
+function IcoClose()    { return (<svg {...TB_ICON}><path d="M6 6l12 12M18 6L6 18" /></svg>); }
 
+// Закрытие выпадающего списка по клику мимо
+function useOutsideClose(open, setOpen, ref) {
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => {
-      function onDown(e) {
-        if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-      }
-      document.addEventListener("mousedown", onDown);
-      return () => document.removeEventListener("mousedown", onDown);
-    }, 50);
-    return () => clearTimeout(t);
-  }, [open]);
+    function onDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
 
-  const allKeys = [...items.map(i => i.value), ...(extraItems||[]).map(i => i.value)];
-  const allOn   = allKeys.length > 0 && allKeys.every(k => visibleSet.has(k));
-  const someOn  = allKeys.some(k => visibleSet.has(k));
-  const isFiltered = !allOn;
-
+// Кнопка + панель (部署 / 職種・役職 / 表示フィルター / 並び替え / 表示列 / その他)
+function DropdownShell({ label, filtered, align, width, className, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useOutsideClose(open, setOpen, ref);
   return (
-    <div ref={ref} className={styles.wpDropdownWrap}>
-      <button
-        type="button"
-        className={`${styles.wpDropdownBtn} ${open ? styles.wpDropdownBtnActive : ""} ${isFiltered ? styles.wpDropdownBtnFiltered : ""}`}
-        onClick={() => setOpen(v => !v)}
-      >
+    <div ref={ref} className={cx(styles.wpDropdownWrap, className)}>
+      <button type="button"
+        className={cx(styles.wpDropdownBtn, open && styles.wpDropdownBtnActive, filtered && styles.wpDropdownBtnFiltered)}
+        onClick={() => setOpen(v => !v)}>
         {label}
-        <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
+        <Chevron open={open} />
       </button>
       {open && (
-        <div className={styles.wpDropdownPanel}>
-          <label className={styles.wpDropdownAll}>
-            <input type="checkbox" className={styles.colToggleCheck}
-              checked={allOn}
-              ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
-              onChange={() => onToggleAll(allKeys, !allOn)}
-            />
-            <span>すべて</span>
-          </label>
-          <div className={styles.wpDropdownDivider} />
-          {items.map(item => (
-            <label key={item.value} className={styles.wpDropdownItem}>
-              <input type="checkbox" className={styles.colToggleCheck}
-                checked={visibleSet.has(item.value)}
-                onChange={() => onToggle(item.value)}
-              />
-              <span>{item.label}</span>
-            </label>
-          ))}
-          {extraItems && extraItems.length > 0 && (
-            <>
-              <div className={styles.wpDropdownDivider} />
-              {extraItems.map(item => (
-                <label key={item.value} className={styles.wpDropdownItem}>
-                  <input type="checkbox" className={styles.colToggleCheck}
-                    checked={visibleSet.has(item.value)}
-                    onChange={() => onToggle(item.value)}
-                  />
-                  <span className={styles.wpSpecialLabel}>{item.label}</span>
-                </label>
-              ))}
-            </>
-          )}
+        <div className={cx(styles.wpDropdownPanel, align === "right" && styles.panelRight)}
+          style={width ? { width } : undefined}>
+          {children}
         </div>
       )}
     </div>
   );
 }
 
-/* ─── SortBar ───────────────────────────────────────────── */
-function SortBar({
-  sortConfig, onSortChange,
-  colVisibility, onColVisibilityChange,
-  workplaceItems, wpExtraItems, visibleWorkplaces, onWpToggle, onWpToggleAll,
-  positionItems, visiblePositions, onPosToggle, onPosToggleAll,
-  departmentItems, visibleDepartments, onDeptToggle, onDeptToggleAll,
-  onReset, isFiltered,
-  showInactive, onShowInactiveChange,
-  searchQuery, onSearchChange,
-}) {
+// Группа чекбоксов (заголовок + すべて + пункты; item.special — серым)
+function CheckGroup({ title, items, set, onToggle, onToggleAll, hideAll }) {
+  const keys   = items.map(i => i.value);
+  const allOn  = keys.length > 0 && keys.every(k => set.has(k));
+  const someOn = keys.some(k => set.has(k));
   return (
-    <div className={styles.sortBar}>
-      <ColToggleDropdown colVisibility={colVisibility} onColVisibilityChange={onColVisibilityChange} />
-
-      {positionItems.length > 0 && (
-        <CheckDropdown
-          label="職種・役職"
-          items={positionItems}
-          visibleSet={visiblePositions}
-          onToggle={onPosToggle}
-          onToggleAll={onPosToggleAll}
-        />
+    <div className={styles.panelGroup}>
+      {title && <div className={styles.panelTitle}>{title}</div>}
+      {!hideAll && (
+        <label className={styles.wpDropdownAll}>
+          <input type="checkbox" className={styles.colToggleCheck}
+            checked={allOn}
+            ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+            onChange={() => onToggleAll(keys, !allOn)}
+          />
+          <span>すべて</span>
+        </label>
       )}
+      {items.map(item => (
+        <label key={item.value} className={styles.wpDropdownItem}>
+          <input type="checkbox" className={styles.colToggleCheck}
+            checked={set.has(item.value)}
+            onChange={() => onToggle(item.value)}
+          />
+          <span className={item.special ? styles.wpSpecialLabel : undefined}>{item.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
-      {departmentItems.length > 0 && (
-        <CheckDropdown
-          label="部署"
-          items={departmentItems}
-          visibleSet={visibleDepartments}
-          onToggle={onDeptToggle}
-          onToggleAll={onDeptToggleAll}
-        />
-      )}
-
-      {(workplaceItems.length > 0 || wpExtraItems.length > 0) && (
-        <CheckDropdown
-          label="表示フィルター"
-          items={workplaceItems}
-          visibleSet={visibleWorkplaces}
-          onToggle={onWpToggle}
-          onToggleAll={onWpToggleAll}
-          extraItems={wpExtraItems}
-        />
-      )}
-
-      <div className={styles.sortBarDivider} />
-
-      {isFiltered && (
-        <button type="button" className={styles.resetBtn} onClick={onReset}>
-          リセット
-        </button>
-      )}
-
-      <input
-        type="text"
-        value={searchQuery}
-        onChange={e => onSearchChange(e.target.value)}
-        placeholder="氏名で検索..."
-        style={{
-          padding: "4px 10px", fontSize: 13,
-          border: "1.5px solid #e2e8f0", borderRadius: 6,
-          outline: "none", background: "#fff",
-          width: 140,
-        }}
-      />
-
-      <label style={{
-        display: "flex", alignItems: "center", gap: 5,
-        fontSize: 13, cursor: "pointer", color: "#666",
-        whiteSpace: "nowrap",
-      }}>
-        <input
-          type="checkbox"
-          checked={showInactive}
-          onChange={e => onShowInactiveChange(e.target.checked)}
-        />
-        非アクティブを表示
-      </label>
-
-      <div className={styles.sortBarDivider} />
-
-      <span className={styles.sortBarLabel}>並び替え：</span>
+// Список полей сортировки (клик по активному — смена направления)
+function SortList({ sortConfig, setSortConfig }) {
+  return (
+    <div className={styles.panelGroup}>
+      <div className={styles.panelTitle}>並び替え</div>
       {SORT_FIELDS.map(f => {
-        const isActive = sortConfig.field === f.value;
+        const active = sortConfig.field === f.value;
         return (
           <button key={f.value} type="button"
-            className={`${styles.sortBtn} ${isActive ? styles.sortBtnActive : ""}`}
-            onClick={() => onSortChange({
+            className={cx(styles.sortItem, active && styles.sortItemActive)}
+            onClick={() => setSortConfig({
               field: f.value,
-              dir: isActive ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
-            })}
-          >
-            {f.label}
-            <span className={styles.sortArrow}>
-              {isActive ? (sortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
-            </span>
+              dir: active ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
+            })}>
+            <span>{f.label}</span>
+            <span className={styles.sortDir}>{active ? (sortConfig.dir === "asc" ? "↑" : "↓") : ""}</span>
           </button>
         );
       })}
@@ -1111,6 +713,39 @@ function SortBar({
   );
 }
 
+// Статус половины месяца: [1〜15日 | ● 作成中 ⌄] + список
+function StatusSelect({ label, value, disabled, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useOutsideClose(open, setOpen, ref);
+  const cur = STATUS_ITEMS.find(i => i.value === value) || STATUS_ITEMS[0];
+  return (
+    <div ref={ref} className={styles.statusWrap}>
+      <button type="button"
+        className={cx(styles.statusBtn, open && styles.statusBtnOpen)}
+        disabled={disabled}
+        onClick={() => setOpen(v => !v)}>
+        <span className={styles.statusLabel}>{label}</span>
+        <span className={styles.statusDivider} />
+        <span className={styles.statusDot} style={{ background: cur.color }} />
+        <span className={styles.statusText}>{cur.label}</span>
+        <Chevron open={open} />
+      </button>
+      {open && (
+        <div className={styles.statusMenu}>
+          {STATUS_ITEMS.map(i => (
+            <button key={i.value} type="button"
+              className={cx(styles.statusItem, i.value === value && styles.statusItemActive)}
+              onClick={() => { setOpen(false); if (i.value !== value) onChange(i.value); }}>
+              <span className={styles.statusDot} style={{ background: i.color }} />
+              {i.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 /* ─── Main page ─────────────────────────────────────────── */
 export default function ManagerTablePage({ view, onNavigate, onLogout }) {
 
@@ -1146,7 +781,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [statusLoading, setStatusLoading] = useState({});
   const [savingCell, setSavingCell]       = useState(null);
   const [openCell, setOpenCell]           = useState(null);
-  const [reportMenuOpen, setReportMenuOpen] = useState(false);
   const [reportLoading, setReportLoading]   = useState(false);
   const [alertMsg, setAlertMsg]   = useState(null);
   const [selectedCells, setSelectedCells] = useState([]);
@@ -1154,7 +788,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   const [bulkOpen, setBulkOpen]     = useState(false);
   const [contextMenu, setContextMenu]   = useState(null);
   const [copiedPattern, setCopiedPattern] = useState(null);
-  const reportMenuRef  = useRef();
   const cellAnchorRefs = useRef({});
 
   const [sortConfig, setSortConfig] = useState({ field:"sortOrder", dir:"asc" });
@@ -1325,17 +958,6 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
   useEffect(() => {
     try { localStorage.setItem("mgrColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
   }, [colVisibility]);
-
-  /* ── close report menu on outside click ── */
-  useEffect(() => {
-    if (!reportMenuOpen) return;
-    function onDown(e) {
-      if (reportMenuRef.current && !reportMenuRef.current.contains(e.target))
-        setReportMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [reportMenuOpen]);
 
   /* ── close context menu on outside click ── */
   useEffect(() => {
@@ -1684,8 +1306,8 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     }
   }
 
-  async function handleReport(type) {
-    setReportMenuOpen(false);
+  // Excel = 選択中のシフト表: период и сотрудники — как на экране
+  async function handleReport() {
     setReportLoading(true);
     try {
       if (displayDates.length === 0) {
@@ -1694,109 +1316,16 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
       }
       const from = displayDates[0];
       const to   = displayDates[displayDates.length - 1];
-
-      if (type === "all") {
-        await api.reportShiftAllRange(from, to);
-      } else if (type === "timesheet") {
-        await api.reportTimesheetRange(from, to);
-      } else if (type === "filtered") {
-        await api.reportShiftFilteredRange(from, to, filteredStaff.map(s => s.userId));
-      } else if (type === "dept") {
-        const selectedDepts = [...visibleDepartments];
-        if (selectedDepts.length === 0) {
-          setAlertMsg("部署を選択してください。");
-          setReportLoading(false); return;
-        }
-        if (selectedDepts.length > 1) {
-          setAlertMsg("部署別シフト表は1つの部署のみ選択してください。");
-          setReportLoading(false); return;
-        }
-        await api.reportShiftDeptRange(from, to, selectedDepts[0]);
-      }
+      await api.reportShiftScreen(from, to, {
+        userIds:    filteredStaff.map(s => s.userId),                 // порядок — как на экране
+        columns:    COL_ITEMS.map(c => c.value).filter(k => colVisibility[k]),
+        workplaces: [...visibleWorkplaces],                           // места + __none__ + __off__
+      });
     } catch (e) {
       setAlertMsg("レポートの生成に失敗しました: " + e.message);
     } finally {
       setReportLoading(false);
     }
-  }
-
-  /* ── Excel export (по displayDates) ── */
-  function exportToExcel() {
-    const S = {
-      headerMain: { font:{bold:true,color:{rgb:"FFFFFF"},sz:10}, fill:{fgColor:{rgb:"2F5496"}}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"AAAAAA"}},bottom:{style:"thin",color:{rgb:"AAAAAA"}},left:{style:"thin",color:{rgb:"AAAAAA"}},right:{style:"thin",color:{rgb:"AAAAAA"}}} },
-      headerSat:  { font:{bold:true,color:{rgb:"FFFFFF"},sz:10}, fill:{fgColor:{rgb:"4472C4"}}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"AAAAAA"}},bottom:{style:"thin",color:{rgb:"AAAAAA"}},left:{style:"thin",color:{rgb:"AAAAAA"}},right:{style:"thin",color:{rgb:"AAAAAA"}}} },
-      headerSun:  { font:{bold:true,color:{rgb:"FFFFFF"},sz:10}, fill:{fgColor:{rgb:"C0504D"}}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"AAAAAA"}},bottom:{style:"thin",color:{rgb:"AAAAAA"}},left:{style:"thin",color:{rgb:"AAAAAA"}},right:{style:"thin",color:{rgb:"AAAAAA"}}} },
-      cellNormal: { font:{sz:9}, alignment:{vertical:"top",wrapText:true}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-      cellSat:    { font:{sz:9}, fill:{fgColor:{rgb:"EEF3FF"}}, alignment:{vertical:"top",wrapText:true}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-      cellSun:    { font:{sz:9}, fill:{fgColor:{rgb:"FFEEED"}}, alignment:{vertical:"top",wrapText:true}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-      cellOff:    { font:{sz:9,color:{rgb:"CC0000"}}, fill:{fgColor:{rgb:"FFE0E0"}}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-      cellName:   { font:{bold:true,sz:9}, fill:{fgColor:{rgb:"F5F5F5"}}, alignment:{vertical:"center",wrapText:false}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-      cellMeta:   { font:{sz:9,color:{rgb:"555555"}}, fill:{fgColor:{rgb:"F5F5F5"}}, alignment:{vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"DDDDDD"}},bottom:{style:"thin",color:{rgb:"DDDDDD"}},left:{style:"thin",color:{rgb:"DDDDDD"}},right:{style:"thin",color:{rgb:"DDDDDD"}}} },
-    };
-
-    const headerRow = [
-      { v: "職種・役職", s: S.headerMain },
-      { v: "部署",       s: S.headerMain },
-      { v: "氏名",       s: S.headerMain },
-    ];
-    displayDates.forEach(date => {
-      const wd    = new Date(date).getDay();
-      const d     = parseInt(date.slice(8), 10);
-      const label = `${d}\n${WD_JA[wd]}`;
-      headerRow.push({ v: label, s: wd === 6 ? S.headerSat : wd === 0 ? S.headerSun : S.headerMain });
-    });
-
-    const dataRows = filteredStaff.map(staff => {
-      const row = [
-        { v: positions[staff.userId] || "",               s: S.cellMeta },
-        { v: (staffDepts[staff.userId] || []).join("、"), s: S.cellMeta },
-        { v: staff.userName,                              s: S.cellName },
-      ];
-      displayDates.forEach(date => {
-        const wd  = new Date(date).getDay();
-        const day = getDayData(staff.userId, date);
-        if (day.off || !day.slots || day.slots.length === 0) {
-          row.push({ v: "休", s: S.cellOff }); return;
-        }
-        const visibleSlots = day.slots.filter(s =>
-          s.workplace ? visibleWorkplaces.has(s.workplace) : visibleWorkplaces.has("__none__")
-        );
-        if (visibleSlots.length === 0) {
-          row.push({ v: "", s: wd === 6 ? S.cellSat : wd === 0 ? S.cellSun : S.cellNormal }); return;
-        }
-        const text = visibleSlots.map(s => {
-          const start = formatTime(s.startTime);
-          const end   = s.last ? "L" : formatTime(s.endTime);
-          const place = s.workplace ? ` ${s.workplace}` : "";
-          return `${start}〜${end}${place}`;
-        }).join("\n");
-        row.push({ v: text, s: wd === 6 ? S.cellSat : wd === 0 ? S.cellSun : S.cellNormal });
-      });
-      return row;
-    });
-
-    const wsData = [headerRow, ...dataRows];
-    const ws     = XLSX.utils.aoa_to_sheet(wsData, { cellStyles: true });
-    ws["!cols"]  = [{ wch:14 }, { wch:14 }, { wch:14 }, ...displayDates.map(() => ({ wch:13 }))];
-    ws["!rows"]  = [{ hpt:30 }, ...dataRows.map(() => ({ hpt:40 }))];
-    ws["!freeze"] = { xSplit: 3, ySplit: 1 };
-
-    const wb = XLSX.utils.book_new();
-    const sheetName = viewMode === "week"
-      ? `週_${selectedWeek}`
-      : viewMode === "period"
-        ? `期間_${periodFrom}_${periodTo}`
-        : `${ym.replace("-","年")}月`;
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-    XLSX.writeFile(wb, `シフト_${sheetName}.xlsx`);
-  }
-
-  /* ── sticky column left values ── */
-  function nameLeft() {
-    if (!colVisibility.position && !colVisibility.department) return 0;
-    if (!colVisibility.position) return 90;
-    if (!colVisibility.department) return 70;
-    return 160;
   }
 
   /* ── period validation ── */
@@ -1806,535 +1335,447 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
     ? (pDays < 7 ? "7日以上を指定してください" : "50日以内を指定してください")
     : null;
 
-  /* ── thead: второй ряд — недели со статусами ── */
-  // Вычисляем сколько displayDates приходится на каждую неделю
-  const weekColSpans = useMemo(() => {
-    return weeksRaw.map(week => {
-      const count = displayDates.filter(date => {
-        const ws = new Date(week.weekStart);
-        const we = new Date(week.weekStart); we.setDate(we.getDate() + 6);
-        const d  = new Date(date);
-        return d >= ws && d <= we;
-      }).length;
-      return { week, count };
-    }).filter(x => x.count > 0);
-  }, [weeksRaw, displayDates]);
+  /* ── ‹ › : месяц ±1, неделя ±7 дней ── */
+  function shiftPeriod(dir) {
+    if (viewMode === "month") {
+      const [y, m] = ym.split("-").map(Number);
+      const d = new Date(y, m - 1 + dir, 1);
+      setYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    } else if (viewMode === "week") {
+      const ws = addDays(selectedWeek, dir * 7);
+      setSelectedWeek(ws);
+      setYm(ws.slice(0, 7));
+    }
+  }
+  const yearChoices = useMemo(() => {
+    const set = new Set(yearOptions);
+    set.add(ym.split("-")[0]);
+    return [...set].sort();
+  }, [yearOptions, ym]);
 
+  /* ── флаги и наборы для новой панели ── */
+  const todayStr      = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const weekStartSet  = new Set(weeksRaw.map(w => w.weekStart));
+  const wpAllItems    = [...workplaceItems, ...wpExtraItems.map(i => ({ ...i, special: true }))];
+  const wpFiltered    = _f3 || _f4;
+  const colsFiltered  = COL_ITEMS.some(c => !colVisibility[c.value]);
+  const colSet        = new Set(COL_ITEMS.map(c => c.value).filter(k => colVisibility[k]));
+  const toggleCol     = k => setColVisibility(v => ({ ...v, [k]: !v[k] }));
+  const toggleAllCols = (keys, on) => setColVisibility(v => ({ ...v, ...Object.fromEntries(keys.map(k => [k, on])) }));
+  const sortChanged   = !(sortConfig.field === "sortOrder" && sortConfig.dir === "asc");
   /* ── render ── */
   return (
     <ManagerLayout name={getName()} view={view} onNavigate={onNavigate} onLogout={onLogout}>
       <div className={styles.page}>
+        <div className={styles.card}>
 
-        {/* ── TopBar ── */}
-        <div className={styles.topBar}>
-
-          {/* Year */}
-          <select
-            className={styles.monthSelect}
-            value={ym.split("-")[0]}
-            onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}
-          >
-            {yearOptions.map(y => (
-              <option key={y} value={y}>{y}年</option>
-            ))}
-          </select>
-
-          {/* Month */}
-          <select
-            className={styles.monthSelect}
-            value={ym.split("-")[1]}
-            onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}
-          >
-            {MONTHS_JA.map((label, i) => (
-              <option key={i} value={String(i + 1).padStart(2, "0")}>{label}</option>
-            ))}
-          </select>
-
-          {/* View mode tabs */}
-          <div style={{
-            display: "flex", borderRadius: 6, overflow: "hidden",
-            border: "1px solid #ccc", flexShrink: 0,
-          }}>
-            {VIEW_MODES.map((m, idx) => (
-              <button key={m.value} type="button"
-                onClick={() => setViewMode(m.value)}
-                style={{
-                  padding: "5px 14px", fontSize: 13, border: "none", cursor: "pointer",
-                  background: viewMode === m.value ? "#2F5496" : "#fff",
-                  color:      viewMode === m.value ? "#fff"    : "#333",
-                  borderRight: idx < VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
-                  fontWeight:  viewMode === m.value ? "600" : "normal",
-                  transition:  "background 0.15s",
-                }}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Week selector */}
-          {viewMode === "week" && (
-            <select
-              className={styles.monthSelect}
-              value={selectedWeek}
-              onChange={e => setSelectedWeek(e.target.value)}
-            >
-              {weekOptions.map(w => (
-                <option key={w.weekStart} value={w.weekStart}>
-                  {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Period inputs */}
-          {viewMode === "period" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="date"
-                value={periodFrom}
-                onChange={e => setPeriodFrom(e.target.value)}
-                style={{
-                  padding: "4px 8px", fontSize: 13, border: "1px solid #ccc",
-                  borderRadius: 4, cursor: "pointer",
-                  borderColor: periodWarn ? "#cc0000" : "#ccc",
-                }}
-              />
-              <span style={{ fontSize: 13, color: "#666" }}>〜</span>
-              <input
-                type="date"
-                value={periodTo}
-                min={periodFrom || undefined}
-                onChange={e => setPeriodTo(e.target.value)}
-                style={{
-                  padding: "4px 8px", fontSize: 13, border: "1px solid #ccc",
-                  borderRadius: 4, cursor: "pointer",
-                  borderColor: periodWarn ? "#cc0000" : "#ccc",
-                }}
-              />
-              {periodFrom && periodTo && (
-                <span style={{ fontSize: 12, color: periodOk ? "#5a8a5a" : "#cc0000", whiteSpace: "nowrap" }}>
-                  {pDays}日{periodWarn ? `（${periodWarn}）` : ""}
-                </span>
+          {/* ══ Шапка: статусы месяца + действия ══ */}
+          <div className={styles.headRow}>
+            <div className={styles.headLeft}>
+              {viewMode === "month" ? (
+                <>
+                  <StatusSelect label="1〜15日" value={monthStatus1} disabled={monthStatusLoading}
+                    onChange={v => changeMonthStatus(v, 1)} />
+                  <StatusSelect label="16〜末日" value={monthStatus2} disabled={monthStatusLoading}
+                    onChange={v => changeMonthStatus(v, 2)} />
+                  {monthStatusLoading && <span className={styles.statusSpinner}>…</span>}
+                </>
+              ) : (
+                <span className={styles.statusHint}>ステータスは「月」表示で変更できます</span>
               )}
             </div>
-          )}
 
-          {/* Report menu */}
-          <div ref={reportMenuRef} style={{ position: "relative" }}>
-            <button type="button" className={styles.exportBtn}
-              onClick={() => setReportMenuOpen(v => !v)}
-              disabled={loading || reportLoading}>
-              {reportLoading ? "..." : "📊 レポート▼"}
-            </button>
-            {reportMenuOpen && (
-              <div style={{
-                position: "absolute", top: "100%", left: 0, zIndex: 1000,
-                background: "#fff", border: "1px solid #ccc", borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: 200, marginTop: 4,
-              }}>
-                {[
-                  { key:"all",       icon:"📋", label:"全員シフト表" },
-                  { key:"dept",      icon:"🏢", label:"部署別シフト表" },
-                  { key:"timesheet", icon:"🕐", label:"勤怠集計表" },
-                  { key:"filtered",  icon:"🔍", label:"選択中のシフト表" },
-                ].map(item => (
-                  <button key={item.key} type="button"
-                    onClick={() => handleReport(item.key)}
-                    style={{ display:"block", width:"100%", padding:"10px 16px",
-                      textAlign:"left", border:"none", background:"none",
-                      cursor:"pointer", fontSize:13 }}
-                    onMouseEnter={e => e.target.style.background = "#f5f5f5"}
-                    onMouseLeave={e => e.target.style.background = "none"}>
-                    {item.icon} {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {viewMode === "month" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>1〜15日:</span>
-              <select
-                className={`${styles.statusSelect} ${styles[`s_${(STATUS_META[monthStatus1] || STATUS_META.RECEIVING).cls}`]}`}
-                value={monthStatus1}
-                disabled={monthStatusLoading}
-                onChange={e => changeMonthStatus(e.target.value, 1)}
-              >
-                <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
-                <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
-                <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
-              </select>
-              <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>16〜末日:</span>
-              <select
-                className={`${styles.statusSelect} ${styles[`s_${(STATUS_META[monthStatus2] || STATUS_META.RECEIVING).cls}`]}`}
-                value={monthStatus2}
-                disabled={monthStatusLoading}
-                onChange={e => changeMonthStatus(e.target.value, 2)}
-              >
-                <option value="RECEIVING" style={{ color: "#555555" }}>受付中</option>
-                <option value="DRAFTING"  style={{ color: "#7a6000" }}>作成中</option>
-                <option value="CONFIRMED" style={{ color: "#ffffff" }}>確定</option>
-              </select>
-              {monthStatusLoading && <span style={{ fontSize: 12, color: "#94a3b8" }}>…</span>}
+            <div className={styles.headActions}>
+              <button type="button" className={styles.excelBtn}
+                onClick={handleReport}
+                disabled={loading || reportLoading || filteredStaff.length === 0}>
+                <IcoDownload />{reportLoading ? "..." : "Excel"}
+              </button>
+              <span className={styles.headSep} />
+              <button type="button" className={styles.iconBtn} data-tip="お知らせ（準備中）" aria-label="お知らせ" disabled>
+                <IcoBell />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip="設定" aria-label="設定" onClick={() => onNavigate("SETTINGS")}>
+                <IcoGear />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip="希望シフト" aria-label="希望シフト" onClick={() => onNavigate("PREFS")}>
+                <IcoUser />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip="ログアウト" aria-label="ログアウト" onClick={onLogout}>
+                <IcoLogout />
+              </button>
             </div>
+          </div>
+
+          {/* ══ Строка инструментов ══ */}
+          <div className={styles.filterRow}>
+            <div className={styles.periodNav}>
+              {viewMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftPeriod(-1)} aria-label="前へ"><IcoPrev /></button>
+              )}
+
+              {viewMode === "month" && (
+                <>
+                  <select className={styles.monthSelect}
+                    value={ym.split("-")[0]}
+                    onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}>
+                    {yearChoices.map(y => <option key={y} value={y}>{y}年</option>)}
+                  </select>
+                  <select className={styles.monthSelect}
+                    value={ym.split("-")[1]}
+                    onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}>
+                    {MONTHS_JA.map((label, i) => (
+                      <option key={i} value={String(i + 1).padStart(2, "0")}>{label}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {viewMode === "week" && (
+                <select className={styles.monthSelect} value={selectedWeek}
+                  onChange={e => setSelectedWeek(e.target.value)}>
+                  {!weekOptions.some(w => w.weekStart === selectedWeek) && (
+                    <option value={selectedWeek}>
+                      {selectedWeek.slice(5).replace("-","/")} 〜 {addDays(selectedWeek, 6).slice(5).replace("-","/")}
+                    </option>
+                  )}
+                  {weekOptions.map(w => (
+                    <option key={w.weekStart} value={w.weekStart}>
+                      {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {viewMode === "period" && (
+                <div className={styles.periodInputs}>
+                  <input type="date" value={periodFrom}
+                    className={cx(styles.dateInput, periodWarn && styles.dateInputWarn)}
+                    onChange={e => setPeriodFrom(e.target.value)} />
+                  <span className={styles.tilde}>〜</span>
+                  <input type="date" value={periodTo} min={periodFrom || undefined}
+                    className={cx(styles.dateInput, periodWarn && styles.dateInputWarn)}
+                    onChange={e => setPeriodTo(e.target.value)} />
+                  {periodFrom && periodTo && (
+                    <span className={cx(styles.periodDays, !periodOk && styles.periodDaysWarn)}>{pDays}日</span>
+                  )}
+                </div>
+              )}
+
+              {viewMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftPeriod(1)} aria-label="次へ"><IcoNext /></button>
+              )}
+            </div>
+
+            <div className={styles.segment}>
+              {VIEW_MODES.map(m => (
+                <button key={m.value} type="button"
+                  className={cx(styles.segBtn, styles.segBtnSm, viewMode === m.value && styles.segBtnGreen)}
+                  onClick={() => setViewMode(m.value)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <label className={styles.search}>
+              <IcoSearch />
+              <input type="text" value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="氏名で検索..." />
+            </label>
+
+            {departmentItems.length > 0 && (
+              <DropdownShell label="部署" filtered={_f2} width={220}>
+                <CheckGroup items={departmentItems} set={visibleDepartments}
+                  onToggle={handleDeptToggle} onToggleAll={handleDeptToggleAll} />
+              </DropdownShell>
+            )}
+            {positionItems.length > 0 && (
+              <DropdownShell label="職種・役職" filtered={_f1} width={220}>
+                <CheckGroup items={positionItems} set={visiblePositions}
+                  onToggle={handlePosToggle} onToggleAll={handlePosToggleAll} />
+              </DropdownShell>
+            )}
+            {wpAllItems.length > 0 && (
+              <DropdownShell label="表示フィルター" filtered={wpFiltered} width={220}>
+                <CheckGroup title="勤務場所" items={wpAllItems} set={visibleWorkplaces}
+                  onToggle={handleWpToggle} onToggleAll={handleWpToggleAll} />
+              </DropdownShell>
+            )}
+
+            {/* На широком экране — отдельными кнопками */}
+            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+            </DropdownShell>
+            <DropdownShell label="表示列" filtered={colsFiltered} width={180} className={styles.wideOnly}>
+              <CheckGroup items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
+            </DropdownShell>
+
+            {/* На узком экране — всё в «その他» */}
+            <DropdownShell label="その他" filtered={sortChanged || colsFiltered} width={220} className={styles.narrowOnly}>
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+              <div className={styles.wpDropdownDivider} />
+              <CheckGroup title="表示列" items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
+            </DropdownShell>
+
+            <div className={styles.filterRight}>
+              {isFiltered && (
+                <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
+              )}
+            </div>
+          </div>
+
+          {viewMode === "period" && periodWarn && (
+            <div className={styles.warnBar}>⚠️ {periodWarn}</div>
           )}
 
-          <span className={styles.topHint}>📅 シフト管理</span>
-        </div>
-
-        {/* ── SortBar ── */}
-        <SortBar
-          sortConfig={sortConfig} onSortChange={setSortConfig}
-          showInactive={showInactive} onShowInactiveChange={setShowInactive}
-          colVisibility={colVisibility} onColVisibilityChange={setColVisibility}
-          workplaceItems={workplaceItems} wpExtraItems={wpExtraItems}
-          visibleWorkplaces={visibleWorkplaces}
-          onWpToggle={handleWpToggle} onWpToggleAll={handleWpToggleAll}
-          positionItems={positionItems} visiblePositions={visiblePositions}
-          onPosToggle={handlePosToggle} onPosToggleAll={handlePosToggleAll}
-          departmentItems={departmentItems} visibleDepartments={visibleDepartments}
-          onDeptToggle={handleDeptToggle} onDeptToggleAll={handleDeptToggleAll}
-          onReset={handleReset} isFiltered={isFiltered}
-          searchQuery={searchQuery} onSearchChange={setSearchQuery}
-        />
-
-        {/* ── period warning banner ── */}
-        {viewMode === "period" && periodWarn && (
-          <div style={{
-            padding: "8px 16px", background: "#FFF3CD", borderBottom: "1px solid #FFEAA7",
-            fontSize: 13, color: "#856404",
-          }}>
-            ⚠️ {periodWarn}
-          </div>
-        )}
-
-        {/* ── Table ── */}
-        {loading ? (
-          <div className={styles.loading}>読み込み中...</div>
-        ) : displayDates.length === 0 ? (
-          <div className={styles.loading} style={{ color: "#999" }}>
-            {viewMode === "period" ? "期間を正しく設定してください（7〜35日）" : "データがありません"}
-          </div>
-        ) : (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                {/* Row 1: week status bars */}
-                <tr>
-                  <th className={styles.thNameSub} style={!colVisibility.number     ? { display:"none" } : {}}></th>
-                  <th className={styles.thNameSub} style={!colVisibility.position   ? { display:"none" } : {}}></th>
-                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
-                    style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
-                  <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
-                    style={{ left: nameLeft() }}></th>
-                  <th className={styles.thNameSub}></th>
-
-                  {weekColSpans.map(({ week, count }) => {
-                    const wkData  = data[week.weekStart] || { status:"RECEIVING" };
-                    const sm      = STATUS_META[wkData.status] || STATUS_META.RECEIVING;
-                    const isLoad  = !!statusLoading[week.weekStart];
-                    const narrow  = count <= 4;
-                    return (
-                        <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
-                          <div className={styles.thWeekInner}>
-                            <span className={styles.thWeekRange}>
-                              {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
-                            </span>
-                          </div>
-                        </th>
-                    );
-                  })}
-
-                  <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
-                  <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
-                </tr>
-
-                {/* Row 2: column headers + day headers */}
-                <tr>
-                  <th className={styles.thNumber}   style={!colVisibility.number     ? { display:"none" } : {}}>№</th>
-                  <th className={styles.thPosition} style={!colVisibility.position   ? { display:"none" } : {}}>職種・役職</th>
-                  <th className={styles.thDepartment}
-                    style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}>
-                    部署
-                  </th>
-                  <th className={styles.thName} style={{ left: nameLeft() }}>氏名</th>
-                  <th className={styles.thDay} style={{ minWidth: 40 }}></th>
-
-                  {displayDates.map(date => {
-                    const wd = new Date(date).getDay();
-                    const d  = parseInt(date.slice(8), 10);
-                    return (
-                      <th key={date} className={`${styles.thDay} ${wd===6?styles.thSat:""} ${wd===0?styles.thSun:""}`}>
-                        <span className={styles.thNum}>{d}</span>
-                        <span className={styles.thWd}>{WD_JA[wd]}</span>
-                      </th>
-                    );
-                  })}
-
-                  <th className={styles.thDay} style={{ minWidth: 44, background: "#f0f4ff"}}>
-                    <span className={styles.thNum}>公休</span>
-                    <span className={styles.thWd}>数</span>
-                  </th>
-                  <th className={styles.thDay} style={{ minWidth: 44, background: "#f0f4ff" }}>
-                    <span className={styles.thNum}>勤務</span>
-                    <span className={styles.thWd}>時間</span>
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredStaff.length === 0 ? (
+          {/* ══ Таблица ══ */}
+          {loading ? (
+            <div className={styles.loading}>読み込み中...</div>
+          ) : displayDates.length === 0 ? (
+            <div className={styles.loading}>
+              {viewMode === "period" ? "期間を正しく設定してください（7〜35日）" : "データがありません"}
+            </div>
+          ) : (
+            <div className={styles.tableScroll}>
+              <table className={styles.table} style={colVisibility.number ? undefined : { "--w-no": "0px" }}>
+                <thead>
                   <tr>
-                    <td colSpan={displayDates.length + 5} className={styles.empty}>
-                      {allStaff.length === 0 ? "スタッフが登録されていません" : "該当するスタッフが見つかりません"}
-                    </td>
+                    {colVisibility.number && <th className={cx(styles.th, styles.thNo, styles.stickyNo)}>№</th>}
+                    <th className={cx(styles.th, styles.thName, styles.stickyName)}>
+                      <span className={styles.thNameMain}>氏名</span>
+                      {(colVisibility.position || colVisibility.department) && (
+                        <span className={styles.thNameSub}>
+                          {colVisibility.position && <span className={styles.thSubPos}>職種・役職</span>}
+                          {colVisibility.position && colVisibility.department && " / "}
+                          {colVisibility.department && <span className={styles.thSubDept}>部署</span>}
+                        </span>
+                      )}
+                    </th>
+                    <th className={cx(styles.th, styles.thLabels, styles.stickyLabels)} />
+                    {displayDates.map(date => {
+                      const wd = new Date(date).getDay();
+                      const d  = parseInt(date.slice(8), 10);
+                      const isToday = date === todayStr;
+                      return (
+                        <th key={date} className={cx(
+                          styles.th, styles.thDay,
+                          wd === 6 && styles.colSat, wd === 0 && styles.colSun,
+                          weekStartSet.has(date) && styles.colMon,
+                          isToday && styles.colToday, isToday && styles.thToday,
+                        )}>
+                          {isToday && <span className={styles.todayBadge}>今日</span>}
+                          <span className={styles.thNum}>{d}</span>
+                          <span className={styles.thWd}>{WD_JA[wd]}</span>
+                        </th>
+                      );
+                    })}
+                    <th className={cx(styles.th, styles.thOff, styles.stickyOff)}>
+                      <span className={styles.thNum}>公休</span>
+                      <span className={styles.thWd}>日数</span>
+                    </th>
+                    <th className={cx(styles.th, styles.thTotal, styles.stickyTotal)}>
+                      <span className={styles.thNum}>勤務</span>
+                      <span className={styles.thWd}>時間</span>
+                    </th>
                   </tr>
-                ) : (
-                  filteredStaff.map(staff => {
-                    const maxSlots = maxSlotsForStaff(staff.userId);
-                    return Array.from({ length: maxSlots }, (_, subIdx) => (
-                      <tr key={`${staff.userId}_${subIdx}`} className={styles.staffRow} data-staff={staff.userId}>
-                        {subIdx === 0 && (
-                          <>
-                            <td className={styles.tdNumber} rowSpan={maxSlots}
-                              style={!colVisibility.number ? { display:"none" } : {}}>
-                              {sortOrders[staff.userId] ?? "—"}
-                            </td>
-                            <td className={styles.tdPosition} rowSpan={maxSlots}
-                              style={!colVisibility.position ? { display:"none" } : {}}>
-                              {positions[staff.userId] || ""}
-                            </td>
-                            <td className={styles.tdDepartment} rowSpan={maxSlots}
-                              style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}>
-                              {(staffDepts[staff.userId] || []).map((d, i) => <div key={i}>{d}</div>)}
-                            </td>
-                            <td className={styles.tdName} rowSpan={maxSlots}
-                              style={{ left: nameLeft() }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-                                <span>{staff.userName}</span>
-                                <button
-                                  type="button"
-                                  title="この月全体を選択（一括でシフトを設定できます）"
-                                  onClick={() => selectWholeMonth(staff.userId)}
-                                  style={{
-                                    flexShrink: 0, border: "none", background: "#EBF3FF",
-                                    color: "#2F5496", borderRadius: 5, width: 22, height: 22,
-                                    fontSize: 12, cursor: "pointer", lineHeight: 1,
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                  }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#DBEAFE"}
-                                  onMouseLeave={e => e.currentTarget.style.background = "#EBF3FF"}
-                                >
-                                  🗓️
-                                </button>
+                </thead>
+
+                <tbody>
+                  {filteredStaff.length === 0 ? (
+                    <tr>
+                      <td colSpan={displayDates.length + (colVisibility.number ? 5 : 4)} className={styles.empty}>
+                        {allStaff.length === 0 ? "スタッフが登録されていません" : "該当するスタッフが見つかりません"}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStaff.map(staff => {
+                      const maxSlots = maxSlotsForStaff(staff.userId);
+                      const workMin  = calcWorkMinutes(staff.userId);
+                      return (
+                        <tr key={staff.userId} className={styles.row} data-staff={staff.userId}>
+                          {colVisibility.number && (
+                            <td className={cx(styles.td, styles.tdNo, styles.stickyNo)}>{sortOrders[staff.userId] ?? "—"}</td>
+                          )}
+
+                          <td className={cx(styles.td, styles.tdName, styles.stickyName)}>
+                            <div className={styles.nameWrap}>
+                              <div className={styles.nameText}>
+                                <div className={styles.staffName}>{staff.userName}</div>
+                                {colVisibility.position && positions[staff.userId] && (
+                                  <div className={styles.staffPos}>{positions[staff.userId]}</div>
+                                )}
+                                {colVisibility.department && (staffDepts[staff.userId] || []).length > 0 && (
+                                  <div className={styles.staffDept}>{(staffDepts[staff.userId] || []).join("・")}</div>
+                                )}
                               </div>
-                            </td>
-                            <td className={styles.cell} rowSpan={maxSlots} style={{ padding: 0, verticalAlign: "top" }}>
-                              {Array.from({ length: maxSlots }, (_, si) => (
-                                <div key={si} style={{
-                                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                                  minHeight: 35, padding: "4px 3px", gap: 2,
-                                  borderBottom: si < maxSlots - 1 ? "1px dashed #f1f5f9" : "none",
-                                }}>
-                                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>出勤</span>
-                                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>退勤</span>
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0369a1" }}>実働</span>
-                                  <span style={{ fontSize: 10, color: "#6366f1" }}>休憩</span>
-                                  <span style={{ fontSize: 12, color: "#64748b" }}>場所</span>
-                                </div>
-                              ))}
-                            </td>
-                          </>
-                        )}
+                              <button type="button" className={styles.selAllBtn}
+                                title="表示中の全日を選択（一括でシフトを設定できます）"
+                                aria-label="全日を選択"
+                                onClick={() => selectWholeMonth(staff.userId)}>
+                                <IcoSelectAll />
+                              </button>
+                            </div>
+                          </td>
 
-                        {displayDates.map(date => {
-                          const day      = getDayData(staff.userId, date);
-                          const slots    = day.slots || [];
-                          const wd       = new Date(date).getDay();
-                          const isWknd   = wd === 0 || wd === 6;
-                          const isWeekStart = weeksRaw.some(w => w.weekStart === date);
-                          const isSelected  = selectedCells.some(c => c.userId === staff.userId && c.date === date);
-                          const isSaving    = savingCell === `${staff.userId}_${date}`;
-                          const isOpen      = openCell?.userId === staff.userId && openCell?.date === date;
-                          const attStatus = attendanceMap[`${staff.userId}_${date}`];
+                          {/* Подписи строк — на каждую смену свой блок */}
+                          <td className={cx(styles.td, styles.tdLabels, styles.stickyLabels)}>
+                            {Array.from({ length: maxSlots }, (_, si) => (
+                              <div key={si} className={cx(styles.slot, si < maxSlots - 1 && styles.slotSep)}>
+                                {["出勤", "退勤", "実働", "休憩", "場所"].map(l => (
+                                  <div key={l} className={cx(styles.line, styles.lineLabel)}>{l}</div>
+                                ))}
+                              </div>
+                            ))}
+                          </td>
 
-                          const cellCls = [
-                            styles.cell,
-                            isWknd       ? styles.cellWknd      : "",
-                            isOpen       ? styles.cellOpen       : "",
-                            isWeekStart  ? styles.cellWeekStart  : "",
-                            isSelected   ? styles.cellSelected   : "",
-                          ].join(" ");
+                          {displayDates.map(date => {
+                            const day      = getDayData(staff.userId, date);
+                            const slots    = day.slots || [];
+                            const wd       = new Date(date).getDay();
+                            const isToday  = date === todayStr;
+                            const isSelected = selectedCells.some(c => c.userId === staff.userId && c.date === date);
+                            const isSaving   = savingCell === `${staff.userId}_${date}`;
+                            const isOpen     = openCell?.userId === staff.userId && openCell?.date === date;
+                            const isOffDay   = day.off || slots.length === 0;
 
-                          if (subIdx === 0) {
                             const key = `${staff.userId}_${date}`;
                             if (!cellAnchorRefs.current[key]) cellAnchorRefs.current[key] = { current: null };
                             const anchorRef = cellAnchorRefs.current[key];
 
+                            const prevDate = addDays(date, -1);
+                            const prevDayOvernightSlots = (getDayData(staff.userId, prevDate).slots || []).filter(s =>
+                              s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime))
+                            );
+
+                            const visibleSlots = slots.filter(s => s.workplace
+                              ? visibleWorkplaces.has(s.workplace)
+                              : visibleWorkplaces.has("__none__"));
+
                             return (
-                              <td key={date} className={cellCls} rowSpan={maxSlots}
-                                style={{
-                                  padding: 0,
-                                  verticalAlign: (day.off || slots.length === 0) ? "middle" : "top",
-                                  position: "relative",
-                                }}
+                              <td key={date}
+                                className={cx(
+                                  styles.td, styles.tdDay,
+                                  wd === 6 && styles.colSat, wd === 0 && styles.colSun,
+                                  weekStartSet.has(date) && styles.colMon,
+                                  isToday && styles.colToday,
+                                  (isOffDay || isSaving) && styles.tdMiddle,
+                                  isOpen && styles.cellOpen,
+                                  isSelected && styles.cellSelected,
+                                )}
                                 onClick={e => handleCellClick(e, staff.userId, date, isOpen, isSaving)}
                                 onContextMenu={e => handleContextMenu(e, staff.userId, date)}>
-                            
+
                                 {/* Фиолетовая полоска — ночная смена с предыдущего дня */}
-                                {(() => {
-                                  const prevDate = addDays(date, -1);
-                                  const prevDay  = getDayData(staff.userId, prevDate);
-                                  const hasOvernight = (prevDay?.slots || []).some(s =>
-                                    s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime))
-                                  );
-                                  return hasOvernight ? (
-                                    <div style={{
-                                      position: "absolute", top: 0, left: 0, right: 0,
-                                      height: 3, background: "#7c3aed",
-                                      borderRadius: "2px 2px 0 0", zIndex: 1,
-                                      pointerEvents: "none",
-                                    }} />
-                                  ) : null;
-                                })()}
-                            
-                                <div className={styles.cellAnchor}
-                                  ref={el => { anchorRef.current = el; }}>
-                            
+                                {prevDayOvernightSlots.length > 0 && <div className={styles.nextDayStripe} />}
+
+                                <div className={styles.cellAnchor} ref={el => { anchorRef.current = el; }}>
                                   {isSaving ? (
-                                    <div className={styles.slotRow}><span className={styles.cellBusy}>…</span></div>
-                                  ) : day.off || slots.length === 0 ? (
-                                    visibleWorkplaces.has("__off__") && (
-                                      <div className={styles.slotRow}><span className={styles.cellOff}>休</span></div>
-                                    )
+                                    <span className={styles.cellBusy}>…</span>
+                                  ) : isOffDay ? (
+                                    visibleWorkplaces.has("__off__") && <span className={styles.cellOff}>休</span>
                                   ) : (
-                                    slots
-                                      .filter(s => s.workplace
-                                        ? visibleWorkplaces.has(s.workplace)
-                                        : visibleWorkplaces.has("__none__"))
-                                      .map((s, si) => {
-                                        const nd = s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime));
-                                        const workStr  = getWorkHint(s.startTime, s.endTime, s.breakOverrideMinutes, breakRules);
-                                        const breakMin = (s.startTime && s.endTime)
-                                          ? (s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined
-                                              ? s.breakOverrideMinutes
-                                              : getAutoBreakMinutes(s.startTime, s.endTime, breakRules))
-                                          : null;
-                                        const breakStr = fmtBreakMinutes(breakMin);
-                                        return (
-                                          <div key={si} className={styles.slotRow}>
-                                            <span className={styles.cellTime}>
-                                              {formatTime(s.startTime)}<br/>
-                                              {nd
-                                                ? <span style={{ color: "#7c3aed" }}>{formatTime(s.endTime)}</span>
-                                                : formatTime(s.endTime)
-                                              }
-                                              {s.last && <span className={styles.cellLast}> L</span>}
-                                            </span>
-                                            {workStr && (
-                                              <span style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginTop: 2 }}>
-                                                {workStr}
-                                              </span>
-                                            )}
-                                            {breakStr && (
-                                              <span style={{ fontSize: 10, color: "#6366f1", marginTop: 1 }}>
-                                                {breakStr}
-                                              </span>
-                                            )}
-                                            {s.workplace && <span className={styles.cellWorkplace}>{s.workplace}</span>}
+                                    visibleSlots.map((s, si) => {
+                                      const nd = s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime));
+                                      const workStr  = getWorkHint(s.startTime, s.endTime, s.breakOverrideMinutes, breakRules);
+                                      const breakMin = (s.startTime && s.endTime)
+                                        ? (s.breakOverrideMinutes !== null && s.breakOverrideMinutes !== undefined
+                                            ? s.breakOverrideMinutes
+                                            : getAutoBreakMinutes(s.startTime, s.endTime, breakRules))
+                                        : null;
+                                      const breakStr = fmtBreakMinutes(breakMin);
+                                      return (
+                                        <div key={si} className={cx(styles.slot, si < visibleSlots.length - 1 && styles.slotSep)}>
+                                          <div className={styles.line}><span className={styles.time}>{formatTime(s.startTime)}</span></div>
+                                          <div className={styles.line}>
+                                            <span className={cx(styles.time, nd && styles.nextDayText)}>{formatTime(s.endTime)}</span>
+                                            {s.last && <span className={styles.lastBadge}>L</span>}
                                           </div>
-                                        );
-                                      })
+                                          <div className={styles.line}><span className={styles.work}>{workStr || ""}</span></div>
+                                          <div className={styles.line}><span className={styles.dur}>{breakStr || ""}</span></div>
+                                          <div className={styles.line}>
+                                            {s.workplace && <span className={styles.place} title={s.workplace}>{s.workplace}</span>}
+                                          </div>
+                                        </div>
+                                      );
+                                    })
                                   )}
                                 </div>
-                            
-                                {isOpen && (() => {
-                                  const prevDate = addDays(date, -1);
-                                  const prevDay  = getDayData(staff.userId, prevDate);
-                                  const prevDayOvernightSlots = (prevDay?.slots || []).filter(s =>
-                                    s.nextDay || isNextDay(formatTime(s.startTime), formatTime(s.endTime))
-                                  );
-                                  return (
-                                    <CellPopover
-                                      day={day}
-                                      currentDate={date}
-                                      prevDaySlots={prevDayOvernightSlots}
-                                      onGoToPrevDay={() => setOpenCell({ userId: staff.userId, date: prevDate })}
-                                      anchorRef={anchorRef}
-                                      workplaces={workplaces}
-                                      onClose={() => setOpenCell(null)}
-                                      onSave={patch => { setOpenCell(null); saveCell(staff.userId, date, patch); }}
-                                      breakRules={breakRules}
-                                    />
-                                  );
-                                })()}
+
+                                {isOpen && (
+                                  <CellPopover
+                                    day={day}
+                                    currentDate={date}
+                                    prevDaySlots={prevDayOvernightSlots}
+                                    onGoToPrevDay={() => setOpenCell({ userId: staff.userId, date: prevDate })}
+                                    staffName={staff.userName}
+                                    staffPosition={positions[staff.userId] || ""}
+                                    staffDepartments={staffDepts[staff.userId] || []}
+                                    workplaces={workplaces}
+                                    onClose={() => setOpenCell(null)}
+                                    onSave={patch => { setOpenCell(null); saveCell(staff.userId, date, patch); }}
+                                    breakRules={breakRules}
+                                  />
+                                )}
                               </td>
                             );
-                          }
-                          return null;
-                        })}
+                          })}
 
-                        {subIdx === 0 && (
-                          <>
-                            <td rowSpan={maxSlots} className={styles.cell}
-                              style={{ textAlign:"center", verticalAlign:"middle", fontWeight:"bold", fontSize:13, background:"#f8faff" }}>
-                              {countOffDays(staff.userId)}
-                            </td>
-                            <td rowSpan={maxSlots} className={styles.cell}
-                              style={{ textAlign:"center", verticalAlign:"middle", background:"#f8faff" }}>
-                              {(() => {
-                                const mins = calcWorkMinutes(staff.userId);
-                                const h = Math.floor(mins / 60);
-                                const m = mins % 60;
-                                return (
-                                  <>
-                                    <div style={{ fontSize:12, fontWeight:700, color:"#2F5496", lineHeight:1.3 }}>{h}h</div>
-                                    {m > 0 && <div style={{ fontSize:10, color:"#94a3b8", lineHeight:1.2 }}>{m}m</div>}
-                                  </>
-                                );
-                              })()}
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    ));
-                  })
-                )}
-              </tbody>
-            </table>
+                          <td className={cx(styles.td, styles.tdOff, styles.stickyOff)}>
+                            {countOffDays(staff.userId)}
+                          </td>
+                          <td className={cx(styles.td, styles.tdTotal, styles.stickyTotal)}>
+                            <span className={styles.totalH}>{Math.floor(workMin / 60)}時間</span>
+                            <span className={styles.totalM}>{workMin % 60}分</span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ══ Нижняя строка: легенда + счётчик ══ */}
+          <div className={styles.legend}>
+            {[
+              { dot: "#1a8a5f", halo: "#eefaf4", label: "今日" },
+              { dot: "#7c3aed", halo: "#ede9fe", label: "翌日退勤" },
+            ].map(({ dot, halo, label }) => (
+              <span key={label} className={styles.legendItem}>
+                <span className={styles.legendDot} style={{ background: dot, boxShadow: `0 0 0 4px ${halo}` }} />{label}
+              </span>
+            ))}
+            <span className={styles.legendItem}><span className={styles.lastBadge}>L</span>ラスト</span>
+            <span className={styles.legendItem}><span className={styles.cellOff}>休</span>休み</span>
+            <span className={styles.legendHint}>Shift＋クリックで複数選択・右クリックでメニュー</span>
+
+            <div className={styles.legendRight}>
+              <label className={styles.check}>
+                <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+                非アクティブを表示
+              </label>
+              {!loading && allStaff.length > 0 && (
+                <span className={styles.countText}>
+                  表示中 <b>{filteredStaff.length}</b> / {allStaff.length} 人
+                </span>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* ── Bulk selection bar ── */}
+      {/* ── Панель массового выделения ── */}
       {selectedCells.length > 0 && (
-        <div style={{
-          position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
-          background: "#1F4E79", color: "#fff", borderRadius: 12,
-          padding: "12px 24px", display: "flex", alignItems: "center", gap: 16,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.3)", zIndex: 1500,
-        }}>
-          <span style={{ fontSize: 14 }}>📅 {selectedCells.length}日選択中</span>
-          <button
-            onClick={() => setBulkOpen(true)}
-            disabled={bulkSaving}
-            style={{
-              background: "#fff", color: "#1F4E79", border: "none",
-              borderRadius: 8, padding: "6px 16px", fontSize: 13,
-              cursor: "pointer", fontWeight: "bold",
-            }}>
-            ✏️ 一括編集
+        <div className={styles.bulkBar}>
+          <span className={styles.bulkCount}><b>{selectedCells.length}</b>日選択中</span>
+          <button type="button" className={styles.bulkBtn}
+            onClick={() => setBulkOpen(true)} disabled={bulkSaving}>
+            <IcoEdit />一括編集
           </button>
-          <button
-            onClick={() => setSelectedCells([])}
-            style={{
-              background: "transparent", color: "#fff",
-              border: "1px solid rgba(255,255,255,0.5)",
-              borderRadius: 8, padding: "6px 16px", fontSize: 13, cursor: "pointer",
-            }}>
-            ✕ 選択解除
+          <button type="button" className={styles.bulkBtnGhost} onClick={() => setSelectedCells([])}>
+            <IcoClose />選択解除
           </button>
         </div>
       )}
@@ -2358,14 +1799,23 @@ export default function ManagerTablePage({ view, onNavigate, onLogout }) {
         />
       )}
 
-      {bulkOpen && (
-        <BulkPopover
-          workplaces={workplaces}
-          breakRules={breakRules}
-          onClose={() => setBulkOpen(false)}
-          onSave={patch => { setBulkOpen(false); saveBulkCells(patch); }}
-        />
-      )}
+      {bulkOpen && selectedCells.length > 0 && (() => {
+        const uid = selectedCells[0].userId;
+        const st  = allStaff.find(x => x.userId === uid);
+        return (
+          <CellPopover
+            day={{ off: false, slots: [] }}
+            bulkDates={selectedCells.map(c => c.date)}
+            staffName={st?.userName || ""}
+            staffPosition={positions[uid] || ""}
+            staffDepartments={staffDepts[uid] || []}
+            workplaces={workplaces}
+            breakRules={breakRules}
+            onClose={() => setBulkOpen(false)}
+            onSave={patch => { setBulkOpen(false); saveBulkCells(patch); }}
+          />
+        );
+      })()}
 
       {reportLoading && <ReportLoader />}
       {alertMsg && <AlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}

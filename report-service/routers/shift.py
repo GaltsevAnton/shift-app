@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import Response
-from models import ReportRequest, ReportRangeRequest
-from builders import shift_dept, shift_all, timesheet
+from models import ReportRequest, ReportRangeRequest, ShiftScreenRequest
+from builders import shift_dept, shift_all, timesheet, shift_screen
 
 router = APIRouter()
 
@@ -69,6 +69,17 @@ def generate_timesheet_range(req: ReportRangeRequest):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
     )
+
+@router.post("/shift/screen")
+def generate_shift_screen(req: ShiftScreenRequest):
+    data = shift_screen.build(req)
+    filename = f"シフト_{req.fromDate}_{req.toDate}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_encode(filename)}"},
+    )
+
 
 def _encode(filename: str) -> str:
     from urllib.parse import quote

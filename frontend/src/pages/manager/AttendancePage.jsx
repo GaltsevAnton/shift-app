@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { api } from "../../shared/api/api";
 import ManagerLayout from "../../app/layouts/ManagerLayout";
-import styles from "./ManagerTablePage.module.css";
+import styles from "./AttendancePage.module.css";
 
 const WD_JA     = ["日","月","火","水","木","金","土"];
 const MONTHS_JA = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
@@ -40,6 +40,12 @@ const STATUS_FILTER_ITEMS = [
 ];
 
 // Строки календаря 勤怠管理 (порядок = порядок на экране и в Excel)
+// 表示列 (порядок = порядок в Excel)
+const COL_ITEMS = [
+  { value: "number",     label: "№" },
+  { value: "position",   label: "職種・役職" },
+  { value: "department", label: "部署" },
+];
 const ROW_ITEMS = [
   { value: "in",    label: "出勤" },
   { value: "out",   label: "退勤" },
@@ -51,32 +57,13 @@ const ROW_ITEMS = [
 const ROW_LABEL        = Object.fromEntries(ROW_ITEMS.map(i => [i.value, i.label]));
 const SESSION_ROW_KEYS = ["in", "out", "gross", "break", "work"];
 
-// Фиксированная высота строк — подписи и все ячейки дня всегда на одном уровне
-const ATT_ROW_H  = 22;
-const ATT_NOTE_H = 26;
-function attRowStyle(extra = {}) {
-  return {
-    height: ATT_ROW_H, boxSizing: "border-box", padding: "0 6px",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    whiteSpace: "nowrap", overflow: "hidden",
-    ...extra,
-  };
-}
-function attNoteStyle(withTopBorder) {
-  return {
-    height: ATT_NOTE_H, boxSizing: "border-box", padding: "0 2px",
-    display: "flex", alignItems: "center",
-    borderTop: withTopBorder ? "2px solid #cbd5e1" : "none",
-    background: "#fff",
-  };
-}
 
 const COLOR_FILTER_ITEMS = [
-  { value: "green",   label: "🟢 時間通り" },
-  { value: "red",     label: "🔴 遅刻（出勤）" },
-  { value: "yellow",  label: "🟡 早退（退勤）" },
-  { value: "blue",    label: "🔵 シフト予定あり" },
-  { value: "gray",    label: "⚪ シフトなし・出勤あり" },
+  { value: "green",   label: "時間通り",           swatch: "#dcfce7" },
+  { value: "red",     label: "遅刻（出勤）",       swatch: "#fee2e2" },
+  { value: "yellow",  label: "早退（退勤）",       swatch: "#fef9c3" },
+  { value: "blue",    label: "シフト予定あり",     swatch: "#e0f2fe" },
+  { value: "gray",    label: "シフトなし・出勤あり", swatch: "#f1f5f9" },
 ];
 
 /* ─── helpers ───────────────────────────────────────────── */
@@ -340,72 +327,122 @@ function pagerBtnStyle(disabled) {
     cursor: disabled ? "not-allowed" : "pointer",
   };
 }
-function fmtWeekLabel(ws, we) {
-  const wsD = new Date(ws), weD = new Date(we);
-  const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
-  return `${fmt(wsD)}〜${fmt(weD)}`;
+
+/* ─── small UI helpers (новый дизайн 2026-10-02) ────────── */
+const cx = (...a) => a.filter(Boolean).join(" ");
+
+function Chevron({ open }) {
+  return (
+    <svg className={cx(styles.chev, open && styles.chevOpen)} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
-/* ─── ColToggleDropdown ─────────────────────────────────── */
-function ColToggleDropdown({ colVisibility, onColVisibilityChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef();
+const TB_ICON = {
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+  strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+};
+function IcoCalendar() { return (<svg {...TB_ICON}><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /></svg>); }
+function IcoList()     { return (<svg {...TB_ICON}><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></svg>); }
+function IcoDownload() { return (<svg {...TB_ICON}><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" /><path d="M4.5 19.5h15" /></svg>); }
+function IcoBell()     { return (<svg {...TB_ICON}><path d="M6 16.5V11a6 6 0 0112 0v5.5l1.5 1.5h-15z" /><path d="M10 20.5a2 2 0 004 0" /></svg>); }
+function IcoGear()     { return (<svg {...TB_ICON}><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2" /><circle cx="12" cy="12" r="7" /></svg>); }
+function IcoUser()     { return (<svg {...TB_ICON}><circle cx="12" cy="8.5" r="3.8" /><path d="M4.5 20c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5" /></svg>); }
+function IcoLogout()   { return (<svg {...TB_ICON}><path d="M14 4H7a2 2 0 00-2 2v12a2 2 0 002 2h7" /><path d="M11 12h9M17 8.5l3.5 3.5-3.5 3.5" /></svg>); }
+function IcoSearch()   { return (<svg {...TB_ICON}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></svg>); }
+function IcoPrev()     { return (<svg {...TB_ICON}><path d="M15 6l-6 6 6 6" /></svg>); }
+function IcoNext()     { return (<svg {...TB_ICON}><path d="M9 6l6 6-6 6" /></svg>); }
 
+// Закрытие выпадающего списка по клику мимо
+function useOutsideClose(open, setOpen, ref) {
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => {
-      function onDown(e) {
-        if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-      }
-      document.addEventListener("mousedown", onDown);
-      return () => document.removeEventListener("mousedown", onDown);
-    }, 50);
-    return () => clearTimeout(t);
-  }, [open]);
+    function onDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
 
-  const COL_TOGGLES = [
-    { key: "number",     label: "№" },
-    { key: "position",   label: "職種・役職" },
-    { key: "department", label: "部署" },
-  ];
-  const allOn = COL_TOGGLES.every(c => colVisibility[c.key]);
-
+// Универсальная кнопка + панель (для 状態 / 並び替え / 表示行 / その他)
+function DropdownShell({ label, filtered, align, width, className, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useOutsideClose(open, setOpen, ref);
   return (
-    <div ref={ref} className={styles.wpDropdownWrap}>
+    <div ref={ref} className={cx(styles.wpDropdownWrap, className)}>
       <button type="button"
-        className={`${styles.wpDropdownBtn} ${open ? styles.wpDropdownBtnActive : ""}`}
+        className={cx(styles.wpDropdownBtn, open && styles.wpDropdownBtnActive, filtered && styles.wpDropdownBtnFiltered)}
         onClick={() => setOpen(v => !v)}>
-        表示列
-        <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
+        {label}
+        <Chevron open={open} />
       </button>
       {open && (
-        <div className={styles.wpDropdownPanel}>
-          <label className={styles.wpDropdownAll}>
-            <input type="checkbox" className={styles.colToggleCheck}
-              checked={allOn}
-              onChange={() => {
-                const next = !allOn;
-                onColVisibilityChange({ number: next, position: next, department: next });
-              }}
-            />
-            <span>すべて</span>
-          </label>
-          <div className={styles.wpDropdownDivider} />
-          {COL_TOGGLES.map(c => (
-            <label key={c.key} className={styles.wpDropdownItem}>
-              <input type="checkbox" className={styles.colToggleCheck}
-                checked={colVisibility[c.key]}
-                onChange={() => onColVisibilityChange({ ...colVisibility, [c.key]: !colVisibility[c.key] })}
-              />
-              <span>{c.label}</span>
-            </label>
-          ))}
+        <div className={cx(styles.wpDropdownPanel, align === "right" && styles.panelRight)}
+          style={width ? { width } : undefined}>
+          {children}
         </div>
       )}
     </div>
   );
 }
 
+// Группа чекбоксов внутри панели (заголовок + すべて + пункты)
+function CheckGroup({ title, items, set, onToggle, onToggleAll, hideAll }) {
+  const keys  = items.map(i => i.value);
+  const allOn = keys.length > 0 && keys.every(k => set.has(k));
+  const someOn = keys.some(k => set.has(k));
+  return (
+    <div className={styles.panelGroup}>
+      {title && <div className={styles.panelTitle}>{title}</div>}
+      {!hideAll && (
+        <label className={styles.wpDropdownAll}>
+          <input type="checkbox" className={styles.colToggleCheck}
+            checked={allOn}
+            ref={el => { if (el) el.indeterminate = !allOn && someOn; }}
+            onChange={() => onToggleAll(keys, !allOn)}
+          />
+          <span>すべて</span>
+        </label>
+      )}
+      {items.map(item => (
+        <label key={item.value} className={styles.wpDropdownItem}>
+          <input type="checkbox" className={styles.colToggleCheck}
+            checked={set.has(item.value)}
+            onChange={() => onToggle(item.value)}
+          />
+          {item.swatch && <span className={styles.swatch} style={{ background: item.swatch }} />}
+          <span>{item.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// Список полей сортировки (клик по активному — смена направления)
+function SortList({ sortConfig, setSortConfig }) {
+  return (
+    <div className={styles.panelGroup}>
+      <div className={styles.panelTitle}>並び替え</div>
+      {SORT_FIELDS.map(f => {
+        const active = sortConfig.field === f.value;
+        return (
+          <button key={f.value} type="button"
+            className={cx(styles.sortItem, active && styles.sortItemActive)}
+            onClick={() => setSortConfig({
+              field: f.value,
+              dir: active ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
+            })}>
+            <span>{f.label}</span>
+            <span className={styles.sortDir}>{active ? (sortConfig.dir === "asc" ? "↑" : "↓") : ""}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 /* ─── CheckDropdown ─────────────────────────────────────── */
 function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraItems, panelMaxHeight, panelWidth, panelHeight, searchable, hideAll }) {
   const [open, setOpen] = useState(false);
@@ -447,7 +484,7 @@ function CheckDropdown({ label, items, visibleSet, onToggle, onToggleAll, extraI
         className={`${styles.wpDropdownBtn} ${open ? styles.wpDropdownBtnActive : ""} ${isFiltered ? styles.wpDropdownBtnFiltered : ""}`}
         onClick={() => setOpen(v => !v)}>
         {label}
-        <span className={styles.sortArrow}>{open ? "▲" : "▼"}</span>
+        <Chevron open={open} />
       </button>
       {open && (
         <div className={styles.wpDropdownPanel} style={panelStyle}>
@@ -544,12 +581,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   const [err,         setErr]         = useState(null);
 
   /* ── filters ── */
-  const [colVisibility, setColVisibility] = useState(() => {
-    try {
-      const raw = localStorage.getItem("attColVisibility");
-      return raw ? JSON.parse(raw) : { number: true, position: true, department: true };
-    } catch { return { number: true, position: true, department: true }; }
-  });
   const [visiblePositions,   setVisiblePositions]   = useState(() => loadFilterSet("attFilterPos")    || new Set());
   const [visibleDepartments, setVisibleDepartments] = useState(() => loadFilterSet("attFilterDept")   || new Set());
   const [visibleStatuses,    setVisibleStatuses]    = useState(() => loadFilterSet("attFilterStatus") || new Set(STATUS_FILTER_ITEMS.map(i => i.value)));
@@ -563,6 +594,17 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     () => loadFilterSet("attRowVisibility") || new Set(ROW_ITEMS.map(i => i.value))
   );
   const [showColors, setShowColors] = useState(() => localStorage.getItem("attShowColors") !== "0");
+  // 表示列: №・職種・役職・部署 — влияет и на экран, и на Excel
+  const [colVisibility, setColVisibility] = useState(() => {
+    try {
+      const raw = localStorage.getItem("attColVisibility");
+      return raw ? { number: true, position: true, department: true, ...JSON.parse(raw) }
+                 : { number: true, position: true, department: true };
+    } catch { return { number: true, position: true, department: true }; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("attColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
+  }, [colVisibility]);
   const [attStatuses, setAttStatuses] = useState([]); // 勤務状況リスト
   const [notesMap, setNotesMap]       = useState({});  // "userId_date" → {statusId, label}
 
@@ -649,9 +691,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
   useEffect(() => {
     try { localStorage.setItem("attShowColors", showColors ? "1" : "0"); } catch { /* ignore */ }
   }, [showColors]);
-  useEffect(() => {
-    try { localStorage.setItem("attColVisibility", JSON.stringify(colVisibility)); } catch { /* ignore */ }
-  }, [colVisibility]);
 
   /* ── displayDates ── */
   const displayDates = useMemo(() => {
@@ -1267,13 +1306,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     ? (pDays < 7 ? "7日以上を指定してください" : "35日以内を指定してください")
     : null;
 
-  /* ── sticky col left ── */
-  function nameLeft() {
-    if (!colVisibility.position && !colVisibility.department) return 0;
-    if (!colVisibility.position) return 90;
-    if (!colVisibility.department) return 70;
-    return 160;
-  }
 
   function toMinutes(timeStr) {
     if (!timeStr) return null;
@@ -1373,7 +1405,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         displayDates[displayDates.length - 1],
         filteredStaffByStatus.map(s => s.id),
         {
-          columns:    Object.keys(colVisibility).filter(k => colVisibility[k]),
+          columns:    COL_ITEMS.map(c => c.value).filter(k => colVisibility[k]),
           rows:       ROW_ITEMS.map(i => i.value).filter(k => visibleRows.has(k)),
           showColors,
         }
@@ -1448,563 +1480,513 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
     );
   }
 
-  const weekColSpans = useMemo(() => {
-    const weeks = weeksInMonth(ym);
-    return weeks.map(week => {
-      const count = displayDates.filter(date => {
-        const ws = new Date(week.weekStart);
-        const we = new Date(week.weekStart); we.setDate(we.getDate() + 6);
-        const d  = new Date(date);
-        return d >= ws && d <= we;
-      }).length;
-      return { week, count };
-    }).filter(x => x.count > 0);
-  }, [displayDates, ym]);
+  /* ── period navigation (‹ ›) ── */
+  function shiftPeriod(dir) {
+    if (viewMode === "month") {
+      const [y, m] = ym.split("-").map(Number);
+      const d = new Date(y, m - 1 + dir, 1);
+      setYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    } else if (viewMode === "week") {
+      const ws = addDays(selectedWeek, dir * 7);
+      setSelectedWeek(ws);
+      setYm(ws.slice(0, 7));
+    }
+  }
+  // リスト: ‹ › — день ±1, неделя ±7 дней, месяц ±1
+  function shiftListPeriod(dir) {
+    if (listMode === "month") {
+      const [y, m] = listYm.split("-").map(Number);
+      const d = new Date(y, m - 1 + dir, 1);
+      setListYm(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    } else if (listMode === "week") {
+      const ws = addDays(listWeek, dir * 7);
+      setListWeek(ws);
+      setListYm(ws.slice(0, 7));
+    } else if (listMode === "day") {
+      setListDay(addDays(listDay, dir));
+    }
+  }
+  const listYearChoices = useMemo(() => {
+    const set = new Set(yearOptions);
+    set.add(listYm.split("-")[0]);
+    return [...set].sort();
+  }, [yearOptions, listYm]);
+  const yearChoices = useMemo(() => {
+    const set = new Set(yearOptions);
+    set.add(ym.split("-")[0]);
+    return [...set].sort();
+  }, [yearOptions, ym]);
+
+  const todayStr = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const statusFiltered = _f3 || _f4;
+  const rowsFiltered   = ROW_ITEMS.some(i => !visibleRows.has(i.value));
+  const colsFiltered   = COL_ITEMS.some(c => !colVisibility[c.value]);
+  const colSet         = new Set(COL_ITEMS.map(c => c.value).filter(k => colVisibility[k]));
+  const toggleCol      = k => setColVisibility(v => ({ ...v, [k]: !v[k] }));
+  const toggleAllCols  = (keys, on) => setColVisibility(v => ({ ...v, ...Object.fromEntries(keys.map(k => [k, on])) }));
+  const sortChanged    = !(sortConfig.field === "sortOrder" && sortConfig.dir === "asc");
 
   /* ── render ── */
   return (
     <ManagerLayout name={getName()} view={view} onNavigate={onNavigate} onLogout={onLogout}>
       <div className={styles.page}>
+        <div className={styles.card}>
 
-        {/* ── Mode toggle: カレンダー / リスト ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 0, padding: "10px 20px 0" }}>
-          {[
-            { value: "calendar", label: "📅 カレンダー" },
-            { value: "list",     label: "📋 リスト" },
-          ].map((m, idx) => (
-            <button key={m.value} type="button"
-              onClick={() => setPageMode(m.value)}
-              style={{
-                padding: "7px 18px", fontSize: 13, cursor: "pointer",
-                border: "1px solid #ccc",
-                borderRight: idx === 0 ? "none" : "1px solid #ccc",
-                borderRadius: idx === 0 ? "6px 0 0 6px" : "0 6px 6px 0",
-                background: pageMode === m.value ? "#2F5496" : "#fff",
-                color:      pageMode === m.value ? "#fff"    : "#333",
-                fontWeight: pageMode === m.value ? "600" : "normal",
-              }}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+          {/* ══ Шапка, строка 1: режим + действия ══ */}
+          <div className={styles.headRow}>
+            <div className={styles.segment}>
+              {[
+                { value: "calendar", label: "カレンダー", Icon: IcoCalendar },
+                { value: "list",     label: "リスト",     Icon: IcoList },
+              ].map(m => (
+                <button key={m.value} type="button"
+                  className={cx(styles.segBtn, pageMode === m.value && styles.segBtnNavy)}
+                  onClick={() => setPageMode(m.value)}>
+                  <m.Icon />{m.label}
+                </button>
+              ))}
+            </div>
 
-        {pageMode === "calendar" && (
-        <>
-        {/* ── TopBar ── */}
-        <div className={styles.topBar}>
-          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid #ccc", flexShrink:0 }}>
-            {VIEW_MODES.map((m, idx) => (
-              <button key={m.value} type="button"
-                onClick={() => setViewMode(m.value)}
-                style={{
-                  padding:"5px 14px", fontSize:13, border:"none", cursor:"pointer",
-                  background: viewMode === m.value ? "#2F5496" : "#fff",
-                  color:      viewMode === m.value ? "#fff"    : "#333",
-                  borderRight: idx < VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
-                  fontWeight:  viewMode === m.value ? "600" : "normal",
-                  transition: "background 0.15s",
-                }}>
-                {m.label}
+            <div className={styles.headActions}>
+              <button type="button" className={styles.excelBtn}
+                onClick={pageMode === "calendar" ? handleReport : handleListExport}
+                disabled={pageMode === "calendar"
+                  ? (loading || reportLoading)
+                  : (!listRange.from || !listRange.to || reportLoading || listSessions.length === 0)}>
+                <IcoDownload />{reportLoading ? "..." : "Excel"}
               </button>
-            ))}
+              <span className={styles.headSep} />
+              <button type="button" className={styles.iconBtn} data-tip="お知らせ（準備中）" aria-label="お知らせ" disabled>
+                <IcoBell />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip="設定" aria-label="設定" onClick={() => onNavigate("SETTINGS")}>
+                <IcoGear />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip={`${getName()}｜希望シフト`} aria-label="希望シフト" onClick={() => onNavigate("PREFS")}>
+                <IcoUser />
+              </button>
+              <button type="button" className={styles.iconBtn} data-tip="ログアウト" aria-label="ログアウト" onClick={onLogout}>
+                <IcoLogout />
+              </button>
+            </div>
           </div>
 
-          {viewMode === "month" && (
-            <>
-              <select className={styles.monthSelect}
-                value={ym.split("-")[0]}
-                onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}>
-                {yearOptions.map(y => <option key={y} value={y}>{y}年</option>)}
-              </select>
-
-              <select className={styles.monthSelect}
-                value={ym.split("-")[1]}
-                onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}>
-                {MONTHS_JA.map((label, i) => (
-                  <option key={i} value={String(i+1).padStart(2,"0")}>{label}</option>
-                ))}
-              </select>
-            </>
-          )}
-
-          {viewMode === "week" && (
-            <select className={styles.monthSelect} value={selectedWeek}
-              onChange={e => setSelectedWeek(e.target.value)}>
-              {weekOptions.map(w => (
-                <option key={w.weekStart} value={w.weekStart}>
-                  {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {viewMode === "period" && (
-            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <input type="date" value={periodFrom}
-                onChange={e => setPeriodFrom(e.target.value)}
-                style={{ padding:"4px 8px", fontSize:13, border:"1px solid", borderColor: periodWarn ? "#cc0000" : "#ccc", borderRadius:4, cursor:"pointer" }}
-              />
-              <span style={{ fontSize:13, color:"#666" }}>〜</span>
-              <input type="date" value={periodTo} min={periodFrom || undefined}
-                onChange={e => setPeriodTo(e.target.value)}
-                style={{ padding:"4px 8px", fontSize:13, border:"1px solid", borderColor: periodWarn ? "#cc0000" : "#ccc", borderRadius:4, cursor:"pointer" }}
-              />
-              {periodFrom && periodTo && (
-                <span style={{ fontSize:12, color: periodOk ? "#5a8a5a" : "#cc0000", whiteSpace:"nowrap" }}>
-                  {pDays}日{periodWarn ? `（${periodWarn}）` : ""}
-                </span>
+          {pageMode === "calendar" && (
+          <>
+          {/* ══ Шапка, строка 2: период + фильтры ══ */}
+          <div className={styles.filterRow}>
+            {/* Период */}
+            <div className={styles.periodNav}>
+              {viewMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftPeriod(-1)} aria-label="前へ"><IcoPrev /></button>
               )}
+
+              {viewMode === "month" && (
+                <>
+                  <select className={styles.monthSelect}
+                    value={ym.split("-")[0]}
+                    onChange={e => setYm(`${e.target.value}-${ym.split("-")[1]}`)}>
+                    {yearChoices.map(y => <option key={y} value={y}>{y}年</option>)}
+                  </select>
+                  <select className={styles.monthSelect}
+                    value={ym.split("-")[1]}
+                    onChange={e => setYm(`${ym.split("-")[0]}-${e.target.value}`)}>
+                    {MONTHS_JA.map((label, i) => (
+                      <option key={i} value={String(i+1).padStart(2,"0")}>{label}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {viewMode === "week" && (
+                <select className={styles.monthSelect} value={selectedWeek}
+                  onChange={e => setSelectedWeek(e.target.value)}>
+                  {!weekOptions.some(w => w.weekStart === selectedWeek) && (
+                    <option value={selectedWeek}>
+                      {selectedWeek.slice(5).replace("-","/")} 〜 {addDays(selectedWeek, 6).slice(5).replace("-","/")}
+                    </option>
+                  )}
+                  {weekOptions.map(w => (
+                    <option key={w.weekStart} value={w.weekStart}>
+                      {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {viewMode === "period" && (
+                <div className={styles.periodInputs}>
+                  <input type="date" value={periodFrom}
+                    className={cx(styles.dateInput, periodWarn && styles.dateInputWarn)}
+                    onChange={e => setPeriodFrom(e.target.value)} />
+                  <span className={styles.tilde}>〜</span>
+                  <input type="date" value={periodTo} min={periodFrom || undefined}
+                    className={cx(styles.dateInput, periodWarn && styles.dateInputWarn)}
+                    onChange={e => setPeriodTo(e.target.value)} />
+                  {periodFrom && periodTo && (
+                    <span className={cx(styles.periodDays, !periodOk && styles.periodDaysWarn)}>{pDays}日</span>
+                  )}
+                </div>
+              )}
+
+              {viewMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftPeriod(1)} aria-label="次へ"><IcoNext /></button>
+              )}
+            </div>
+
+            <div className={styles.segment}>
+              {VIEW_MODES.map(m => (
+                <button key={m.value} type="button"
+                  className={cx(styles.segBtn, styles.segBtnSm, viewMode === m.value && styles.segBtnGreen)}
+                  onClick={() => setViewMode(m.value)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Поиск */}
+            <label className={styles.search}>
+              <IcoSearch />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="氏名で検索..."
+              />
+            </label>
+
+            {/* Фильтры */}
+            {allDepartmentItems.length > 0 && (
+              <CheckDropdown
+                label="部署"
+                items={allDepartmentItems}
+                visibleSet={visibleDepartments}
+                onToggle={handleDeptToggle}
+                onToggleAll={handleDeptToggleAll}
+              />
+            )}
+
+            {positionOptions.length > 0 && (
+              <CheckDropdown
+                label="職種・役職"
+                items={positionOptions.map(p => ({ value: p, label: p }))}
+                visibleSet={visiblePositions}
+                onToggle={handlePosToggle}
+                onToggleAll={handlePosToggleAll}
+              />
+            )}
+
+            <DropdownShell label="状態" filtered={statusFiltered} width={240}>
+              <CheckGroup title="状態（色）" items={COLOR_FILTER_ITEMS}
+                set={visibleColors} onToggle={handleColorToggle} onToggleAll={handleColorToggleAll} />
+              <div className={styles.wpDropdownDivider} />
+              <CheckGroup title="出勤状況" items={STATUS_FILTER_ITEMS}
+                set={visibleStatuses} onToggle={handleStatusToggle} onToggleAll={handleStatusToggleAll} />
+            </DropdownShell>
+
+            {/* На широком экране — отдельными кнопками */}
+            <DropdownShell label="並び替え" filtered={sortChanged} width={200} className={styles.wideOnly}>
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+            </DropdownShell>
+            <DropdownShell label="表示列" filtered={colsFiltered} width={180} className={styles.wideOnly}>
+              <CheckGroup items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
+            </DropdownShell>
+            <DropdownShell label="表示行" filtered={rowsFiltered} width={180} className={styles.wideOnly}>
+              <CheckGroup items={ROW_ITEMS} set={visibleRows}
+                onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
+            </DropdownShell>
+
+            {/* На узком экране — всё в «その他» */}
+            <DropdownShell label="その他" filtered={sortChanged || colsFiltered || rowsFiltered} width={220} className={styles.narrowOnly}>
+              <SortList sortConfig={sortConfig} setSortConfig={setSortConfig} />
+              <div className={styles.wpDropdownDivider} />
+              <CheckGroup title="表示列" items={COL_ITEMS} set={colSet} onToggle={toggleCol} onToggleAll={toggleAllCols} />
+              <div className={styles.wpDropdownDivider} />
+              <CheckGroup title="表示行" items={ROW_ITEMS} set={visibleRows}
+                onToggle={handleRowToggle} onToggleAll={handleRowToggleAll} hideAll />
+            </DropdownShell>
+
+            <label className={styles.check}>
+              <input type="checkbox" checked={showColors} onChange={e => setShowColors(e.target.checked)} />
+              色分け表示
+            </label>
+
+            <div className={styles.filterRight}>
+              {isFiltered && (
+                <button type="button" className={styles.resetBtn} onClick={handleReset}>リセット</button>
+              )}
+            </div>
+          </div>
+
+          {viewMode === "period" && periodWarn && (
+            <div className={styles.warnBar}>⚠️ {periodWarn}</div>
+          )}
+          {err && <div className={styles.errBar}>{err}</div>}
+
+          {/* ══ Таблица ══ */}
+          {loading ? (
+            <div className={styles.loading}>読み込み中...</div>
+          ) : displayDates.length === 0 ? (
+            <div className={styles.loading} style={{ color: "#94a3b8" }}>
+              {viewMode === "period" ? "期間を正しく設定してください（7〜35日）" : "データがありません"}
+            </div>
+          ) : (
+            <div className={styles.tableScroll}>
+              <table className={styles.table} style={colVisibility.number ? undefined : { "--w-no": "0px" }}>
+                <thead>
+                  <tr>
+                    {colVisibility.number && <th className={cx(styles.th, styles.thNo, styles.stickyNo)}>№</th>}
+                    <th className={cx(styles.th, styles.thName, styles.stickyName)}>
+                      <span className={styles.thNameMain}>氏名</span>
+                      {(colVisibility.position || colVisibility.department) && (
+                        <span className={styles.thNameSub}>
+                          {colVisibility.position && <span className={styles.thSubPos}>職種・役職</span>}
+                          {colVisibility.position && colVisibility.department && " / "}
+                          {colVisibility.department && <span className={styles.thSubDept}>部署</span>}
+                        </span>
+                      )}
+                    </th>
+                    <th className={cx(styles.th, styles.thLabels, styles.stickyLabels)} />
+                    {displayDates.map(date => {
+                      const wd = new Date(date).getDay();
+                      const d  = parseInt(date.slice(8), 10);
+                      const isToday = date === todayStr;
+                      return (
+                        <th key={date} className={cx(
+                          styles.th, styles.thDay,
+                          wd === 6 && styles.colSat, wd === 0 && styles.colSun,
+                          wd === 1 && styles.colMon,
+                          isToday && styles.colToday, isToday && styles.thToday,
+                        )}>
+                          {isToday && <span className={styles.todayBadge}>今日</span>}
+                          <span className={styles.thNum}>{d}</span>
+                          <span className={styles.thWd}>{WD_JA[wd]}</span>
+                        </th>
+                      );
+                    })}
+                    <th className={cx(styles.th, styles.thTotal, styles.stickyTotal)}>
+                      <span className={styles.thNum}>勤務</span>
+                      <span className={styles.thWd}>時間</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStaffByStatus.length === 0 ? (
+                    <tr>
+                      <td colSpan={displayDates.length + (colVisibility.number ? 4 : 3)} className={styles.empty}>
+                        {staff.length === 0 ? "スタッフが登録されていません" : "該当するスタッフが見つかりません"}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStaffByStatus.map(s => {
+                      const sessionRows = maxSessionsForStaff(s.id);
+                      const hasBlocks   = sessionRowKeys.length > 0;
+                      return (
+                      <tr key={s.id} className={styles.row} data-staff={s.id}>
+                        {colVisibility.number && <td className={cx(styles.td, styles.tdNo, styles.stickyNo)}>{s.sortOrder ?? "—"}</td>}
+
+                        <td className={cx(styles.td, styles.tdName, styles.stickyName)}>
+                          <div className={styles.staffName}>{s.fullName}</div>
+                          {colVisibility.position && positions[s.id] && <div className={styles.staffPos}>{positions[s.id]}</div>}
+                          {colVisibility.department && (staffDepts[s.id] || []).length > 0 && (
+                            <div className={styles.staffDept}>{(staffDepts[s.id] || []).join("・")}</div>
+                          )}
+                        </td>
+
+                        {/* Подписи строк */}
+                        <td className={cx(styles.td, styles.tdLabels, styles.stickyLabels)}>
+                          {hasBlocks && Array.from({ length: sessionRows }, (_, si) => (
+                            <div key={si} className={cx(styles.block, si < sessionRows - 1 && styles.blockSep)}>
+                              {sessionRowKeys.map(key => (
+                                <div key={key} className={cx(styles.line, styles.lineLabel)}>{ROW_LABEL[key]}</div>
+                              ))}
+                            </div>
+                          ))}
+                          {showNoteRow && (
+                            <div className={cx(styles.noteLine, hasBlocks && styles.noteLineSep, styles.lineLabel)}>状況</div>
+                          )}
+                        </td>
+
+                        {displayDates.map(date => {
+                          const wd          = new Date(date).getDay();
+                          const dayRecs     = getRecordsForDay(s.id, date);
+                          const shift       = shiftMap[`${s.id}_${date}`];
+                          const daySessions = getSessionsForDay(s.id, date);
+                          const hasShift    = !!shift;
+                          const hasPunch    = daySessions.length > 0;
+                          const matched     = matchSessionsToSlots(daySessions, shift?.slots || []);
+                          const isToday     = date === todayStr;
+
+                          let stateCls = null;
+                          if (showColors && hasShift && !hasPunch) stateCls = styles.cellPlanned;
+                          if (showColors && !hasShift && hasPunch) stateCls = styles.cellNoPlan;
+
+                          return (
+                            <td key={date}
+                              className={cx(
+                                styles.td, styles.tdDay,
+                                wd === 6 && styles.colSat, wd === 0 && styles.colSun, wd === 1 && styles.colMon,
+                                isToday && styles.colToday,
+                                stateCls,
+                                (dayRecs.length > 0 || hasShift) && styles.tdClickable,
+                              )}
+                              onClick={() => {
+                                if (dayRecs.length > 0 || hasShift) {
+                                  setDetailPopup({ userId: s.id, userName: s.fullName, date, dayRecords: dayRecs });
+                                }
+                              }}
+                            >
+                              {hasBlocks && Array.from({ length: sessionRows }, (_, si) => {
+                                const pair       = matched[si];
+                                const session    = pair?.session || null;
+                                const slot       = pair?.slot || null;
+                                const info       = session ? computeSessionOfficial(session, slot, date, breakRules) : null;
+                                const outNextDay = session?.clockOut && isNextDayJst(session.clockOut, date);
+                                // 表示用: 実際の打刻を30分単位で丸めた値（出勤は切り上げ、退勤は切り下げ）— リストと同じロジック
+                                const displayIn  = session?.clockIn  ? roundUpHalfHour(session.clockIn)   : null;
+                                const displayOut = session?.clockOut ? roundDownHalfHour(session.clockOut) : null;
+                                // 拘束/休憩/実働 — リストと同じ計算（丸めた実打刻ベース）
+                                const grossMin = session ? rawActualGrossMinutes(session) : null;
+                                const rawBrk   = session ? rawBreakMinutes(session) : null;
+                                const brkMin   = session ? (rawBrk !== null ? rawBrk : (info?.officialBreakMinutes ?? 0)) : null;
+                                const netMin   = grossMin !== null ? Math.max(grossMin - brkMin, 0) : null;
+
+                                const cells = {
+                                  in: {
+                                    bg: showColors ? info?.inColor : null,
+                                    content: <span className={cx(styles.time, !displayIn && styles.muted)}>{displayIn ? fmtTime(displayIn) : "--:--"}</span>,
+                                  },
+                                  out: {
+                                    bg: showColors ? info?.outColor : null,
+                                    content: (
+                                      <>
+                                        <span className={cx(styles.time, !displayOut && styles.muted, outNextDay && styles.nextDayText)}>
+                                          {displayOut ? fmtTime(displayOut) : "--:--"}
+                                        </span>
+                                        {outNextDay && <span className={styles.nextDayBadge}>翌日</span>}
+                                      </>
+                                    ),
+                                  },
+                                  gross: {
+                                    bg: null,
+                                    content: <span className={cx(styles.dur, !session && styles.muted)}>{!session ? "--:--" : (grossMin === null ? "―" : fmtHM(grossMin))}</span>,
+                                  },
+                                  break: {
+                                    bg: null,
+                                    content: <span className={cx(styles.dur, styles.durBreak, !session && styles.muted)}>{session ? fmtHM(brkMin) : "--:--"}</span>,
+                                  },
+                                  work: {
+                                    bg: null,
+                                    content: <span className={cx(styles.work, !session && styles.muted)}>{!session ? "--:--" : (netMin === null ? "―" : fmtHM(netMin))}</span>,
+                                  },
+                                };
+
+                                return (
+                                  <div key={si} className={cx(styles.block, si < sessionRows - 1 && styles.blockSep)}>
+                                    {outNextDay && <div className={styles.nextDayStripe} />}
+                                    {sessionRowKeys.map(key => (
+                                      <div key={key} className={styles.line}>
+                                        <div className={cx(styles.pill, cells[key].bg && styles.pillColored)}
+                                          style={cells[key].bg ? { background: cells[key].bg } : undefined}>
+                                          {cells[key].content}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })}
+
+                              {/* 状況 — 勤務状況リストから選択（1日1つ） */}
+                              {showNoteRow && (() => {
+                                const note  = notesMap[`${s.id}_${date}`];
+                                // «живой» пункт: существует в справочнике и название совпадает с сохранённым
+                                const known = !!note && note.statusId != null &&
+                                  attStatuses.some(st => st.id === note.statusId && st.name === note.label);
+                                const value = !note ? "" : (known ? String(note.statusId) : "__keep");
+                                return (
+                                  <div
+                                    onClick={e => e.stopPropagation()}
+                                    className={cx(styles.noteLine, hasBlocks && styles.noteLineSep)}
+                                  >
+                                    <select
+                                      value={value}
+                                      onChange={e => handleNoteChange(s.id, date, e.target.value)}
+                                      className={cx(styles.noteSelect, note && styles.noteSelectOn)}
+                                    >
+                                      <option value="">—</option>
+                                      {note && !known && <option value="__keep">{note.label}</option>}
+                                      {attStatuses.map(st => (
+                                        <option key={st.id} value={st.id}>{st.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                          );
+                        })}
+
+                        <td className={cx(styles.td, styles.tdTotal, styles.stickyTotal)}>
+                          {(() => {
+                            const m = calcActualWorkMinutes(s.id) || 0;
+                            return (<>
+                              <span className={styles.totalH}>{Math.floor(m / 60)}時間</span>
+                              <span className={styles.totalM}>{m % 60}分</span>
+                            </>);
+                          })()}
+                        </td>
+                      </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
 
-          <button type="button" className={styles.exportBtn}
-            onClick={handleReport}
-            disabled={loading || reportLoading}>
-            {reportLoading ? "..." : "📥 Excel"}
-          </button>
-
-          <span className={styles.topHint}>🕐 勤怠管理</span>
-        </div>
-
-        {/* ── SortBar ── */}
-        <div className={styles.sortBar}>
-          <ColToggleDropdown colVisibility={colVisibility} onColVisibilityChange={setColVisibility} />
-
-          <CheckDropdown
-            label="表示行"
-            items={ROW_ITEMS}
-            visibleSet={visibleRows}
-            onToggle={handleRowToggle}
-            onToggleAll={handleRowToggleAll}
-            hideAll
-          />
-
-          {positionOptions.length > 0 && (
-            <CheckDropdown
-              label="職種・役職"
-              items={positionOptions.map(p => ({ value: p, label: p }))}
-              visibleSet={visiblePositions}
-              onToggle={handlePosToggle}
-              onToggleAll={handlePosToggleAll}
-            />
-          )}
-
-          {allDepartmentItems.length > 0 && (
-            <CheckDropdown
-              label="部署"
-              items={allDepartmentItems}
-              visibleSet={visibleDepartments}
-              onToggle={handleDeptToggle}
-              onToggleAll={handleDeptToggleAll}
-            />
-          )}
-
-          <CheckDropdown
-            label="表示フィルター"
-            items={STATUS_FILTER_ITEMS}
-            visibleSet={visibleStatuses}
-            onToggle={handleStatusToggle}
-            onToggleAll={handleStatusToggleAll}
-          />
-
-          <CheckDropdown
-            label="状態フィルター"
-            items={COLOR_FILTER_ITEMS}
-            visibleSet={visibleColors}
-            onToggle={handleColorToggle}
-            onToggleAll={handleColorToggleAll}
-          />
-
-          <label style={{
-            display: "flex", alignItems: "center", gap: 5,
-            fontSize: 13, cursor: "pointer", color: "#666", whiteSpace: "nowrap",
-          }}>
-            <input
-              type="checkbox"
-              checked={showColors}
-              onChange={e => setShowColors(e.target.checked)}
-            />
-            色分け表示
-          </label>
-
-          <div className={styles.sortBarDivider} />
-
-          {isFiltered && (
-            <button type="button" className={styles.resetBtn} onClick={handleReset}>
-              リセット
-            </button>
-          )}
-
-          <div className={styles.sortBarDivider} />
-
-          <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="氏名で検索..."
-              style={{
-                padding: "4px 10px", fontSize: 13,
-                border: "1.5px solid #e2e8f0", borderRadius: 6,
-                outline: "none", background: "#fff",
-                width: 140,
-              }}
-          />
-
-          <div className={styles.sortBarDivider} />
-
-          <label style={{
-            display: "flex", alignItems: "center", gap: 5,
-            fontSize: 13, cursor: "pointer", color: "#666",
-            whiteSpace: "nowrap",
-          }}>
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={e => setShowInactive(e.target.checked)}
-            />
-            非アクティブを表示
-          </label>
-
-          <span className={styles.sortBarLabel}>並び替え：</span>
-          {SORT_FIELDS.map(f => {
-            const isActive = sortConfig.field === f.value;
-            return (
-              <button key={f.value} type="button"
-                className={`${styles.sortBtn} ${isActive ? styles.sortBtnActive : ""}`}
-                onClick={() => setSortConfig({
-                  field: f.value,
-                  dir: isActive ? (sortConfig.dir === "asc" ? "desc" : "asc") : "asc",
-                })}>
-                {f.label}
-                <span className={styles.sortArrow}>
-                  {isActive ? (sortConfig.dir === "asc" ? "↑" : "↓") : "↕"}
+          {/* ══ Легенда ══ */}
+          <div className={styles.legend}>
+            {[
+              ...(showColors ? [
+                { dot: "#4caf87", halo: "#dcfce7", label: "時間通り" },
+                { dot: "#ef6b6b", halo: "#fee2e2", label: "遅刻（出勤）" },
+                { dot: "#f2c94c", halo: "#fef9c3", label: "早退（退勤）" },
+                { dot: "#5aa9e6", halo: "#e0f2fe", label: "シフト予定あり" },
+                { dot: "#94a3b8", halo: "#f1f5f9", label: "シフトなし・出勤あり" },
+              ] : []),
+              { dot: "#1a8a5f", halo: "#eefaf4", label: "今日" },
+              { dot: "#7c3aed", halo: "#ede9fe", label: "翌日退勤" },
+            ].map(({ dot, halo, label }) => (
+              <span key={label} className={styles.legendItem}>
+                <span className={styles.legendDot} style={{ background: dot, boxShadow: `0 0 0 4px ${halo}` }} />{label}
+              </span>
+            ))}
+            <div className={styles.legendRight}>
+              <label className={styles.check}>
+                <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+                非アクティブを表示
+              </label>
+              {!loading && staff.length > 0 && (
+                <span className={styles.countText}>
+                  表示中 <b>{filteredStaffByStatus.length}</b> / {staff.length} 人
                 </span>
-              </button>
-            );
-          })}
-
-          {!loading && staff.length > 0 && (
-            <span style={{ marginLeft: "auto", fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>
-              表示中: {filteredStaffByStatus.length} / {staff.length} 人
-            </span>
+              )}
+            </div>
+          </div>
+          </>
           )}
-        </div>
-
-        {viewMode === "period" && periodWarn && (
-          <div style={{ padding:"8px 16px", background:"#FFF3CD", borderBottom:"1px solid #FFEAA7", fontSize:13, color:"#856404" }}>
-            ⚠️ {periodWarn}
-          </div>
-        )}
-
-        {err && (
-          <div style={{ padding:"12px 20px", background:"#fee2e2", color:"#dc2626", fontSize:13 }}>{err}</div>
-        )}
-
-        {/* ── Table ── */}
-        {loading ? (
-          <div className={styles.loading}>読み込み中...</div>
-        ) : displayDates.length === 0 ? (
-          <div className={styles.loading} style={{ color:"#999" }}>
-            {viewMode === "period" ? "期間を正しく設定してください（7〜35日）" : "データがありません"}
-          </div>
-        ) : (
-          <div className={styles.tableWrap} style={{ paddingBottom: 0, marginBottom: 36 }}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                    <th className={styles.thNameSub} style={!colVisibility.number     ? { display:"none" } : {}}></th>
-                    <th className={styles.thNameSub} style={!colVisibility.position   ? { display:"none" } : {}}></th>
-                    <th className={`${styles.thNameSub} ${styles.thNameSubPos}`}
-                      style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}></th>
-                    <th className={`${styles.thNameSub} ${styles.thNameSubPos}`} style={{ left: nameLeft() }}></th>
-                    <th className={styles.thNameSub}></th>
-
-                    {weekColSpans.map(({ week, count }) => (
-                      <th key={week.weekStart} colSpan={count} className={styles.thWeek}>
-                        <div className={styles.thWeekInner}>
-                          <span className={styles.thWeekRange}>
-                            {fmtWeekLabel(week.weekStart, addDays(week.weekStart, 6))}
-                          </span>
-                        </div>
-                      </th>
-                    ))}
-                    <th className={styles.thNameSub} style={{ background: "#f0f4ff" }}></th>
-                  </tr>
-                <tr>
-                  <th className={styles.thNumber}
-                    style={!colVisibility.number ? { display:"none" } : {}}>№</th>
-                  <th className={styles.thPosition}
-                    style={!colVisibility.position ? { display:"none" } : {}}>職種・役職</th>
-                  <th className={styles.thDepartment}
-                    style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}>
-                    部署
-                  </th>
-                  <th className={styles.thName} style={{ left: nameLeft() }}>氏名</th>
-                  <th className={styles.thDay} style={{ minWidth: 50 }}></th>
-                  {displayDates.map(date => {
-                    const wd = new Date(date).getDay();
-                    const d  = parseInt(date.slice(8), 10);
-                    return (
-                      <th key={date} className={`${styles.thDay} ${wd===6?styles.thSat:""} ${wd===0?styles.thSun:""}`}>
-                        <span className={styles.thNum}>{d}</span>
-                        <span className={styles.thWd}>{WD_JA[wd]}</span>
-                      </th>
-                    );
-                  })}
-                  <th className={styles.thDay} style={{ minWidth: 60, background: "#f0f4ff" }}>
-                    <span className={styles.thNum}>勤務</span>
-                    <span className={styles.thWd}>時間</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStaffByStatus.length === 0 ? (
-                  <tr>
-                    <td colSpan={displayDates.length + 4} className={styles.empty}>
-                      {staff.length === 0 ? "スタッフが登録されていません" : "該当するスタッフが見つかりません"}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredStaffByStatus.map((s, idx) => (
-                    <tr key={s.id} className={`${styles.staffRow} ${styles.attRow}`} data-staff={s.id}>
-                      <td className={styles.tdNumber}
-                        style={!colVisibility.number ? { display:"none" } : {}}>
-                        {s.sortOrder ?? "—"}
-                      </td>
-                      <td className={styles.tdPosition}
-                        style={!colVisibility.position ? { display:"none" } : {}}>
-                        {positions[s.id] || ""}
-                      </td>
-                      <td className={styles.tdDepartment}
-                        style={{ ...(!colVisibility.department ? { display:"none" } : {}), ...(!colVisibility.position ? { left:0 } : {}) }}>
-                        {(staffDepts[s.id] || []).map((d, i) => <div key={i}>{d}</div>)}
-                      </td>
-                      <td className={styles.tdName} style={{ left: nameLeft() }}>{s.fullName}</td>
-
-                      {(() => {
-                        const sessionRows = maxSessionsForStaff(s.id);
-                        const hasBlocks   = sessionRowKeys.length > 0;
-                        return (
-                          <td className={styles.cell} style={{ padding: 0, verticalAlign: "top" }}>
-                            {hasBlocks && Array.from({ length: sessionRows }, (_, si) => (
-                              <div key={si} style={{ borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none" }}>
-                                {sessionRowKeys.map((key, ri) => (
-                                  <div key={key} style={attRowStyle({
-                                    justifyContent: "flex-start",
-                                    fontSize: 11, color: "#64748b", fontWeight: 600,
-                                    borderBottom: ri < sessionRowKeys.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none",
-                                  })}>
-                                    {ROW_LABEL[key]}
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                            {showNoteRow && (
-                              <div style={{
-                                ...attNoteStyle(hasBlocks),
-                                padding: "0 6px", fontSize: 11, color: "#64748b", fontWeight: 600,
-                              }}>
-                                状況
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })()}
-
-                      {displayDates.map(date => {
-                        const wd          = new Date(date).getDay();
-                        const isWeekStart = weekColSpans.some(({ week }) => week.weekStart === date);
-                        const dayRecs     = getRecordsForDay(s.id, date);
-                        const shift       = shiftMap[`${s.id}_${date}`];
-                        const daySessions = getSessionsForDay(s.id, date);
-                        const hasShift    = !!shift;
-                        const hasPunch    = daySessions.length > 0;
-                        const sessionRows = maxSessionsForStaff(s.id);
-                        const matched     = matchSessionsToSlots(daySessions, shift?.slots || []);
-
-                        let cellBg = "#fff";
-                        if (showColors && hasShift && !hasPunch) cellBg = "#e0f2fe";
-                        if (showColors && !hasShift && hasPunch) cellBg = "#f1f5f9";
-
-                        return (
-                          <td key={date}
-                            className={`${styles.cell} ${isWeekStart ? styles.cellWeekStart : ""}`}
-                            style={{ padding: 0, verticalAlign: "top", background: cellBg, cursor: "pointer", position: "relative" }}
-                            onClick={() => {
-                              if (dayRecs.length > 0 || hasShift) {
-                                setDetailPopup({ userId: s.id, userName: s.fullName, date, dayRecords: dayRecs });
-                              }
-                            }}
-                          >
-                            {sessionRowKeys.length > 0 && Array.from({ length: sessionRows }, (_, si) => {
-                              const pair       = matched[si];
-                              const session    = pair?.session || null;
-                              const slot       = pair?.slot || null;
-                              const info       = session ? computeSessionOfficial(session, slot, date, breakRules) : null;
-                              const outNextDay = session?.clockOut && isNextDayJst(session.clockOut, date);
-                              // 表示用: 実際の打刻を30分単位で丸めた値（出勤は切り上げ、退勤は切り下げ）— リストと同じロジック
-                              const displayIn  = session?.clockIn  ? roundUpHalfHour(session.clockIn)   : null;
-                              const displayOut = session?.clockOut ? roundDownHalfHour(session.clockOut) : null;
-                              // 拘束/休憩/実働 — リストと同じ計算（丸めた実打刻ベース）
-                              const grossMin = session ? rawActualGrossMinutes(session) : null;
-                              const rawBrk   = session ? rawBreakMinutes(session) : null;
-                              const brkMin   = session ? (rawBrk !== null ? rawBrk : (info?.officialBreakMinutes ?? 0)) : null;
-                              const netMin   = grossMin !== null ? Math.max(grossMin - brkMin, 0) : null;
-
-                              const cells = {
-                                in: {
-                                  bg: showColors ? (info?.inColor || "transparent") : "transparent",
-                                  content: (
-                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: displayIn ? "#1e293b" : "#cbd5e1" }}>
-                                      {displayIn ? fmtTime(displayIn) : "--:--"}
-                                    </span>
-                                  ),
-                                },
-                                out: {
-                                  bg: showColors ? (info?.outColor || "transparent") : "transparent",
-                                  content: (
-                                    <>
-                                      <span style={{
-                                        fontSize: 12, fontWeight: 600, fontFamily: "monospace",
-                                        color: !displayOut ? "#cbd5e1" : (outNextDay ? "#7c3aed" : "#1e293b"),
-                                      }}>
-                                        {displayOut ? fmtTime(displayOut) : "--:--"}
-                                      </span>
-                                      {outNextDay && (
-                                        <span style={{
-                                          marginLeft: 4, fontSize: 9, fontWeight: 700, color: "#fff",
-                                          background: "#7c3aed", borderRadius: 3, padding: "1px 3px", lineHeight: 1.4,
-                                        }}>翌日</span>
-                                      )}
-                                    </>
-                                  ),
-                                },
-                                gross: {
-                                  bg: "transparent",
-                                  content: (
-                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: session ? "#475569" : "#cbd5e1" }}>
-                                      {!session ? "--:--" : (grossMin === null ? "―" : fmtHM(grossMin))}
-                                    </span>
-                                  ),
-                                },
-                                break: {
-                                  bg: "transparent",
-                                  content: (
-                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8" }}>
-                                      {session ? fmtHM(brkMin) : "--:--"}
-                                    </span>
-                                  ),
-                                },
-                                work: {
-                                  bg: "transparent",
-                                  content: (
-                                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: session ? "#0369a1" : "#cbd5e1" }}>
-                                      {!session ? "--:--" : (netMin === null ? "―" : fmtHM(netMin))}
-                                    </span>
-                                  ),
-                                },
-                              };
-
-                              return (
-                                <div key={si} style={{
-                                  position: "relative",
-                                  borderBottom: si < sessionRows - 1 ? "2px solid #cbd5e1" : "none",
-                                }}>
-                                  {outNextDay && (
-                                    <div style={{
-                                      position: "absolute", top: 0, left: 0, right: 0,
-                                      height: 3, background: "#7c3aed", zIndex: 1, pointerEvents: "none",
-                                    }} />
-                                  )}
-                                  {sessionRowKeys.map((key, ri) => (
-                                    <div key={key} style={attRowStyle({
-                                      background: cells[key].bg,
-                                      borderBottom: ri < sessionRowKeys.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none",
-                                    })}>
-                                      {cells[key].content}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
-
-                            {/* 状況 — 勤務状況リストから選択（1日1つ） */}
-                            {showNoteRow && (() => {
-                              const note  = notesMap[`${s.id}_${date}`];
-                              // «живой» пункт: существует в справочнике и название совпадает с сохранённым
-                              const known = !!note && note.statusId != null &&
-                                attStatuses.some(st => st.id === note.statusId && st.name === note.label);
-                              const value = !note ? "" : (known ? String(note.statusId) : "__keep");
-                              return (
-                                <div
-                                  onClick={e => e.stopPropagation()}
-                                  style={{ ...attNoteStyle(sessionRowKeys.length > 0), cursor: "default" }}
-                                >
-                                  <select
-                                    value={value}
-                                    onChange={e => handleNoteChange(s.id, date, e.target.value)}
-                                    style={{
-                                      width: "100%", height: ATT_NOTE_H - 4, fontSize: 11, padding: 0,
-                                      border: "none", background: "transparent",
-                                      color: note ? "#1e293b" : "#cbd5e1",
-                                      fontWeight: note ? 600 : 400,
-                                      cursor: "pointer", textAlignLast: "center",
-                                    }}
-                                  >
-                                    <option value="">—</option>
-                                    {note && !known && <option value="__keep">{note.label}</option>}
-                                    {attStatuses.map(st => (
-                                      <option key={st.id} value={st.id}>{st.name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            })()}
-                          </td>
-                        );
-                      })}
-
-                      <td style={{ textAlign: "center", verticalAlign: "middle", background: "#f8faff", fontWeight: 700, color: "#2F5496" }}>
-                        {fmtHM(calcActualWorkMinutes(s.id))}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-        </>
-        )}
-
         {pageMode === "list" && (
-          <div style={{ padding: "16px 20px" }}>
-
-            {/* ── フィルターバー ── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-            <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ccc", flexShrink: 0 }}>
-                {LIST_VIEW_MODES.map((m, idx) => (
-                  <button key={m.value} type="button"
-                    onClick={() => setListMode(m.value)}
-                    style={{
-                      padding: "5px 14px", fontSize: 13, border: "none", cursor: "pointer",
-                      background: listMode === m.value ? "#2F5496" : "#fff",
-                      color:      listMode === m.value ? "#fff"    : "#333",
-                      borderRight: idx < LIST_VIEW_MODES.length - 1 ? "1px solid #ccc" : "none",
-                      fontWeight:  listMode === m.value ? "600" : "normal",
-                    }}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
+          <>
+          {/* ══ Строка инструментов (リスト) — вне скруглённого блока ══ */}
+          <div className={styles.filterRow}>
+            <div className={styles.periodNav}>
+              {listMode !== "period" && (
+                <button type="button" className={styles.navBtn} onClick={() => shiftListPeriod(-1)} aria-label="前へ"><IcoPrev /></button>
+              )}
 
               {listMode === "day" && (
-                <input type="date" value={listDay}
-                  onChange={e => setListDay(e.target.value)}
-                  style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #ccc", borderRadius: 6 }}
-                />
+                <input type="date" value={listDay} className={styles.dateInput}
+                  onChange={e => setListDay(e.target.value)} />
               )}
 
               {listMode === "month" && (
@@ -2012,7 +1994,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
                   <select className={styles.monthSelect}
                     value={listYm.split("-")[0]}
                     onChange={e => setListYm(`${e.target.value}-${listYm.split("-")[1]}`)}>
-                    {yearOptions.map(y => <option key={y} value={y}>{y}年</option>)}
+                    {listYearChoices.map(y => <option key={y} value={y}>{y}年</option>)}
                   </select>
                   <select className={styles.monthSelect}
                     value={listYm.split("-")[1]}
@@ -2026,8 +2008,13 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
 
               {listMode === "week" && (
                 <select className={styles.monthSelect} value={listWeek}
-                  onChange={e => setListWeek(e.target.value)}>
-                  {listWeekOptions.map(w => (
+                onChange={e => setListWeek(e.target.value)}>
+                {!listWeekOptions.some(w => w.weekStart === listWeek) && (
+                  <option value={listWeek}>
+                    {listWeek.slice(5).replace("-","/")} 〜 {addDays(listWeek, 6).slice(5).replace("-","/")}
+                  </option>
+                )}
+                {listWeekOptions.map(w => (
                     <option key={w.weekStart} value={w.weekStart}>
                       {w.weekStart.slice(5).replace("-","/")} 〜 {w.weekEnd.slice(5).replace("-","/")}
                     </option>
@@ -2036,68 +2023,76 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               )}
 
               {listMode === "period" && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className={styles.periodInputs}>
                   <input type="date" value={listPeriodFrom}
-                    onChange={e => setListPeriodFrom(e.target.value)}
-                    style={{ padding: "6px 10px", fontSize: 13, border: "1px solid", borderColor: listPWarn ? "#cc0000" : "#ccc", borderRadius: 6 }}
-                  />
-                  <span style={{ fontSize: 13, color: "#666" }}>〜</span>
+                    className={cx(styles.dateInput, listPWarn && styles.dateInputWarn)}
+                    onChange={e => setListPeriodFrom(e.target.value)} />
+                  <span className={styles.tilde}>〜</span>
                   <input type="date" value={listPeriodTo} min={listPeriodFrom || undefined}
-                    onChange={e => setListPeriodTo(e.target.value)}
-                    style={{ padding: "6px 10px", fontSize: 13, border: "1px solid", borderColor: listPWarn ? "#cc0000" : "#ccc", borderRadius: 6 }}
-                  />
+                    className={cx(styles.dateInput, listPWarn && styles.dateInputWarn)}
+                    onChange={e => setListPeriodTo(e.target.value)} />
                   {listPeriodFrom && listPeriodTo && (
-                    <span style={{ fontSize: 12, color: listPOk ? "#5a8a5a" : "#cc0000", whiteSpace: "nowrap" }}>
+                    <span className={cx(styles.periodDays, !listPOk && styles.periodDaysWarn)}>
                       {listPDays}日{listPWarn ? `（${listPWarn}）` : ""}
                     </span>
                   )}
-                </div>
-              )}
-
-              {staff.length > 0 && (
-                <CheckDropdown
-                  label="申請者"
-                  items={staff
-                    .slice()
-                    .sort((a, b) => (a.fullName || "").localeCompare(b.fullName || "", "ja"))
-                    .map(s => ({ value: s.id, label: s.fullName }))}
-                  visibleSet={listSelectedStaff}
-                  onToggle={handleListStaffToggle}
-                  onToggleAll={handleListStaffToggleAll}
-                  panelWidth={250}
-                  panelHeight={500}
-                  searchable
-                />
-              )}
-
-              <CheckDropdown
-                label="表示列"
-                items={LIST_COLUMNS}
-                visibleSet={visibleListCols}
-                onToggle={handleListColToggle}
-                onToggleAll={handleListColToggleAll}
-              />
-
-              <button type="button" className={styles.exportBtn}
-                onClick={loadListData}
-                disabled={!listRange.from || !listRange.to || listLoading}>
-                {listLoading ? "..." : "🔍 表示"}
-              </button>
-
-              <button type="button" className={styles.exportBtn}
-                onClick={handleListExport}
-                disabled={!listRange.from || !listRange.to || reportLoading || listSessions.length === 0}>
-                {reportLoading ? "..." : "📥 Excel"}
-              </button>
+                  </div>
+                )}
+  
+                {listMode !== "period" && (
+                  <button type="button" className={styles.navBtn} onClick={() => shiftListPeriod(1)} aria-label="次へ"><IcoNext /></button>
+                )}
+              </div>
+  
+              <div className={styles.segment}>
+                {LIST_VIEW_MODES.map(m => (
+                <button key={m.value} type="button"
+                  className={cx(styles.segBtn, styles.segBtnSm, listMode === m.value && styles.segBtnGreen)}
+                  onClick={() => setListMode(m.value)}>
+                  {m.label}
+                </button>
+              ))}
             </div>
 
+            {staff.length > 0 && (
+              <CheckDropdown
+                label="申請者"
+                items={staff
+                  .slice()
+                  .sort((a, b) => (a.fullName || "").localeCompare(b.fullName || "", "ja"))
+                  .map(s => ({ value: s.id, label: s.fullName }))}
+                visibleSet={listSelectedStaff}
+                onToggle={handleListStaffToggle}
+                onToggleAll={handleListStaffToggleAll}
+                panelWidth={250}
+                panelHeight={500}
+                searchable
+              />
+            )}
+
+            <CheckDropdown
+              label="表示列"
+              items={LIST_COLUMNS}
+              visibleSet={visibleListCols}
+              onToggle={handleListColToggle}
+              onToggleAll={handleListColToggleAll}
+            />
+
+            <button type="button" className={styles.showBtn}
+              onClick={loadListData}
+              disabled={!listRange.from || !listRange.to || listLoading}>
+              <IcoSearch />
+              {listLoading ? "読み込み中..." : "表示"}
+            </button>
+
             {listSearched && !listLoading && listSessions.length > 0 && (
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                <span style={{ fontSize: 13, color: "#64748b" }}>
-                  全 {listSessions.length} 件
-                </span>
+              <div className={styles.filterRight}>
+                <span className={styles.countText}>全 <b>{listSessions.length}</b> 件</span>
               </div>
             )}
+          </div>
+
+          <div className={styles.listBody}>
 
             {listErr && (
               <div style={{ padding: "10px 14px", background: "#fee2e2", color: "#dc2626", fontSize: 13, borderRadius: 8, marginBottom: 12 }}>
@@ -2116,7 +2111,7 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
             ) : listSessions.length === 0 ? (
               <div className={styles.loading} style={{ color: "#999" }}>該当するデータがありません</div>
             ) : (
-              <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                       <tr style={{ background: "#f0f4ff" }}>
@@ -2257,7 +2252,9 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
               </div>
             )}
           </div>
+          </>
         )}
+        </div>
       </div>
 
       {/* ── Detail popup ── */}
@@ -2496,37 +2493,6 @@ export default function AttendancePage({ view, onNavigate, onLogout }) {
         </div>
       )}
 
-      {/* ── Легенда внизу ── */}
-      {pageMode === "calendar" && showColors && (
-        <div style={{
-          position: "fixed", bottom: 0, left: 56, right: 0,
-          height: 36, zIndex: 100,
-          background: "linear-gradient(45deg, #d8d8d8 0%, #ffffff 100%)",
-          justifyContent: "flex-end",
-          borderTop: "1px solid #e2e8f0",
-          display: "flex", alignItems: "center",
-          gap: 20, padding: "0 20px",
-          fontSize: 12, color: "#475569",
-          flexShrink: 0,
-        }}>
-          {[
-            { color: "#dcfce7", border: "#86efac", label: "緑：時間通り（1分以上前）" },
-            { color: "#fee2e2", border: "#fca5a5", label: "赤：遅刻（出勤）" },
-            { color: "#fef9c3", border: "#fde047", label: "黄：早退（退勤）" },
-            { color: "#e0f2fe", border: "#7dd3fc", label: "青：シフト予定あり" },
-            { color: "#f1f5f9", border: "#cbd5e1", label: "グレー：シフトなし・出勤あり" },
-          ].map(({ color, label }) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-              <div style={{
-                width: 32, height: 16, borderRadius: 1,
-                background: color, border: `1px solid #000`,
-                flexShrink: 0,
-              }} />
-              <span>{label}</span>
-            </div>
-          ))}
-        </div>
-      )}
       {reportLoading && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 3000,

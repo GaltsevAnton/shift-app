@@ -7,7 +7,8 @@ class SlotModel(BaseModel):
     endTime: Optional[str] = None
     last: bool = False
     workplace: Optional[str] = None
-
+    nextDay: bool = False                       # 退勤が翌日
+    breakOverrideMinutes: Optional[int] = None  # ручной перерыв (None = по 休憩ルール)
 
 class DayModel(BaseModel):
     date: str          # "2026-05-01"
@@ -18,6 +19,7 @@ class DayModel(BaseModel):
 class StaffModel(BaseModel):
     userId: int
     userName: str
+    sortOrder: Optional[int] = None    # колонка №
     position: Optional[str] = None
     departments: list[str] = []
     days: list[DayModel] = []
@@ -124,3 +126,9 @@ class ReportRangeRequest(BaseModel):
     department: Optional[str] = None
     staff: list[StaffModel] = []
     breakRules: list[BreakRuleModel] = []
+
+
+class ShiftScreenRequest(ReportRangeRequest):
+    # Настройки экрана シフト管理 (None = показать всё)
+    columns: Optional[list[str]] = None      # number / position / department
+    workplaces: Optional[list[str]] = None   # отмеченные места + "__none__" (без места) + "__off__" (休み)
